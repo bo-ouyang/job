@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
-# We assume requirements are in jobCollectionWebApi
-COPY jobCollectionWebApi/requirements.txt .
+# We assume requirements are in root
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project files

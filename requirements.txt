@@ -44,3 +44,8 @@ flower>=2.0.0
 
 # Logging
 loguru>=0.7.0
+
+# LLM Integrations
+langchain-core>=0.1.0
+langchain-openai>=0.0.2
+openai>=1.0.0
