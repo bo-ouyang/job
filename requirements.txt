@@ -1,0 +1,46 @@
+# Web Framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-multipart>=0.0.6
+jinja2>=3.1.2
+
+# Database
+sqlalchemy>=2.0.0
+asyncpg>=0.28.0
+redis>=5.0.0
+
+# Settings
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Crawling & Automation
+scrapy>=2.11.0
+scrapy-redis>=0.7.3
+DrissionPage>=4.0.0
+pyautogui>=0.9.54
+pygetwindow>=0.0.9
+pyperclip>=1.8.2
+
+# Proxy / Mitm
+mitmproxy>=10.0.0
+
+# Utilities
+aiofiles>=23.0.0
+requests>=2.31.0
+pillow>=10.0.0
+
+# Payment
+python-alipay-sdk>=3.2.0
+wechatpayv3>=1.0.0
+
+# Tasks
+celery[redis]>=5.3.0
+flower>=2.0.0
+
+# Logging
+loguru>=0.7.0

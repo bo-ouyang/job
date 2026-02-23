@@ -1,0 +1,172 @@
+{% extends "layout.html" %}
+
+{% block header %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">数据看板</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary">Share</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary">Export</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <!-- Users Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                总用户数</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ stats.user_count }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-users fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Job Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                在招职位</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ stats.job_count }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-briefcase fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Company Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">入驻企业
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ stats.company_count }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-building fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resume Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                简历投递</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ stats.resume_count }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-file-alt fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <!-- System Status (Admin Only) -->
+        {% if system_status %}
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">服务器状态监控</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <h4 class="small font-weight-bold">CPU 使用率 <span class="float-right">{{
+                                    system_status.cpu_percent }}%</span></h4>
+                            <div class="progress mb-4">
+                                <div class="progress-bar bg-danger" role="progressbar"
+                                    style="width: {{ system_status.cpu_percent }}%"
+                                    aria-valuenow="{{ system_status.cpu_percent }}" aria-valuemin="0"
+                                    aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <h4 class="small font-weight-bold">内存使用率 <span class="float-right">{{
+                                    system_status.memory_percent }}%</span></h4>
+                            <div class="progress mb-4">
+                                <div class="progress-bar bg-warning" role="progressbar"
+                                    style="width: {{ system_status.memory_percent }}%"
+                                    aria-valuenow="{{ system_status.memory_percent }}" aria-valuemin="0"
+                                    aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-bordered" width="100%" cellspacing="0">
+                            <tbody>
+                                <tr>
+                                    <td>操作系统</td>
+                                    <td>{{ system_status.platform }}</td>
+                                </tr>
+                                <tr>
+                                    <td>Python 版本</td>
+                                    <td>{{ system_status.python_version }}</td>
+                                </tr>
+                                <tr>
+                                    <td>总内存</td>
+                                    <td>{{ system_status.memory_total }}</td>
+                                </tr>
+                                <tr>
+                                    <td>已用内存</td>
+                                    <td>{{ system_status.memory_used }}</td>
+                                </tr>
+                                <tr>
+                                    <td>磁盘总量</td>
+                                    <td>{{ system_status.disk_total }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">系统环境</h6>
+                </div>
+                <div class="card-body">
+                    <p>当前环境: {{ env }}</p>
+                    <p>数据库: <span class="badge badge-success">Connected</span></p>
+                    <div class="alert alert-info" role="alert">
+                        更多图表分析功能正在开发中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
