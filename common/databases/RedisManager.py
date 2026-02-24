@@ -25,12 +25,21 @@ class RedisManager:
         """生成带前缀的键"""
         return f"{settings.REDIS_KEY_PREFIX}:{key}"
     
-    async def set_cache(self, key: str, value: Any, expire: Optional[int] = None) -> bool:
-        """设置缓存"""
+    async def set_cache(self, key: str, value: Any, expire: Optional[int] = None, jitter: bool = True) -> bool:
+        """设置缓存 (支持 TTL 抖动防雪崩, 可缓存 None 防穿透)"""
+        import random
         if expire is None:
             expire = settings.REDIS_CACHE_EXPIRE
         
+        # 添加 0~300 秒的随机抖动，防止缓存雪崩
+        if jitter and expire > 0:
+            expire += random.randint(0, 300)
+            
         redis_key = self.make_key(key)
+        # 如果 value 为 None，表示空值占位（防止缓存击穿查库），设置极短生命周期
+        if value is None:
+            return await self.redis_client.setex(redis_key, min(expire, 60), json.dumps({"__is_null__": True}))
+            
         serialized_value = json.dumps(value, ensure_ascii=False)
         return await self.redis_client.setex(redis_key, expire, serialized_value)
     
@@ -39,8 +48,54 @@ class RedisManager:
         redis_key = self.make_key(key)
         value = await self.redis_client.get(redis_key)
         if value:
-            return json.loads(value)
-        return None
+            parsed = json.loads(value)
+            if isinstance(parsed, dict) and parsed.get("__is_null__") is True:
+                return None  # Hit the null-placeholder
+            return parsed
+        return None  # Cache miss
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def cache_lock(self, lock_key: str, expire: int = 10, timeout: float = 5.0):
+        """
+        分布式锁 (基于 SETNX)，用于防止缓存击穿 (Hot Key 瞬间失效时并发打满 DB)
+        使用方式:
+            async with redis_manager.cache_lock("lock:my_key") as locked:
+                if locked:
+                    # 去查 DB
+        """
+        import time
+        import asyncio
+        import uuid
+        
+        redis_key = self.make_key(lock_key)
+        identifier = str(uuid.uuid4())
+        
+        end_time = time.time() + timeout
+        locked = False
+        try:
+            while time.time() < end_time:
+                # SETNX 语义
+                acquired = await self.redis_client.set(redis_key, identifier, nx=True, ex=expire)
+                if acquired:
+                    locked = True
+                    break
+                # 等待 100ms 重试
+                await asyncio.sleep(0.1)
+                
+            yield locked
+        finally:
+            # 只有拿到锁的才去释放它 (并且校验 identifier，避免误删别人后来抢到的锁)
+            if locked:
+                script = """
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+                """
+                await self.redis_client.eval(script, 1, redis_key, identifier)
     
     async def delete_cache(self, key: str) -> bool:
         """删除缓存"""

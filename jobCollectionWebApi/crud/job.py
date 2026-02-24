@@ -21,27 +21,45 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
     # ES Sync removed for PostgreSQL migration
 
     async def create(self, db: AsyncSession, *, obj_in: JobCreate) -> Job:
-        """创建职位"""
+        """创建职位并发送 ES 双写队列"""
         db_obj = await super().create(db, obj_in=obj_in)
         await db.commit() 
-        
+        # 异步派发 ES 创建任务
+        try:
+            from tasks.es_sync import sync_job_to_es
+            sync_job_to_es.delay(db_obj.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for new job {db_obj.id}: {e}")
         return db_obj
 
     async def update(
         self, db: AsyncSession, *, db_obj: Job, obj_in: JobUpdate | dict
     ) -> Job:
-        """更新职位"""
+        """更新职位并发送 ES 双写队列"""
         db_obj = await super().update(db, db_obj=db_obj, obj_in=obj_in)
         await db.commit()
-        
+        # 异步派发 ES 更新任务
+        try:
+            from tasks.es_sync import sync_job_to_es
+            sync_job_to_es.delay(db_obj.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for update job {db_obj.id}: {e}")
         return db_obj
 
     async def remove(self, db: AsyncSession, *, id: int) -> Job:
-        """删除职位并同步到 ES"""
+        """删除职位并发送 ES 删除队列"""
         db_obj = await super().remove(db, id=id)
         if db_obj:
             await db.commit()
-            # ES delete removed
+            # 异步派发 ES 移除任务
+            try:
+                from tasks.es_sync import delete_job_from_es
+                delete_job_from_es.delay(id)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to dispatch Celery delete task for job {id}: {e}")
         return db_obj
 
     async def get_by_source_url(self, db: AsyncSession, source_url: str) -> Optional[Job]:
@@ -161,6 +179,77 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         result = await db.execute(stmt)
         return result.scalars().all(), total
 
+    async def search_by_ai_intent(
+        self,
+        db: AsyncSession,
+        intent: dict,
+        skip: int = 0,
+        limit: int = 20
+    ) -> Tuple[List[Job], int]:
+        """专门接收 AI 结构化意图的 PostgreSQL 降级搜寻"""
+        stmt = select(Job).options(selectinload(Job.company), selectinload(Job.industry))
+        count_stmt = select(func.count()).select_from(Job)
+
+        conditions = []
+        
+        # 1. Keywords (OR logic)
+        keywords = intent.get("keywords") or []
+        if keywords:
+            kw_filters = []
+            for kw in keywords:
+                kw_filters.append(Job.title.ilike(f"%{kw}%"))
+                kw_filters.append(Job.description.ilike(f"%{kw}%"))
+                kw_filters.append(Job.requirements.ilike(f"%{kw}%"))
+            conditions.append(or_(*kw_filters))
+
+        # 2. Locations (OR logic)
+        locations = intent.get("locations") or []
+        if locations:
+            loc_filters = [Job.location.ilike(f"%{loc}%") for loc in locations]
+            conditions.append(or_(*loc_filters))
+
+        # 3. Skills (OR logic for now, using LIKE since JSONB array intersection in PG is complex syntax)
+        skills = intent.get("skills_must_have") or []
+        if skills:
+            skill_filters = [Job.tags.ilike(f"%{sk}%") for sk in skills]
+            # Must have AT LEAST ONE of the requested skills to be shown in fallback (or_ is safe fallback)
+            conditions.append(or_(*skill_filters))
+            
+        # 4. Salary
+        salary_min = intent.get("salary_min")
+        if salary_min:
+            conditions.append(or_(Job.salary_max >= salary_min, Job.salary_max >= salary_min * 1000))
+        
+        salary_max = intent.get("salary_max")
+        if salary_max:
+            conditions.append(or_(Job.salary_min <= salary_max, Job.salary_min <= salary_max * 1000))
+            
+        # 5. Exclude keywords (AND NOT)
+        exclude_keywords = intent.get("exclude_keywords") or []
+        for exc in exclude_keywords:
+            conditions.append(~Job.title.ilike(f"%{exc}%"))
+            conditions.append(~Job.company_name.ilike(f"%{exc}%"))
+
+        # 6. Education & Experience
+        education = intent.get("education")
+        if education and education != "不限":
+            conditions.append(Job.education.ilike(f"%{education}%"))
+            
+        experience = intent.get("experience")
+        if experience and experience != "不限":
+            conditions.append(Job.experience.ilike(f"%{experience}%"))
+            
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
+            count_stmt = count_stmt.where(and_(*conditions))
+
+        total_result = await db.execute(count_stmt)
+        total = total_result.scalar_one()
+
+        stmt = stmt.order_by(Job.publish_date.desc()).offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
+
     async def get_statistics_from_db(
         self, 
         db: AsyncSession,
@@ -271,6 +360,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
              skills_res = await db.execute(skills_stmt)
              skill_dist = [{"name": row.tag, "value": row.cnt} for row in skills_res.all()]
         except Exception as e:
+             await db.rollback()
              # 降级: 如果数据库不支持或数据格式错误，回退到部分采样统计
              # print(f"DB Skill Aggregation failed: {e}, falling back to sampling.")
              skills_stmt = select(Job.tags).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
@@ -307,20 +397,31 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         industry_codes: Optional[List[int]] = None
     ) -> dict:
         """多关键词聚合分析 (SQL优化版)"""
-        # 1. 构建基础过滤条件
+        # 1. 构建基础过滤条件 (Relaxed conditions for Major Analysis)
         conditions = []
-        # if keywords:
-        #     keyword_filters = []
-        #     for kw in keywords:
-        #         keyword_filters.append(Job.title.ilike(f"%{kw}%"))
-        #         keyword_filters.append(Job.description.ilike(f"%{kw}%"))
-        #     conditions.append(or_(*keyword_filters))
         
-        if location:
-            conditions.append(Job.location.ilike(f"{location}%"))
+        # 关键词 和 行业码 是专业分析的两个唯独。为了保证数据量（避免交集为空导致图表无数据），
+        # 我们采用 OR 逻辑联合它们，即：【行业属于这些】或者【标题/描述包含这些词】的职位，
+        # 都算作这个“专业”的候选池。
+        major_criteria = []
+
+        if keywords:
+            keyword_filters = []
+            for kw in keywords:
+                keyword_filters.append(Job.title.ilike(f"%{kw}%"))
+                keyword_filters.append(Job.description.ilike(f"%{kw}%"))
+            major_criteria.append(or_(*keyword_filters))
             
         if industry_codes:
-            conditions.append(Job.industry_code.in_(industry_codes))
+            major_criteria.append(Job.industry_code.in_(industry_codes))
+            
+        if major_criteria:
+            # 行业符合 OR 关键字符合
+            conditions.append(or_(*major_criteria))
+        
+        if location:
+            # 城市是硬性条件 (AND)
+            conditions.append(Job.location.ilike(f"{location}%"))
             
         base_filter = and_(*conditions) if conditions else True
 
@@ -371,8 +472,23 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         try:
             skills_res = await db.execute(skills_stmt)
             skill_rows = skills_res.all()
-        except Exception:
-            skill_rows = []
+            skill_dist = [{"name": row[0], "value": row[1]} for row in skill_rows][:15]
+        except Exception as e:
+            await db.rollback()
+            # 降级: 如果数据库抛出 JSON 操作异常，回退到内存级采样分析
+            fallback_stmt = select(Job.tags).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
+            fallback_res = await db.execute(fallback_stmt)
+            all_tags = []
+            for row in fallback_res.scalars():
+                if row:
+                    try:
+                        tags = row if isinstance(row, (list, dict)) else json.loads(row)
+                        if isinstance(tags, list): all_tags.extend(tags)
+                        else: all_tags.append(str(tags))
+                    except:
+                        pass
+            skill_counts = Counter(all_tags).most_common(15)
+            skill_dist = [{"name": name, "value": count} for name, count in skill_counts]
 
         total_res = await db.execute(total_stmt)
         total = total_res.scalar_one()
@@ -383,7 +499,6 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
              salary_dist.append({"name": key, "value": salary_counts[i]})
              
         industry_dist = [{"name": row[0], "value": row[1]} for row in industry_rows]
-        skill_dist = [{"name": row[0], "value": row[1]} for row in skill_rows][:15]
 
         return {
             "salary": salary_dist,

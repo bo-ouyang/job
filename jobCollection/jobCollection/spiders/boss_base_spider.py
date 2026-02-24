@@ -79,7 +79,7 @@ class BossBaseSpider(scrapy.Spider):
         else:
             self.logger.warning(f"mitmdump not found at {potential_path}, using default 'mitmdump' command")
 
-        cmd = [mitmdump_path, "-s", addon_path, "-p", "8888", "-q", "--ssl-insecure"]
+        cmd = [mitmdump_path, "-s", addon_path, "-p", "8889", "-q", "--ssl-insecure"]
         
         # Fetch Proxy from DB (Only if enabled)
         if self.enable_upstream_proxy:

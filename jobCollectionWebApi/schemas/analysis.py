@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from .base import TimestampSchema
 
@@ -95,10 +95,11 @@ class MajorAnalysisRequest(BaseModel):
     location: Optional[str] = None
 
 class TaskLogBase(BaseModel):
-    task_id: str
-    task_name: str
-    status: str
-    args: Optional[Dict[str, Any] | List[Any]] = None
+    task_id: str = Field(..., description="Celery 任务 ID")
+    task_name: str = Field(..., description="任务名称")
+    job_id: Optional[int] = Field(None, description="关联职位 ID")
+    status: str = Field(..., description="任务状态")
+    args: Optional[Union[Dict[str, Any], List[Any]]] = None
     kwargs: Optional[Dict[str, Any]] = None
     result: Optional[str] = None
     worker: Optional[str] = None

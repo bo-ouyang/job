@@ -14,7 +14,7 @@ JOB_INDEX_MAPPING = {
     },
     "mappings": {
         "properties": {
-            "id": {"type": "integer"},
+            "id": {"type": "long"},
             "title": {
                 "type": "text", 
                 "analyzer": "ik_max_word", 
@@ -47,6 +47,22 @@ JOB_INDEX_MAPPING = {
                 }
             },
             "industry": {"type": "keyword"},
+            "industry_code": {"type": "integer"},
+            "city_code": {"type": "integer"},
+            "salary_unit": {"type": "keyword"},
+            "salary_desc": {"type": "keyword"},
+            "ai_summary": {
+                "type": "text",
+                "analyzer": "ik_max_word",
+                "search_analyzer": "ik_smart"
+            },
+            "ai_skills": {"type": "keyword"},
+            "ai_benefits": {"type": "keyword"},
+            "job_labels": {"type": "keyword"},
+            "work_type": {"type": "keyword"},
+            "boss_name": {"type": "keyword"},
+            "boss_title": {"type": "keyword"},
+            "welfare": {"type": "keyword"},
             "skills": {"type": "keyword"}, # 列表
             "tags": {"type": "keyword"},   # 列表
             "publish_date": {"type": "date"},

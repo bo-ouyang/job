@@ -154,3 +154,23 @@
 - **孤岛重连**：`boss_list_spider.py` 的底层状态轮询库已被纠正，从废弃的、不同步的 `SpiderBossCrawlUrl` 一举切换至当前 Admin 正在操作的主表 `BossCrawlTask`。
 - 实现了 Web管理面板对正在疯狂爬取的 `scrapy` 进程的真实中断控制（当收到 `stopped` 信号抛出 `CloseSpider`）。
 - **指令携参预埋**：重写了 `crawler_service.py` 的 `subprocess` 激发方法，强制追加接收和投递 `-a task_url=...` 变长参数，以为接下来的“单机构职位页直抓”埋下功能拓展的种子。
+
+## 9. 最近更新 (2026-02-24)
+
+### 核心基础设施弹性与前端 C 端联动闭环 (Core Infrastructure Resilience & C-Side Auth Loop)
+
+本次迭代突破点在于**高并发防御机制**的落实、**认证链路体系**的接通，以及**数据聚类分析精准度**的修复。
+
+#### A. Redis 缓存高可用改造 (Resilient Caching Strategy)
+- **缓存穿透防护 (Penetration Protection)**：修改 `RedisManager.py`，允许对空结果（None/空列表）写入短期缓存，防范恶意查空穿透底层 DB。
+- **缓存雪崩防护 (Avalanche Jittering)**：在核心缓存写入层引入了基于基础 TTL 额外浮动 10%~20% 的时间抖动机制（TTL Jitter），防止大批键在同一秒失效形成压力洪峰。
+- **分布式并发锁 (Distributed Lock)**：创新实现了基于 `SETNX` 的异步锁上下文管理器 (`cache_lock`)。它被优先安置于高耗时的 Elasticsearch 分析聚合和 Postgres 兜底查询之前，杜绝热点 Key 瞬间失效时的缓存击穿 (Hot-Key Breakdown) 惨案。
+
+#### B. JWT 认证与 C 端状态管理 (Robust JWT & State Control)
+- **拦截器黑名单 (Blacklist Guard)**：在后端的 FastAPI Dependency 层 (`get_current_user`)，全面挂载并激活了 `is_token_blacklisted` 拦截。保障登出 (Logout) 和扫码冲突等情况下的废弃令牌能实现毫秒级的失效。
+- **自动化无感刷新 (Silent Rotation in Vue)**：探明并跑通了独立封装在 Vue 侧 `core/api.js` 中的高阶 Axios 双拦截器。面临 401 拒收时，前端队列缓冲请求并静默投递 Refresh Token 换签重试。
+- **Favorites 功能与 UI 连通**：完全激活了 C 端用户的职务收藏流程。成功在 `JobMarket.vue` 实现带权限管控的 `❤️ 收藏` 按钮，并完成了后端 `/api/v1/favorites/jobs` 数据链路的接驳验证，完善了用户体验。
+
+#### C. 数据映射与 AI 端点修复 (Mapping Calibration)
+- 修正了 ES 同步脚本 (`es_sync_all.py` / `es_sync.py`) 的抽取规则：支持完整的 `city_code` 和 `industry_code` 整型建树并同步至 Elasticsearch。
+- 修复了 `analysis_service.py` 层级连投递 ID 参数（如 `industry`, `location`）导致的查询报错。消除了强制拦截抛出的 `ValueError`，在 ES 查询 DSL 构建时：若传 `location`，则直接匹配 `city_code`；若传 `industry` 大类，则利用映射的 PostgreSQL 关系回溯补查全系子行业 Code 并带入 ES 的 `terms` (In 查询) 中完美解决数据穿透过滤。

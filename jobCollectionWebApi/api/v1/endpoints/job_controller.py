@@ -26,6 +26,11 @@ strict_limit = RateLimiter(requests_per_minute=10)
 
 # 搜索引擎服务注入
 from services.search_service import search_service
+from services.ai_service import ai_service
+from pydantic import BaseModel
+
+class AIParseRequest(BaseModel):
+    query: str
 
 async def log_search_activity(
     query_type: str, 
@@ -52,6 +57,71 @@ async def log_search_activity(
         logger.error(f"Failed to log search: {e}")
 
 from core.cache import cache
+
+@router.get("/ai_search", response_model=JobList, summary="AI Intent Search")
+async def ai_search_jobs(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    q: str = Query(..., description="Natural language search describing what you want"),
+    pagination: PaginationParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisManager = Depends(get_redis)
+):
+    """
+    通过 AI 自然语言提取意图并动态组装 ES DSL 搜索职位
+    """
+    import hashlib
+    # 构造唯一缓存键 (不再复用包含深度依赖反射的 get_cache_key)
+    q_hash = hashlib.md5(q.encode('utf-8')).hexdigest()
+    cache_key = f"ai_search:q_{q_hash}:page_{pagination.page}:size_{pagination.page_size}"
+    
+    cached = await redis.get_cache(cache_key)
+    if cached:
+        return JobList(**cached)
+
+    try:
+        # 1. 拦截解析自然意图
+        parsed_intent = await ai_service.parse_job_search_intent(q)
+        
+        # 2. 交由 ES + PG 容灾双重搜索服务处理结构化的 JSON 意图
+        jobs, total = await search_service.search_jobs_by_ai_intent(
+            intent=parsed_intent,
+            skip=pagination.skip,
+            limit=pagination.page_size
+        )
+        
+        result = JobList(
+            items=jobs,
+            total=total,
+            page=pagination.page,
+            size=pagination.page_size,
+            pages=(total + pagination.page_size - 1) // pagination.page_size
+        )
+        
+        # 3. 数据写入缓存体系 (有效10分钟)
+        await redis.set_cache(cache_key, result.model_dump(mode='json'), expire=600)
+        
+        # 4. 日志审计异步记录
+        search_data = {
+            "q": q,
+            "parsed_intent": parsed_intent
+        }
+        background_tasks.add_task(
+            log_search_activity,
+            query_type="ai_search",
+            params=search_data,
+            result_count=total,
+            ip=request.client.host,
+            ua=request.headers.get("user-agent")
+        )
+
+        return result
+    except Exception as e:
+        logger.error(f"AI Search Endpoint Error: {e}")
+        raise HTTPException(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
+            detail=f"AI Search Failed: {str(e)}"
+        )
 
 @router.get("/jobs", response_model=JobList)
 @cache(expire=300)
@@ -273,3 +343,22 @@ async def read_public_jobs(
         )
 
     return result
+
+@router.post("/test_ai_parse", summary="Test AI Intent Parsing")
+async def test_ai_parse(request: AIParseRequest):
+    """
+    接收自然语言，返回 AI 解析出的结构化搜索意图 JSON。
+    用于调试 prompt 以及检验 Pydantic Schema 的覆盖率。
+    """
+    try:
+        parsed_intent = await ai_service.parse_job_search_intent(request.query)
+        return {
+            "query": request.query,
+            "parsed_intent": parsed_intent
+        }
+    except Exception as e:
+        logger.error(f"Error parsing AI intent: {e}")
+        raise HTTPException(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse query via AI: {e}"
+        )

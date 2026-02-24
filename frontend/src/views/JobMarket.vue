@@ -17,8 +17,11 @@ const filters = reactive({
     education: '',
     industry: '', // Now stores Industry Code (int) or empty string
     salary_range: '',
-    q: route.query.q || ''
+    q: route.query.q || '',
+    ai_q: route.query.ai_q || '' // ⚡ 捕获 AI 查询意图
 });
+
+const isAiLoading = ref(false); // AI 专属加载遮罩状态
 
 // 选项配置
 const locations = ref([]); // Changed to ref for API data
@@ -53,6 +56,12 @@ const fetchMetadata = async () => {
 };
 
 const fetchJobs = async () => {
+    // 💡 智能分流逻辑：如果是 AI 模式，转走专门的通道
+    if (filters.ai_q) {
+        await executeAiSearch();
+        return;
+    }
+
     loading.value = true;
     try {
         const params = {
@@ -97,6 +106,29 @@ const fetchJobs = async () => {
     }
 };
 
+const executeAiSearch = async () => {
+    loading.value = true;
+    isAiLoading.value = true;
+    try {
+        const params = {
+            q: filters.ai_q,
+            page: currentPage.value,
+            page_size: pageSize.value,
+        };
+        const response = await api.get('/jobs/ai_search', { params });
+        jobs.value = response.data.items;
+        total.value = response.data.total;
+        
+        if (jobs.value.length > 0) { selectedJob.value = jobs.value[0]; }
+        else { selectedJob.value = null; }
+    } catch (e) {
+        console.error("AI Search Failed", e);
+    } finally {
+        isAiLoading.value = false;
+        loading.value = false;
+    }
+};
+
 const handlePageChange = (page) => {
     currentPage.value = page;
     fetchJobs();
@@ -121,6 +153,50 @@ const handleImageError = (e) => {
     e.target.src = 'https://via.placeholder.com/50';
 };
 
+import { useAuthStore } from '../stores/auth';
+const authStore = useAuthStore();
+const isFavorite = ref(false);
+
+const checkFavoriteStatus = async (jobId) => {
+    if (!authStore.isAuthenticated) return;
+    try {
+        // Query favorite jobs for current user to see if this one is favorited
+        const res = await api.get('/favorites/jobs');
+        const favList = res.data || [];
+        isFavorite.value = favList.some(item => item.job_id === jobId);
+    } catch (e) {
+        console.error("Check favorite failed", e);
+    }
+};
+
+const toggleFavorite = async () => {
+    if (!authStore.isAuthenticated) {
+        alert("请先登录再执行此操作！"); // Or trigger login modal
+        return;
+    }
+    if (!selectedJob.value) return;
+    
+    const jobId = selectedJob.value.id;
+    try {
+        if (isFavorite.value) {
+            await api.delete(`/favorites/jobs/${jobId}`);
+            isFavorite.value = false;
+        } else {
+            await api.post(`/favorites/jobs/${jobId}`);
+            isFavorite.value = true;
+        }
+    } catch (e) {
+        alert("操作失败：" + (e.response?.data?.detail || e.message));
+    }
+};
+
+// Override the previous selectJob to also trigger checkFavoriteStatus
+const _originalSelectJob = selectJob;
+selectJob = (job) => {
+    _originalSelectJob(job);
+    checkFavoriteStatus(job.id);
+};
+
 onMounted(async () => {
     await fetchMetadata();
     fetchJobs();
@@ -138,27 +214,28 @@ watch(filters, () => {
     <!-- 顶部搜索栏 (保持不变) -->
     <div class="page-header">
         <div class="header-content">
-            <div class="search-bar">
-                <input v-model.lazy="filters.q" placeholder="搜索职位、公司..." @keyup.enter="fetchJobs" />
-                <button @click="fetchJobs">搜索</button>
+            <div class="search-bar" :class="{ 'ai-mode': !!filters.ai_q }">
+                <input v-if="!filters.ai_q" v-model.lazy="filters.q" placeholder="搜索职位、公司..." @keyup.enter="fetchJobs" />
+                <input v-else v-model.lazy="filters.ai_q" class="ai-input" placeholder="✨ 正在解析您的口语化求职意向..." @keyup.enter="fetchJobs" />
+                <button :class="{ 'ai-btn': !!filters.ai_q }" @click="fetchJobs">{{ filters.ai_q ? 'AI 精准发现' : '搜索' }}</button>
             </div>
             <!-- 简化的筛选栏，放顶部 -->
-            <div class="filters-bar">
+            <div class="filters-bar" :class="{ disabled: !!filters.ai_q }">
                 <!-- Location Filter: Binds to City Code -->
-                <select v-model="filters.location">
+                <select v-model="filters.location" :disabled="!!filters.ai_q">
                     <option value="">城市</option>
                     <option v-for="l in locations" :key="l.code" :value="l.code">{{l.name}}</option>
                 </select>
                 
                 <!-- Industry Filter: Binds to Industry Code -->
-                <select v-model="filters.industry">
+                <select v-model="filters.industry" :disabled="!!filters.ai_q">
                     <option value="">行业</option>
                     <option v-for="i in industryOptions" :key="i.code" :value="i.code">{{i.name}}</option>
                 </select>
 
-                <select v-model="filters.experience"><option value="">经验</option><option v-for="e in experiences" :value="e">{{e}}</option></select>
-                <select v-model="filters.education"><option value="">学历</option><option v-for="e in educations" :value="e">{{e}}</option></select>
-                <select v-model="filters.salary_range"><option value="">薪资</option><option v-for="r in salaryRanges" :value="r.label">{{r.label}}</option></select>
+                <select v-model="filters.experience" :disabled="!!filters.ai_q"><option value="">经验</option><option v-for="e in experiences" :value="e">{{e}}</option></select>
+                <select v-model="filters.education" :disabled="!!filters.ai_q"><option value="">学历</option><option v-for="e in educations" :value="e">{{e}}</option></select>
+                <select v-model="filters.salary_range" :disabled="!!filters.ai_q"><option value="">薪资</option><option v-for="r in salaryRanges" :value="r.label">{{r.label}}</option></select>
             </div>
         </div>
     </div>
@@ -167,8 +244,16 @@ watch(filters, () => {
     <div class="main-container">
         <!-- 左侧：职位列表 -->
         <div class="job-list-panel">
-            <div v-if="loading" class="loading-state"><div class="spinner"></div> 加载中...</div>
-            <div v-else-if="jobs.length === 0" class="empty-state">暂无职位</div>
+            <div v-if="isAiLoading" class="ai-loading-state">
+                <div class="ai-scanner"></div>
+                <div class="ai-text">
+                    <span class="icon">🧠</span>
+                    <p>正在理解您的求职意图...</p>
+                    <small>由大模型进行深度语义树解析与匹配</small>
+                </div>
+            </div>
+            <div v-else-if="loading" class="loading-state"><div class="spinner"></div> 加载中...</div>
+            <div v-else-if="jobs.length === 0" class="empty-state">未匹配到符合您要求的职位</div>
             
             <div v-else class="job-cards-wrapper">
                 <div 
@@ -217,6 +302,9 @@ watch(filters, () => {
                         </div>
                     </div>
                     <div class="header-actions">
+                         <button class="favorite-btn" @click="toggleFavorite" :class="{ 'is-active': isFavorite }">
+                             {{ isFavorite ? '❤️ 已收藏' : '🤍 收藏' }}
+                         </button>
                          <a :href="selectedJob.source_url" target="_blank" class="apply-btn">立即沟通</a>
                     </div>
                 </div>
@@ -272,182 +360,333 @@ watch(filters, () => {
     height: calc(100vh - 64px); /* 减去导航栏高度 */
     display: flex;
     flex-direction: column;
-    background: #f6f6f8;
+    background: var(--color-background);
     overflow: hidden;
+    animation: fadeIn var(--transition-slow);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .page-header {
-    background: white;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    padding: 1rem 2rem;
+    background: var(--color-glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--color-border);
+    padding: 1.25rem 2rem;
     z-index: 10;
 }
 
 .header-content {
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
 }
 
-.search-bar { display: flex; gap: 0.5rem; }
+.search-bar { display: flex; flex: 1; max-width: 500px; position: relative; }
 .search-bar input {
-    padding: 0.5rem 1rem;
-    border: 2px solid var(--color-primary);
-    border-radius: 4px 0 0 4px;
-    width: 300px;
+    flex: 1;
+    padding: 0.75rem 1.5rem;
+    border: 1px solid var(--color-border);
+    background: rgba(0, 0, 0, 0.05); /* Works for light mode currently */
+    border-radius: var(--radius-full) 0 0 var(--radius-full);
     outline: none;
+    font-size: 0.95rem;
+    color: var(--color-text);
+    transition: all var(--transition-normal);
+}
+
+/* 适配深色模式的输入框 */
+:root[data-theme='dark'] .search-bar input {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.search-bar input:focus {
+    border-color: var(--color-primary);
+    box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 .search-bar button {
-    background: var(--color-primary);
+    background: linear-gradient(135deg, var(--color-primary) 0%, #818cf8 100%);
     color: white;
     border: none;
-    padding: 0 1.5rem;
-    border-radius: 0 4px 4px 0;
+    padding: 0 2rem;
+    border-radius: 0 var(--radius-full) var(--radius-full) 0;
     cursor: pointer;
-    font-weight: bold;
+    font-weight: 600;
+    transition: all var(--transition-fast);
+}
+.search-bar button:hover {
+    filter: brightness(1.1);
 }
 
-.filters-bar { display: flex; gap: 0.5rem; }
+.filters-bar { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .filters-bar select {
-    padding: 0.4rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background: #fff;
-    min-width: 80px;
+    appearance: none;
+    padding: 0.6rem 2.5rem 0.6rem 1.2rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-background-soft);
+    color: var(--color-text);
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 1em;
+    transition: all var(--transition-normal);
+}
+.filters-bar select:focus {
+    outline: none;
+    border-color: var(--color-primary);
 }
 
-/* 主容器：固定高度，不随页面滚动 */
+/* 主容器 */
 .main-container {
     flex: 1;
     display: flex;
-    max-width: 1200px;
-    margin: 1rem auto;
+    max-width: 1400px;
+    margin: 1.5rem auto;
     width: 100%;
-    gap: 1rem;
+    gap: 1.5rem;
     padding: 0 1rem;
-    overflow: hidden; /* 防止主容器滚动 */
+    overflow: hidden;
 }
 
-/* 左侧列表：独立滚动 */
+/* 左侧列表 */
 .job-list-panel {
-    width: 380px;
+    width: 400px;
     flex-shrink: 0;
-    background: white;
-    border-radius: 8px;
+    background: var(--color-glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-}
-
-.job-cards-wrapper {
-    flex: 1;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 .job-card-item {
-    padding: 1rem;
-    border-bottom: 1px solid #eee;
+    padding: 1.25rem;
+    border-bottom: 1px solid var(--color-border);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--transition-fast);
+    position: relative;
+    background: transparent;
 }
 
-.job-card-item:hover { background: #fbfbfb; }
-.job-card-item.active { background: #e6f7ff; border-left: 3px solid var(--color-primary); }
+.job-card-item:hover { 
+    background: var(--color-background-soft); 
+}
+.job-card-item.active { 
+    background: rgba(14, 165, 233, 0.08); 
+}
+.job-card-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--color-primary);
+    border-radius: 0 4px 4px 0;
+}
 
-.card-top { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-.job-card-title { font-weight: 600; font-size: 1rem; color: #333; max-width: 70%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.job-card-salary { color: var(--color-accent); font-weight: bold; }
+.card-top { display: flex; justify-content: space-between; margin-bottom: 0.6rem; align-items: start; }
+.job-card-title { font-weight: 600; font-size: 1.05rem; color: var(--color-text); max-width: 65%; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.job-card-salary { color: #f43f5e; font-weight: bold; font-size: 1.1rem; }
 
-.card-mid { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-.tag-item { background: #f4f4f5; color: #666; font-size: 0.75rem; padding: 2px 6px; border-radius: 2px; }
+.card-mid { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.tag-item { background: var(--color-background-soft); border: 1px solid var(--color-border); color: var(--color-text-mute); font-size: 0.75rem; padding: 4px 10px; border-radius: var(--radius-full); }
 
 .card-bot { display: flex; align-items: center; }
-.card-company { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #666; }
-.mini-logo { width: 20px; height: 20px; border-radius: 4px; }
+.card-company { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: var(--color-text-mute); }
+.mini-logo { width: 24px; height: 24px; border-radius: var(--radius-sm); object-fit: cover; }
 
-/* 右侧详情：独立滚动 */
+/* 分页控件 */
+.pagination-mini {
+    padding: 1.5rem 1rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    border-top: 1px solid var(--color-border);
+}
+.pagination-mini button {
+    background: var(--color-background-soft);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+}
+.pagination-mini button:not(:disabled):hover { border-color: var(--color-primary); color: var(--color-primary); background: rgba(14, 165, 233, 0.1); }
+.pagination-mini button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 右侧详情 */
 .job-detail-panel {
     flex: 1;
-    background: white;
-    border-radius: 8px;
+    background: var(--color-glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
     overflow-y: auto;
-    padding: 2rem;
+    padding: 3rem;
     position: relative;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 .detail-header {
-    border-bottom: 1px solid #eee;
-    padding-bottom: 1.5rem;
-    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 2rem;
+    margin-bottom: 2rem;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
 }
 
-.header-main h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: #333; }
-.salary-highlight { color: var(--color-accent); margin-left: 1rem; font-size: 1.5rem; }
-.job-badges { display: flex; gap: 1.5rem; color: #444; font-size: 1rem; }
+.header-main h1 { margin: 0 0 1rem 0; font-size: 2rem; color: var(--color-text); font-weight: 700; }
+.salary-highlight { color: #f43f5e; margin-left: 1rem; font-size: 1.8rem; }
+.job-badges { display: flex; gap: 1.5rem; color: var(--color-text-mute); font-size: 1rem; }
 
 .apply-btn {
-    background: var(--color-primary);
+    background: linear-gradient(135deg, var(--color-primary) 0%, #818cf8 100%);
     color: white;
-    padding: 0.8rem 2rem;
-    border-radius: 4px;
+    padding: 0.8rem 2.5rem;
+    border-radius: var(--radius-huge);
     text-decoration: none;
-    font-weight: bold;
+    font-weight: 600;
+    font-size: 1.05rem;
     display: inline-block;
+    transition: all var(--transition-fast);
+    box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
 }
-.apply-btn:hover { opacity: 0.9; }
+.apply-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5); }
 
-.detail-section { margin-bottom: 2rem; }
-.detail-section h3 { font-size: 1.1rem; border-left: 4px solid var(--color-primary); padding-left: 0.8rem; margin-bottom: 1rem; color: #222; font-weight: 600; }
+.detail-section { margin-bottom: 3rem; }
+.detail-section h3 { font-size: 1.25rem; margin-bottom: 1.5rem; color: var(--color-text); font-weight: 600; display: inline-block; position: relative; }
+.detail-section h3::after {
+    content: ''; position: absolute; left: 0; bottom: -8px; width: 40%; height: 3px; background: var(--color-primary); border-radius: 2px;
+}
 
-.text-content { line-height: 1.8; color: #444; white-space: pre-wrap; }
-.skills-row { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.skill-pill { border: 1px solid #ddd; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem; color: #555; }
+.text-content { line-height: 1.8; color: var(--color-text-mute); white-space: pre-wrap; font-size: 1.05rem; }
+.skills-row { margin-bottom: 1.5rem; display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.skill-pill { background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.2); padding: 6px 16px; border-radius: var(--radius-full); font-size: 0.95rem; color: var(--color-primary); }
 
-.hr-section { display: flex; align-items: center; gap: 1rem; background: #f9f9fa; padding: 1rem; border-radius: 8px; }
-.hr-avatar-lg { width: 50px; height: 50px; border-radius: 50%; }
-.hr-name-lg { font-weight: bold; margin-bottom: 0.2rem; }
-.hr-title-lg { color: #888; font-size: 0.9rem; }
+.hr-section { display: flex; align-items: center; gap: 1.2rem; background: var(--color-background-soft); padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); }
+.hr-avatar-lg { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; }
+.hr-name-lg { font-weight: 600; font-size: 1.15rem; color: var(--color-text); margin-bottom: 0.2rem; }
+.hr-title-lg { color: var(--color-text-mute); font-size: 0.95rem; }
 
 .company-detail-card {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    border: 1px solid #eee;
-    padding: 1rem;
-    border-radius: 8px;
+    gap: 1.5rem;
+    border: 1px solid var(--color-border);
+    padding: 1.5rem;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: 0.2s;
+    transition: all var(--transition-fast);
+    background: var(--color-background-soft);
 }
-.company-detail-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-.company-logo-lg { width: 60px; height: 60px; border-radius: 8px; border: 1px solid #f0f0f0; }
-.company-info-lg h4 { margin: 0 0 0.4rem 0; }
-.company-info-lg p { margin: 0; color: #888; font-size: 0.9rem; }
-.arrow { margin-left: auto; color: #ccc; }
+.company-detail-card:hover { border-color: rgba(14, 165, 233, 0.4); box-shadow: 0 4px 20px rgba(0,0,0,0.05); transform: translateY(-3px); }
+.company-logo-lg { width: 70px; height: 70px; border-radius: var(--radius-md); border: 1px solid var(--color-border); object-fit: contain; background: white; }
+.company-info-lg h4 { margin: 0 0 0.5rem 0; font-size: 1.2rem; color: var(--color-text); }
+.company-info-lg p { margin: 0; color: var(--color-text-mute); font-size: 0.95rem; }
+.arrow { margin-left: auto; color: var(--color-primary); font-size: 1.5rem; font-weight: 300; }
 
+.empty-detail, .empty-state {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: var(--color-text-mute);
+    font-size: 1.2rem;
+}
+
+.loading-state {
+    display: flex; justify-content: center; align-items: center; height: 100%; color: var(--color-primary); gap: 10px; font-weight: 500;
+}
+.spinner { width: 24px; height: 24px; border: 3px solid rgba(14, 165, 233, 0.3); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 1s infinite linear; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* AI 专属加载态 */
+.ai-loading-state {
+    display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; position: relative; overflow: hidden; padding: 2rem;
+}
+.ai-scanner {
+    width: 80px; height: 80px; border: 2px solid rgba(129, 140, 248, 0.3); border-radius: 50%; position: relative; margin-bottom: 2rem;
+}
+.ai-scanner::before {
+    content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px; border-radius: 50%; border: 2px solid transparent; border-top-color: #818cf8; border-right-color: #38bdf8; animation: spin 1.5s linear infinite;
+}
+.ai-text .icon { font-size: 3rem; display: block; margin-bottom: 1rem; animation: pulse 2s infinite; }
+.ai-text p { font-size: 1.15rem; color: var(--color-heading); font-weight: 600; margin-bottom: 0.5rem; }
+.ai-text small { color: var(--color-text-mute); font-size: 0.9rem; }
+@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.8; filter: drop-shadow(0 0 10px rgba(129,140,248,0.5)); } }
+
+/* 禁用状态 */
+.filters-bar.disabled { opacity: 0.5; pointer-events: none; filter: grayscale(1); }
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.4); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.8); }
+
+/* 空详情状态 */
 .empty-detail {
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100%;
-    color: #ccc;
-    font-size: 1.2rem;
+    color: var(--color-text-mute);
+    font-size: 1.1rem;
+    font-weight: 500;
 }
 
-.list-footer {
-    padding: 1rem;
-    text-align: center;
-    color: #999;
-    font-size: 0.85rem;
+/* 详情面板头与操作区域 */
+.header-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
 }
-.mini-loading { color: var(--color-primary); }
 
-/* 滚动条美化 */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #f1f1f1; }
-::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #bbb; }
+.favorite-btn {
+    padding: 0.6rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border-radius: 2rem;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.favorite-btn:hover {
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+.favorite-btn.is-active {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+@media (max-width: 1024px) {
+    .main-container { flex-direction: column; overflow: visible; }
+    .job-list-panel { width: 100%; height: 500px; }
+    .job-detail-panel { min-height: 600px; overflow: visible; padding: 1.5rem; }
+    .market-view { overflow: auto; height: auto; min-height: calc(100vh - 64px); }
+    .header-main h1 { font-size: 1.5rem; }
+}
 </style>

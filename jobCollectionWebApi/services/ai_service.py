@@ -173,4 +173,33 @@ class AIService:
             logger.error(f"AI Error: {e}")
             return {}
 
+    async def parse_job_search_intent(self, user_query: str) -> dict:
+        """解析口语化的职位搜索意图为结构化 JSON"""
+        
+        system_prompt = """
+你是一个专业的招聘意图分析引擎。你的任务是将用户自然语言表达的求职需求，精确地转换为结构化的 JSON 数据。
+无论用户的语言多么零散、口语化，你都需要运用逻辑推理能力对其进行分类和提取。
+如果某个字段在用户的表述中没有提及或无法安全推断，请留空（如 null 或 []，严格按照下面的定义）。
+不要输出任何 Markdown 标记或多余的文字说明，只输出原始 JSON 字符串。
+"""
+        
+        user_prompt = f"""
+请分析以下求职意图，并提取包含以下键名的 JSON 数据：
+- locations (list of strings): 地点/城市。比如 "北京", "杭州"。
+- keywords (list of strings): 岗位通配词、职能大类。比如 "后端开发", "产品经理"。
+- skills_must_have (list of strings): 明确点名的技术栈或工具。比如 "Python", "Golang", "Figma"。
+- salary_min (number或null): 最低月薪要求(单位:人民币元)。如 "2万" 记为 20000。
+- salary_max (number或null): 最高月薪要求(单位:人民币元)。如 "不超过3万" 记为 30000。
+- exclude_keywords (list of strings): 用户明确排斥的词汇。如 "不要外包" -> ["外包"]。
+- benefits_desired (list of strings): 期望的公司福利。如 "双休", "不加班", "五险一金"。
+- education (string或null): 学历要求。如 "本科" 或 "大专"。
+- experience (string或null): 经验年限要求。如 "1-3年", "应届生", "5-10年"。
+- industry (string或null): 行业类型。如 "互联网", "游戏行业"。
+
+用户的求职意图原话如下：
+{user_query}
+"""
+        
+        return await self._call_llm_generic(system_prompt, user_prompt)
+
 ai_service = AIService()

@@ -1,3 +1,10 @@
+import sys
+import os
+
+# Ensure the WebAPI directory is in path so Scrapy can import Celery tasks
+webapi_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(os.path.join(webapi_dir, 'jobCollectionWebApi'))
+
 import asyncio
 import logging
 import json
@@ -122,8 +129,17 @@ class BossJobPipeline:
                         if update_item.get('skills'):
                              update_values['tags'] = json.dumps(update_item['skills'], ensure_ascii=False)
 
-                        stmt = update(Job).where(Job.encrypt_job_id == update_item['encrypt_job_id']).values(**update_values)
-                        await session.execute(stmt)
+                        stmt = update(Job).where(Job.encrypt_job_id == update_item['encrypt_job_id']).values(**update_values).returning(Job.id)
+                        res = await session.execute(stmt)
+                        updated_id = res.scalar()
+                        if updated_id:
+                            # 触发 ES 同步
+                            try:
+                                from tasks.es_sync import sync_job_to_es
+                                sync_job_to_es.delay(updated_id)
+                            except Exception as e:
+                                logger.warning(f"Failed to dispatch Celery sync task for updated job {updated_id}: {e}")
+                                
                     logger.info(f"Batch updated {len(detail_updates)} job details.")
 
                 # --- Handle Regular Inserts (Previous Logic) ---
@@ -258,7 +274,16 @@ class BossJobPipeline:
                         stmt = stmt.on_conflict_do_update(
                             index_elements=['encrypt_job_id'],
                             set_=update_cols
-                        )
-                        await session.execute(stmt)
+                        ).returning(Job.id)
+                        res = await session.execute(stmt)
+                        upserted_ids = res.scalars().all()
                         
                         logger.info(f"Batch wrote {len(job_rows)} jobs.")
+                        
+                        # 触发 ES 同步
+                        try:
+                            from tasks.es_sync import sync_job_to_es
+                            for jid in upserted_ids:
+                                sync_job_to_es.delay(jid)
+                        except Exception as e:
+                            logger.warning(f"Failed to dispatch Celery sync task for new batch jobs: {e}")

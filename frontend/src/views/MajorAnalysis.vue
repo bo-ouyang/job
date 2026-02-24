@@ -290,14 +290,191 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* New Styles for AI Section */
+.major-analysis-view {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 2rem;
+    animation: fadeIn var(--transition-slow);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+.header h2 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+    background: linear-gradient(to right, #38bdf8, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.header p {
+    color: var(--color-text-mute);
+    font-size: 1.1rem;
+}
+
+/* 筛选项控制台 */
+.control-panel {
+    background: var(--color-glass-bg);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 1.5rem 2rem;
+    border-radius: var(--radius-lg);
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 220px;
+}
+
+.input-group.flex-2 {
+    flex: 2;
+}
+
+.input-group label {
+    font-size: 0.9rem;
+    color: var(--color-text-mute);
+    font-weight: 500;
+}
+
+.input-group input, .input-group select {
+    appearance: none;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--color-text);
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    outline: none;
+    transition: all var(--transition-normal);
+    backdrop-filter: blur(4px);
+}
+
+.input-group select {
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 1em;
+    padding-right: 2.5rem;
+}
+
+.input-group select option {
+    background: #1e293b;
+    color: #f8fafc;
+}
+
+.input-group input:focus, .input-group select:focus {
+    border-color: rgba(14, 165, 233, 0.5);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.action-group {
+    padding-bottom: 2px;
+}
+
+.analyze-btn {
+    background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+    border: none;
+    padding: 0 2.5rem;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-weight: 600;
+    font-size: 1.05rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    height: 44px;
+    box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+}
+
+.analyze-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5);
+    filter: brightness(1.1);
+}
+
+.analyze-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: #475569;
+    box-shadow: none;
+}
+
+/* 毛玻璃图表网格 */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: 420px 420px;
+    gap: 2.5rem;
+}
+
+.chart-card {
+    position: relative;
+    background: var(--color-card-bg);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+    overflow: hidden;
+}
+
+.chart-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+    pointer-events: none;
+}
+
+.chart-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), 0 0 30px rgba(14, 165, 233, 0.05);
+    border-color: rgba(14, 165, 233, 0.2);
+}
+
+.chart-card.large {
+    grid-row: 1 / 3;
+    height: 100%;
+}
+
+/* AI 指导模块 */
 .ai-section {
-    margin-top: 2rem;
+    margin-top: 3rem;
 }
 
 .ai-card {
     min-height: 200px;
-    background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+    background: linear-gradient(145deg, hsla(222, 47%, 16%, 0.9) 0%, hsla(222, 47%, 11%, 0.8) 100%);
+    border-color: rgba(139, 92, 246, 0.3); /* Purple tint for AI */
+}
+
+.ai-card:hover {
+    border-color: rgba(139, 92, 246, 0.6);
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), 0 0 40px rgba(139, 92, 246, 0.15);
 }
 
 .ai-header {
@@ -305,29 +482,36 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1.5rem;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 1.25rem;
 }
 
 .ai-header h3 {
-    color: #38bdf8;
+    background: linear-gradient(90deg, #c084fc, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
     margin: 0;
+    font-size: 1.5rem;
+    letter-spacing: 0.5px;
 }
 
 .ai-btn {
-    background: #8b5cf6;
+    background: linear-gradient(135deg, #8b5cf6, #6366f1);
     border: none;
     color: white;
-    padding: 0.5rem 1.5rem;
-    border-radius: 20px;
+    padding: 0.6rem 2rem;
+    border-radius: var(--radius-huge);
     cursor: pointer;
-    font-weight: bold;
-    transition: all 0.3s;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: all var(--transition-fast);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
 }
 
 .ai-btn:hover {
-    background: #a78bfa;
-    transform: scale(1.05);
+    filter: brightness(1.2);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.6);
 }
 
 .ai-content {
@@ -338,125 +522,29 @@ onMounted(() => {
 }
 
 .ai-loading {
-    color: #94a3b8;
-    text-align: center;
-    padding: 2rem;
-    font-style: italic;
-}
-
-.major-analysis-view {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 2rem;
-}
-
-.header {
-    text-align: center;
-    margin-bottom: 3rem;
-}
-
-.header h2 {
-    font-size: 2rem;
-    background: linear-gradient(to right, #38bdf8, #818cf8);
-    -webkit-background-clip: text;
-    color: transparent;
-    margin-bottom: 0.5rem;
-}
-
-.header p {
     color: var(--color-text-mute);
-}
-
-.control-panel {
-    background: rgba(30, 41, 59, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 1.5rem;
-    border-radius: 1rem;
+    text-align: center;
+    padding: 3rem;
+    font-style: italic;
+    font-size: 1.1rem;
     display: flex;
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-    align-items: flex-end;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 }
 
-.input-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    flex: 1;
-    min-width: 200px;
+/* 简单的 Spinner 动画 */
+.loader {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(139, 92, 246, 0.3);
+    border-radius: 50%;
+    border-top-color: #8b5cf6;
+    animation: spin 1s ease-in-out infinite;
 }
 
-.input-group.flex-2 {
-    flex: 2;
-}
-
-.input-group label {
-    font-size: 0.9rem;
-    color: #94a3b8;
-}
-
-.input-group input, .input-group select {
-    background: #0f172a;
-    border: 1px solid #334155;
-    color: white;
-    padding: 0.6rem 1rem;
-    border-radius: 0.5rem;
-    font-size: 1rem;
-    outline: none;
-    transition: border-color 0.3s;
-}
-
-.input-group input:focus, .input-group select:focus {
-    border-color: #38bdf8;
-}
-
-.action-group {
-    padding-bottom: 2px;
-}
-
-.analyze-btn {
-    background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
-    border: none;
-    padding: 0.6rem 2rem;
-    border-radius: 0.5rem;
-    color: white;
-    font-weight: bold;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: transform 0.2s, opacity 0.2s;
-    white-space: nowrap;
-    height: 42px;
-}
-
-.analyze-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
-}
-
-.analyze-btn:disabled {
-    opacity: 0.7;
-    cursor: wait;
-    transform: none;
-}
-
-.charts-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: 400px 400px;
-    gap: 1.5rem;
-}
-
-.chart-card {
-    background: #1e293b;
-    border-radius: 1rem;
-    padding: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.chart-card.large {
-    grid-row: 1 / 3;
-    height: 100%;
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 @media (max-width: 1024px) {
@@ -464,14 +552,10 @@ onMounted(() => {
         grid-template-columns: 1fr;
         grid-template-rows: auto;
     }
-    
     .chart-card.large {
         grid-row: auto;
-        height: 500px;
+        height: 550px;
     }
-
-    .chart-card {
-        height: 400px;
-    }
+    .chart-card { height: 450px; }
 }
 </style>

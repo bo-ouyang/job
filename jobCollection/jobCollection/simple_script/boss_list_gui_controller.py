@@ -51,10 +51,15 @@ def launch_browser(url):
         # Note: Monitor might need images enabled to see CAPTCHA? Detail disables them.
         # User asked to disable images earlier for detail. For monitor, maybe keep enabled if captcha is frequent?
         # But 'mimic boss_detail' implies efficiency. I'll disable images but check user preference.
-        # User: "Perfect... mimic boss_detail_spider". Boss detail disables images. I will do same.
+        # Note: Boss list (monitor) relies on raw DOM parsing from Scrapy, not Mitmproxy responses
+        # So we MUST NOT use the 8888 proxy here unless explicitly Mitmproxy is running for this spider
+        # CRITICAL: We MUST use an isolated user-data-dir, otherwise Chrome will merge with an existing open
+        # browser instance, entirely ignoring our proxy-server flag and causing "Check Proxy" errors.
+        #user_data_dir = os.path.join(current_dir, "chrome_isolated_data")
         subprocess.Popen([
             chrome_path,
-            "--proxy-server=127.0.0.1:8888",
+            #f"--user-data-dir={user_data_dir}",
+            "--proxy-server=127.0.0.1:8889",
             "--ignore-certificate-errors",
             "--new-window",
             "--blink-settings=imagesEnabled=false", 

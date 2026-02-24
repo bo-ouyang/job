@@ -3,6 +3,7 @@ import sys
 import os
 
 # 添加项目根目录到 Python 路径
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.search.conn import get_es, es_manager
@@ -23,9 +24,8 @@ async def init_es_index():
         # 1. 检查索引是否存在
         exists = await es.indices.exists(index=index_name)
         if exists:
-            logger.info(f"Index '{index_name}' already exists.")
-            # 可以在这里做 mapping 更新检查，但简单起见暂时跳过
-            return
+            logger.info(f"Index '{index_name}' already exists. Deleting it to apply new mappings...")
+            await es.indices.delete(index=index_name)
             
         # 2. 创建索引
         # 注意：如果 ES 没有安装 IK 分词器，这里可能会失败

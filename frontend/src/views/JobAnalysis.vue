@@ -351,48 +351,130 @@ watch(
 
 <style scoped>
 .analysis-view {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 2rem;
+  animation: fadeIn var(--transition-slow);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .header {
-  margin-bottom: 2rem;
+  margin-bottom: 3rem;
   text-align: center;
+}
+
+.header h2 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #fff, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .header p {
   color: var(--color-text-mute);
+  font-size: 1.1rem;
 }
 
+/* 筛选项指挥舱控制台风格 */
 .filters {
   display: flex;
   justify-content: center;
-  gap: 1rem;
-  margin-bottom: 2rem;
+  gap: 1.25rem;
+  margin-bottom: 3rem;
   flex-wrap: wrap;
+  background: var(--color-glass-bg);
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.filter-group {
+  position: relative;
 }
 
 .filter-group select,
 .search-input {
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  border: 1px solid var(--color-border);
-  background: var(--color-background-soft);
+  appearance: none;
+  padding: 0.75rem 2.5rem 0.75rem 1.25rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--color-text);
+  font-size: 0.95rem;
+  transition: all var(--transition-normal);
+  min-width: 160px;
+  backdrop-filter: blur(4px);
 }
 
+.filter-group select:focus,
+.search-input:focus {
+  outline: none;
+  border-color: rgba(14, 165, 233, 0.5);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.filter-group select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1em;
+}
+
+.filter-group select option {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+/* 玻璃仪表盘卡片 */
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-  gap: 2rem;
+  gap: 2.5rem;
 }
 
 .chart-card {
-  background: var(--color-background-soft);
-  border: 1px solid var(--color-border);
-  border-radius: 1rem;
-  height: 400px;
-  padding: 1rem;
+  position: relative;
+  background: var(--color-card-bg);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+  height: 480px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+  overflow: hidden;
+}
+
+/* 高级折射边缘内发光 */
+.chart-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  pointer-events: none;
+}
+
+.chart-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), 0 0 30px rgba(14, 165, 233, 0.05);
+  border-color: rgba(14, 165, 233, 0.2);
+}
+
+@media (max-width: 768px) {
+  .charts-grid { grid-template-columns: 1fr; }
+  .filter-group select, .search-input { min-width: 100%; width: 100%; }
 }
 </style>

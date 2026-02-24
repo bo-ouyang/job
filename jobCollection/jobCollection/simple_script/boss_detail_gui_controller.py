@@ -32,7 +32,11 @@ def get_browser():
     co = ChromiumOptions()
     
     # Proxy Configuration (Point to Mitmproxy)
-    co.set_proxy("127.0.0.1:8888")
+    co.set_proxy("127.0.0.1:8889")
+    
+    # Isolate user data to prevent proxy bypass due to existing chrome instances
+    user_data_dir = os.path.join(current_dir, "chrome_isolated_data_detail")
+    co.set_user_data_path(user_data_dir)
     
     # Efficiency Settings
     co.set_argument("--blink-settings=imagesEnabled=false") # Disable images
@@ -90,7 +94,7 @@ def main():
                     page.get(url)
                     # No need to wait for full load if we rely on Mitmproxy interception
                     # But a small wait helps ensure the request goes out
-                    time.sleep(0.5) 
+                    time.sleep(4) 
                 except Exception as e:
                     print(f"   Browser Error: {e}")
                 

@@ -161,8 +161,8 @@ async def analyze_major_skills(
     """
     try:
         # 1. [性能优化] 优先检查分析结果缓存 (Redis)
-        # 缓存 Key 包含：专业名 + 城市
-        cache_key = f"analysis:major:{request.major_name}:{request.location or 'all'}"
+        # 缓存 Key 包含：专业名 + 城市 (Bumped to v2 to clear buggy empty cache)
+        cache_key = f"analysis:major:v2:{request.major_name}:{request.location or 'all'}"
         cached_result = await redis_manager.get_cache(cache_key)
         
         # 2. 如果有缓存，直接返回数据，但扔要异步更新热度
