@@ -4650,3 +4650,77 @@ AttributeError: 'Depends' object has no attribute 'q'
 2026-02-24 15:20:31.525 | ERROR    | api.v1.endpoints.analysis_controller:get_job_statistics:45 - ES stats failed, falling back to DB: name 'cached' is not defined
 2026-02-24 15:20:34.278 | ERROR    | api.v1.endpoints.analysis_controller:get_job_statistics:45 - ES stats failed, falling back to DB: name 'cached' is not defined
 2026-02-24 15:25:57.224 | ERROR    | logging:callHandlers:1706 - Database session error: 401: 无法验证凭据xxxxx
+2026-02-24 15:56:51.226 | ERROR    | logging:callHandlers:1706 - Database session error: 401: 无法验证凭据xxxxx
+2026-02-24 16:13:10.194 | ERROR    | logging:callHandlers:1706 - Task tasks.check_proxies[f95e9641-adf5-4da4-b5f4-a35a9cf24f1d] raised unexpected: ConnectionError('Error 22 while writing to socket. 指定的网络名不再可用。.')
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 494, in finish_recv
+    return ov.getresult()
+           │  └ <method 'getresult' of '_overlapped.Overlapped' objects>
+           └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+
+OSError: [WinError 64] 指定的网络名不再可用。
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 543, in send_packed_command
+    await self._writer.drain()
+          │    └ <member '_writer' of 'AbstractConnection' objects>
+          └ <redis.asyncio.connection.Connection(host=localhost,port=6379,db=0)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\streams.py", line 380, in drain
+    raise exc
+          └ ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             │   └ <method 'result' of '_asyncio.Future' objects>
+             └ <_OverlappedFuture finished exception=ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            │        │            │    └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+            │        │            └ 0
+            │        └ 0
+            └ <function IocpProactor.recv_into.<locals>.finish_recv at 0x000001857AA05620>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 498, in finish_recv
+    raise ConnectionResetError(*exc.args)
+
+ConnectionResetError: [WinError 64] 指定的网络名不再可用。
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+> File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 453, in trace_task
+    R = retval = fun(*args, **kwargs)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 736, in __protected_call__
+    return self.run(*args, **kwargs)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\proxy_tasks.py", line 15, in check_proxies_task
+    loop.run_until_complete(proxy_service.check_proxies())
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+
+  File "D:\Code\job\jobCollectionWebApi\services\proxy_service.py", line 161, in check_proxies
+    proxies = await redis.smembers(PROXY_POOL_KEY)
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 55, in call_with_retry
+    raise error
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 554, in send_packed_command
+    raise ConnectionError(
+
+redis.exceptions.ConnectionError: Error 22 while writing to socket. 指定的网络名不再可用。.
+2026-02-24 16:26:51.217 | ERROR    | logging:callHandlers:1706 - Database session error: 401: 无法验证凭据xxxxx

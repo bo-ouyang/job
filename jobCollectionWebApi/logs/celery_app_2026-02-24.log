@@ -3215,3 +3215,289 @@ redis.exceptions.ConnectionError: Error 22 while writing to socket. 指定的网
 2026-02-24 15:51:10.161 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
 2026-02-24 15:51:12.215 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [7375432c-02c5-4e8f-ad91-a1d4390cabf6]
 2026-02-24 15:51:12.222 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[7375432c-02c5-4e8f-ad91-a1d4390cabf6] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 15:53:06.007 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 15:53:10.127 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3cc31932-4c5d-4316-8336-0bf54fd876b9] received
+2026-02-24 15:53:10.128 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3cc31932-4c5d-4316-8336-0bf54fd876b9]
+2026-02-24 15:53:10.134 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 15:53:10.185 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 15:53:12.272 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3cc31932-4c5d-4316-8336-0bf54fd876b9]
+2026-02-24 15:53:12.280 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3cc31932-4c5d-4316-8336-0bf54fd876b9] succeeded in 2.139999999999418s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 15:55:06.008 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 15:55:10.111 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3ffea2ea-564d-407d-80d8-931304f60cdc] received
+2026-02-24 15:55:10.113 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3ffea2ea-564d-407d-80d8-931304f60cdc]
+2026-02-24 15:55:10.118 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 15:55:10.168 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 15:55:12.259 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3ffea2ea-564d-407d-80d8-931304f60cdc]
+2026-02-24 15:55:12.265 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3ffea2ea-564d-407d-80d8-931304f60cdc] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 15:57:06.008 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 15:57:10.099 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[698a27ae-86d4-4bda-8cc7-bdcaca17a82e] received
+2026-02-24 15:57:10.101 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [698a27ae-86d4-4bda-8cc7-bdcaca17a82e]
+2026-02-24 15:57:10.108 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 15:57:10.181 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 15:57:12.225 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [698a27ae-86d4-4bda-8cc7-bdcaca17a82e]
+2026-02-24 15:57:12.231 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[698a27ae-86d4-4bda-8cc7-bdcaca17a82e] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 15:59:06.009 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 15:59:10.096 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[266d1e81-40d5-466a-808f-eda8c3edcccc] received
+2026-02-24 15:59:10.097 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [266d1e81-40d5-466a-808f-eda8c3edcccc]
+2026-02-24 15:59:10.104 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 15:59:10.162 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 15:59:12.207 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [266d1e81-40d5-466a-808f-eda8c3edcccc]
+2026-02-24 15:59:12.213 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[266d1e81-40d5-466a-808f-eda8c3edcccc] succeeded in 2.110000000000582s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:01:06.009 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:01:10.115 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[af472573-76d3-4dd0-a1af-c364922efeeb] received
+2026-02-24 16:01:10.116 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [af472573-76d3-4dd0-a1af-c364922efeeb]
+2026-02-24 16:01:10.122 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:01:10.172 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:01:12.227 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [af472573-76d3-4dd0-a1af-c364922efeeb]
+2026-02-24 16:01:12.233 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[af472573-76d3-4dd0-a1af-c364922efeeb] succeeded in 2.1089999999967404s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:03:06.010 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:03:10.106 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[f3ef1e54-7b62-499d-ae76-409cef579817] received
+2026-02-24 16:03:10.107 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [f3ef1e54-7b62-499d-ae76-409cef579817]
+2026-02-24 16:03:10.114 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:03:10.163 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:03:12.246 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [f3ef1e54-7b62-499d-ae76-409cef579817]
+2026-02-24 16:03:12.252 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[f3ef1e54-7b62-499d-ae76-409cef579817] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:05:06.010 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:05:10.121 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[d7e29ddc-cc17-4fb1-b9f5-8bae0280fc4e] received
+2026-02-24 16:05:10.122 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [d7e29ddc-cc17-4fb1-b9f5-8bae0280fc4e]
+2026-02-24 16:05:10.129 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:05:10.195 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:05:12.245 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [d7e29ddc-cc17-4fb1-b9f5-8bae0280fc4e]
+2026-02-24 16:05:12.252 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[d7e29ddc-cc17-4fb1-b9f5-8bae0280fc4e] succeeded in 2.1089999999967404s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:07:06.011 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:07:10.115 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1208ea27-b9bc-4f7a-a1d7-a6587e0f233b] received
+2026-02-24 16:07:10.116 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1208ea27-b9bc-4f7a-a1d7-a6587e0f233b]
+2026-02-24 16:07:10.123 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:07:10.179 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:07:12.232 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1208ea27-b9bc-4f7a-a1d7-a6587e0f233b]
+2026-02-24 16:07:12.238 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1208ea27-b9bc-4f7a-a1d7-a6587e0f233b] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:09:06.032 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:09:10.120 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[8bb9beb0-938f-4c3a-9537-3fb1965ef156] received
+2026-02-24 16:09:10.122 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [8bb9beb0-938f-4c3a-9537-3fb1965ef156]
+2026-02-24 16:09:10.130 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:09:10.180 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:09:12.247 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [8bb9beb0-938f-4c3a-9537-3fb1965ef156]
+2026-02-24 16:09:12.254 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[8bb9beb0-938f-4c3a-9537-3fb1965ef156] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:11:06.031 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:11:10.136 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[625b3c40-b6dd-497e-9222-b7174f39c573] received
+2026-02-24 16:11:10.137 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [625b3c40-b6dd-497e-9222-b7174f39c573]
+2026-02-24 16:11:10.142 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:11:10.192 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:11:12.281 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [625b3c40-b6dd-497e-9222-b7174f39c573]
+2026-02-24 16:11:12.287 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[625b3c40-b6dd-497e-9222-b7174f39c573] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:13:03.906 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task check-proxies-every-2-hours (tasks.check_proxies)
+2026-02-24 16:13:06.031 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:13:08.048 | INFO     | Celery | logging:callHandlers:1706 - Task tasks.check_proxies[f95e9641-adf5-4da4-b5f4-a35a9cf24f1d] received
+2026-02-24 16:13:08.052 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: tasks.check_proxies [f95e9641-adf5-4da4-b5f4-a35a9cf24f1d]
+2026-02-24 16:13:10.186 | INFO     | Celery | core.celery_events:task_failure_handler:190 - Task Failure: tasks.check_proxies [f95e9641-adf5-4da4-b5f4-a35a9cf24f1d]
+2026-02-24 16:13:10.194 | ERROR    | Celery | logging:callHandlers:1706 - Task tasks.check_proxies[f95e9641-adf5-4da4-b5f4-a35a9cf24f1d] raised unexpected: ConnectionError('Error 22 while writing to socket. 指定的网络名不再可用。.')
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 494, in finish_recv
+    return ov.getresult()
+           │  └ <method 'getresult' of '_overlapped.Overlapped' objects>
+           └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+
+OSError: [WinError 64] 指定的网络名不再可用。
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 543, in send_packed_command
+    await self._writer.drain()
+          │    └ <member '_writer' of 'AbstractConnection' objects>
+          └ <redis.asyncio.connection.Connection(host=localhost,port=6379,db=0)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\streams.py", line 380, in drain
+    raise exc
+          └ ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             │   └ <method 'result' of '_asyncio.Future' objects>
+             └ <_OverlappedFuture finished exception=ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            │        │            │    └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+            │        │            └ 0
+            │        └ 0
+            └ <function IocpProactor.recv_into.<locals>.finish_recv at 0x000001857AA05620>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 498, in finish_recv
+    raise ConnectionResetError(*exc.args)
+
+ConnectionResetError: [WinError 64] 指定的网络名不再可用。
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+> File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 453, in trace_task
+    R = retval = fun(*args, **kwargs)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 736, in __protected_call__
+    return self.run(*args, **kwargs)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\proxy_tasks.py", line 15, in check_proxies_task
+    loop.run_until_complete(proxy_service.check_proxies())
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+
+  File "D:\Code\job\jobCollectionWebApi\services\proxy_service.py", line 161, in check_proxies
+    proxies = await redis.smembers(PROXY_POOL_KEY)
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 55, in call_with_retry
+    raise error
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 554, in send_packed_command
+    raise ConnectionError(
+
+redis.exceptions.ConnectionError: Error 22 while writing to socket. 指定的网络名不再可用。.
+2026-02-24 16:13:10.237 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[4ea43f1b-a424-4d6e-8deb-af2ac54b204e] received
+2026-02-24 16:13:10.238 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [4ea43f1b-a424-4d6e-8deb-af2ac54b204e]
+2026-02-24 16:13:10.243 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:13:10.293 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:13:10.296 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [4ea43f1b-a424-4d6e-8deb-af2ac54b204e]
+2026-02-24 16:13:10.301 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[4ea43f1b-a424-4d6e-8deb-af2ac54b204e] succeeded in 0.062000000005355105s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:15:06.032 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:15:10.104 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[361dd244-6c2c-4dda-a9f3-d7004fa5719f] received
+2026-02-24 16:15:10.105 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [361dd244-6c2c-4dda-a9f3-d7004fa5719f]
+2026-02-24 16:15:10.112 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:15:10.170 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:15:12.226 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [361dd244-6c2c-4dda-a9f3-d7004fa5719f]
+2026-02-24 16:15:12.233 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[361dd244-6c2c-4dda-a9f3-d7004fa5719f] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:17:06.033 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:17:10.136 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[6b66263b-fb16-4d73-b69e-d734f2dc9b70] received
+2026-02-24 16:17:10.137 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [6b66263b-fb16-4d73-b69e-d734f2dc9b70]
+2026-02-24 16:17:10.142 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:17:10.192 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:17:12.279 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [6b66263b-fb16-4d73-b69e-d734f2dc9b70]
+2026-02-24 16:17:12.288 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[6b66263b-fb16-4d73-b69e-d734f2dc9b70] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:19:06.033 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:19:10.140 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[99a68f04-2179-4f6f-937e-2566036d71e3] received
+2026-02-24 16:19:10.142 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [99a68f04-2179-4f6f-937e-2566036d71e3]
+2026-02-24 16:19:10.153 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:19:10.203 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:19:12.268 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [99a68f04-2179-4f6f-937e-2566036d71e3]
+2026-02-24 16:19:12.274 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[99a68f04-2179-4f6f-937e-2566036d71e3] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:21:06.033 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:21:10.129 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[0cae1af0-2556-4e6a-90ac-bcf1af1e05a5] received
+2026-02-24 16:21:10.130 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [0cae1af0-2556-4e6a-90ac-bcf1af1e05a5]
+2026-02-24 16:21:10.137 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:21:10.194 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:21:12.237 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [0cae1af0-2556-4e6a-90ac-bcf1af1e05a5]
+2026-02-24 16:21:12.243 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[0cae1af0-2556-4e6a-90ac-bcf1af1e05a5] succeeded in 2.1089999999967404s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:23:06.033 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:23:10.150 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[fa10d802-7ea3-4361-9cab-a5b4305e5e0e] received
+2026-02-24 16:23:10.151 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [fa10d802-7ea3-4361-9cab-a5b4305e5e0e]
+2026-02-24 16:23:10.158 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:23:10.217 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:23:12.294 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [fa10d802-7ea3-4361-9cab-a5b4305e5e0e]
+2026-02-24 16:23:12.300 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[fa10d802-7ea3-4361-9cab-a5b4305e5e0e] succeeded in 2.1560000000026776s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:25:06.034 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:25:10.106 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3f0639fd-9d56-472e-aedf-4716b04e69ed] received
+2026-02-24 16:25:10.107 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3f0639fd-9d56-472e-aedf-4716b04e69ed]
+2026-02-24 16:25:10.113 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:25:10.165 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:25:12.241 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [3f0639fd-9d56-472e-aedf-4716b04e69ed]
+2026-02-24 16:25:12.271 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[3f0639fd-9d56-472e-aedf-4716b04e69ed] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:27:06.035 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:27:10.130 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[30cf10e7-1ddf-463c-99a3-e388bb57e19c] received
+2026-02-24 16:27:10.131 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [30cf10e7-1ddf-463c-99a3-e388bb57e19c]
+2026-02-24 16:27:10.138 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:27:10.192 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:27:12.257 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [30cf10e7-1ddf-463c-99a3-e388bb57e19c]
+2026-02-24 16:27:12.263 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[30cf10e7-1ddf-463c-99a3-e388bb57e19c] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:29:06.036 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:29:10.102 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[f1a64e61-aa22-4352-986b-fbcc38023e09] received
+2026-02-24 16:29:10.103 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [f1a64e61-aa22-4352-986b-fbcc38023e09]
+2026-02-24 16:29:10.110 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:29:10.166 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:29:12.251 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [f1a64e61-aa22-4352-986b-fbcc38023e09]
+2026-02-24 16:29:12.256 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[f1a64e61-aa22-4352-986b-fbcc38023e09] succeeded in 2.1570000000065193s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:31:06.036 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:31:10.137 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[b7fbb162-a411-4a2f-8556-74ce00edeecf] received
+2026-02-24 16:31:10.139 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [b7fbb162-a411-4a2f-8556-74ce00edeecf]
+2026-02-24 16:31:10.152 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:31:10.202 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:31:12.291 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [b7fbb162-a411-4a2f-8556-74ce00edeecf]
+2026-02-24 16:31:12.305 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[b7fbb162-a411-4a2f-8556-74ce00edeecf] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:33:06.037 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:33:10.100 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[2c4c6917-ef09-4540-9dab-4a7b27662826] received
+2026-02-24 16:33:10.101 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [2c4c6917-ef09-4540-9dab-4a7b27662826]
+2026-02-24 16:33:10.107 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:33:10.157 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:33:12.224 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [2c4c6917-ef09-4540-9dab-4a7b27662826]
+2026-02-24 16:33:12.230 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[2c4c6917-ef09-4540-9dab-4a7b27662826] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:35:06.038 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:35:10.124 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[066e2843-285e-47dd-8cce-7d3254b37e97] received
+2026-02-24 16:35:10.125 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [066e2843-285e-47dd-8cce-7d3254b37e97]
+2026-02-24 16:35:10.131 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:35:10.189 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:35:12.251 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [066e2843-285e-47dd-8cce-7d3254b37e97]
+2026-02-24 16:35:12.275 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[066e2843-285e-47dd-8cce-7d3254b37e97] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:37:06.038 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:37:10.134 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[bef57927-1353-4aae-8462-8e7d04d4b20a] received
+2026-02-24 16:37:10.136 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [bef57927-1353-4aae-8462-8e7d04d4b20a]
+2026-02-24 16:37:10.142 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:37:10.192 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:37:12.246 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [bef57927-1353-4aae-8462-8e7d04d4b20a]
+2026-02-24 16:37:12.252 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[bef57927-1353-4aae-8462-8e7d04d4b20a] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:39:06.039 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:39:10.162 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[4412bdce-3948-4c86-a367-aa56b013e540] received
+2026-02-24 16:39:10.164 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [4412bdce-3948-4c86-a367-aa56b013e540]
+2026-02-24 16:39:10.170 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:39:10.222 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:39:12.306 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [4412bdce-3948-4c86-a367-aa56b013e540]
+2026-02-24 16:39:12.314 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[4412bdce-3948-4c86-a367-aa56b013e540] succeeded in 2.139999999999418s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:41:06.039 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:41:10.132 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[8d4d2630-f738-442f-9466-da06863ae4cb] received
+2026-02-24 16:41:10.134 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [8d4d2630-f738-442f-9466-da06863ae4cb]
+2026-02-24 16:41:10.141 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:41:10.192 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:41:12.270 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [8d4d2630-f738-442f-9466-da06863ae4cb]
+2026-02-24 16:41:12.275 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[8d4d2630-f738-442f-9466-da06863ae4cb] succeeded in 2.139999999999418s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:43:06.040 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:43:10.132 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[e44eb53f-ebd0-4b7d-838c-b37dcdf68834] received
+2026-02-24 16:43:10.134 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [e44eb53f-ebd0-4b7d-838c-b37dcdf68834]
+2026-02-24 16:43:10.138 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:43:10.190 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:43:12.230 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [e44eb53f-ebd0-4b7d-838c-b37dcdf68834]
+2026-02-24 16:43:12.236 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[e44eb53f-ebd0-4b7d-838c-b37dcdf68834] succeeded in 2.1089999999967404s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:45:06.041 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:45:10.143 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[7098ef2d-6b42-4878-bb07-c3f3f4702c88] received
+2026-02-24 16:45:10.145 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [7098ef2d-6b42-4878-bb07-c3f3f4702c88]
+2026-02-24 16:45:10.150 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:45:10.200 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:45:12.281 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [7098ef2d-6b42-4878-bb07-c3f3f4702c88]
+2026-02-24 16:45:12.287 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[7098ef2d-6b42-4878-bb07-c3f3f4702c88] succeeded in 2.1410000000032596s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:47:06.041 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:47:10.126 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1d6e184c-54a6-4ced-991e-7d7acdd8ec2b] received
+2026-02-24 16:47:10.128 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1d6e184c-54a6-4ced-991e-7d7acdd8ec2b]
+2026-02-24 16:47:10.138 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:47:10.188 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:47:12.259 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1d6e184c-54a6-4ced-991e-7d7acdd8ec2b]
+2026-02-24 16:47:12.265 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1d6e184c-54a6-4ced-991e-7d7acdd8ec2b] succeeded in 2.125s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:49:06.042 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:49:10.132 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[d54c5b40-a9ff-471e-aff3-bf059960b76e] received
+2026-02-24 16:49:10.134 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [d54c5b40-a9ff-471e-aff3-bf059960b76e]
+2026-02-24 16:49:10.145 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:49:10.201 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:49:12.280 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [d54c5b40-a9ff-471e-aff3-bf059960b76e]
+2026-02-24 16:49:12.286 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[d54c5b40-a9ff-471e-aff3-bf059960b76e] succeeded in 2.1560000000026776s: {'status': 'success', 'type': 'batch_ai_parse'}
+2026-02-24 16:51:06.042 | INFO     | Celery | logging:callHandlers:1706 - Scheduler: Sending due task fetch-and-parse-jobs-every-2-minutes (jobCollectionWebApi.tasks.job_parser.process_job_parsing_task)
+2026-02-24 16:51:10.129 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1fba4f40-9ffa-43be-83c1-7c3b0568be7a] received
+2026-02-24 16:51:10.130 | INFO     | Celery | core.celery_events:task_started_handler:102 - Task Started: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1fba4f40-9ffa-43be-83c1-7c3b0568be7a]
+2026-02-24 16:51:10.137 | INFO     | Celery | logging:callHandlers:1706 - Start polling for unparsed jobs (limit=10)...
+2026-02-24 16:51:10.191 | INFO     | Celery | logging:callHandlers:1706 - No unparsed jobs found in this polling cycle.
+2026-02-24 16:51:12.271 | INFO     | Celery | core.celery_events:task_success_handler:137 - Task Success: jobCollectionWebApi.tasks.job_parser.process_job_parsing_task [1fba4f40-9ffa-43be-83c1-7c3b0568be7a]
+2026-02-24 16:51:12.276 | INFO     | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[1fba4f40-9ffa-43be-83c1-7c3b0568be7a] succeeded in 2.139999999999418s: {'status': 'success', 'type': 'batch_ai_parse'}
