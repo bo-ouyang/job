@@ -91,10 +91,10 @@ class AnalysisService:
         """获取职位统计数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
         cache_key = f"analysis:stats:v2:{hash(frozenset(filters.items()))}"
         
-        # 1. 直接查询缓存 (暂时禁用用于调试)
-        # cached_result = await redis_manager.get_cache(cache_key)
-        # if cached_result is not None: 
-        #     return cached_result
+        # 1. 直接查询缓存
+        cached_result = await redis_manager.get_cache(cache_key)
+        if cached_result is not None: 
+            return cached_result
             
         # 2. 缓存击穿防护：尝试获取分布式锁 (最多等待 5 秒，锁存活 15 秒)
         lock_key = f"lock:{cache_key}"
@@ -105,9 +105,9 @@ class AnalysisService:
                 return {"salary": [], "skills": [], "industries": [], "total_jobs": 0}
             
             # 3. 拿到锁后，Double Check (DCL)
-            # cached_result = await redis_manager.get_cache(cache_key)
-            # if cached_result is not None:
-            #     return cached_result
+            cached_result = await redis_manager.get_cache(cache_key)
+            if cached_result is not None:
+                return cached_result
 
             # 4. 执行高耗时统计查表
             try:
