@@ -1,0 +1,338 @@
+2026-02-24 08:19:46.646 | ERROR    | Celery | logging:callHandlers:1706 - Database/Batch error: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.DataError'>: invalid input for query argument $2: {'title': 'Summary', 'type': 'string'} (expected str, got dict)
+[SQL: UPDATE jobs SET ai_parsed=$1::INTEGER, ai_summary=$2::VARCHAR, ai_skills=$3::JSONB, ai_benefits=$4::JSONB, updated_at=now() WHERE jobs.id = $5::BIGINT]
+[parameters: (2, {'title': 'Summary', 'type': 'string'}, '{"title": "Skills", "type": "array", "items": ["C", "P"]}', '{"title": "Benefits", "type": "array"}', 518)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi) (Background on this error at: https://sqlalche.me/e/20/7s2a)
+2026-02-24 08:19:46.647 | ERROR    | Celery | logging:callHandlers:1706 - process_job_parsing_task failed: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.DataError'>: invalid input for query argument $2: {'title': 'Summary', 'type': 'string'} (expected str, got dict)
+[SQL: UPDATE jobs SET ai_parsed=$1::INTEGER, ai_summary=$2::VARCHAR, ai_skills=$3::JSONB, ai_benefits=$4::JSONB, updated_at=now() WHERE jobs.id = $5::BIGINT]
+[parameters: (2, {'title': 'Summary', 'type': 'string'}, '{"title": "Skills", "type": "array", "items": ["C", "P"]}', '{"title": "Benefits", "type": "array"}', 518)]
+(Background on this error at: https://sqlalche.me/e/20/dbapi) (Background on this error at: https://sqlalche.me/e/20/7s2a)
+2026-02-24 08:20:46.657 | ERROR    | Celery | core.celery_events:_log:129 - Failed to log task start: Task <Task pending name='Task-660' coro=<task_started_handler.<locals>._log() running at D:\Code\job\jobCollectionWebApi\core\celery_events.py:126> cb=[_run_until_complete_cb() at D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py:181]> got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]> attached to a different loop
+2026-02-24 08:20:46.662 | ERROR    | Celery | logging:callHandlers:1706 - Database/Batch error: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.salary_desc, jobs.boss_name, jobs.boss_title, jobs.boss_avatar, jobs.experience, jobs.education, jobs.location, jobs.area_district, jobs.business_district, jobs.longitude, jobs.latitude, jobs.tags, jobs.welfare, jobs.work_type, jobs.source_site, jobs.source_url, jobs.publish_date, jobs.encrypt_job_id, jobs.job_labels, jobs.company_id, jobs.industry_code, jobs.city_code, jobs.industry_id, jobs.ai_parsed, jobs.ai_summary, jobs.ai_skills, jobs.ai_benefits, jobs.created_at, jobs.updated_at, jobs.is_active, jobs.is_crawl 
+FROM jobs 
+WHERE jobs.is_crawl = $1::INTEGER AND jobs.ai_parsed = $2::INTEGER 
+ LIMIT $3::INTEGER]
+[parameters: (1, 0, 10)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:20:46.665 | ERROR    | Celery | logging:callHandlers:1706 - process_job_parsing_task failed: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.salary_desc, jobs.boss_name, jobs.boss_title, jobs.boss_avatar, jobs.experience, jobs.education, jobs.location, jobs.area_district, jobs.business_district, jobs.longitude, jobs.latitude, jobs.tags, jobs.welfare, jobs.work_type, jobs.source_site, jobs.source_url, jobs.publish_date, jobs.encrypt_job_id, jobs.job_labels, jobs.company_id, jobs.industry_code, jobs.city_code, jobs.industry_id, jobs.ai_parsed, jobs.ai_summary, jobs.ai_skills, jobs.ai_benefits, jobs.created_at, jobs.updated_at, jobs.is_active, jobs.is_crawl 
+FROM jobs 
+WHERE jobs.is_crawl = $1::INTEGER AND jobs.ai_parsed = $2::INTEGER 
+ LIMIT $3::INTEGER]
+[parameters: (1, 0, 10)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:21:38.593 | ERROR    | Celery | core.celery_events:_log:129 - Failed to log task start: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: INSERT INTO task_logs (id, task_id, task_name, status, args, kwargs, result, worker, execution_time, created_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::JSON, $6::JSON, $7::VARCHAR, $8::VARCHAR, $9::FLOAT, now()) RETURNING task_logs.created_at]
+[parameters: (549023063073755136, '60bde398-ba3c-4e29-a828-6ed9e567ada7', 'jobCollectionWebApi.tasks.job_parser.process_job_parsing_task', 'STARTED', '[]', '{}', None, 'celery@DESKTOP-7I2DOLV', None)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:21:46.673 | ERROR    | Celery | core.celery_events:_log:129 - Failed to log task start: Task <Task pending name='Task-728' coro=<task_started_handler.<locals>._log() running at D:\Code\job\jobCollectionWebApi\core\celery_events.py:126> cb=[_run_until_complete_cb() at D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py:181]> got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]> attached to a different loop
+2026-02-24 08:21:46.678 | ERROR    | Celery | logging:callHandlers:1706 - Database/Batch error: Task <Task pending name='Task-730' coro=<_process_batch_job_parsing() running at D:\Code\job\jobCollectionWebApi\tasks\job_parser.py:63> cb=[_run_until_complete_cb() at D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py:181]> got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]> attached to a different loop
+2026-02-24 08:21:46.680 | ERROR    | Celery | logging:callHandlers:1706 - process_job_parsing_task failed: Task <Task pending name='Task-730' coro=<_process_batch_job_parsing() running at D:\Code\job\jobCollectionWebApi\tasks\job_parser.py:63> cb=[_run_until_complete_cb() at D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py:181]> got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]> attached to a different loop
+2026-02-24 08:22:46.688 | ERROR    | Celery | core.celery_events:_log:129 - Failed to log task start: Task <Task pending name='Task-785' coro=<task_started_handler.<locals>._log() running at D:\Code\job\jobCollectionWebApi\core\celery_events.py:126> cb=[_run_until_complete_cb() at D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py:181]> got Future <Future pending cb=[BaseProtocol._on_waiter_completed()]> attached to a different loop
+2026-02-24 08:22:46.694 | ERROR    | Celery | logging:callHandlers:1706 - Database/Batch error: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.salary_desc, jobs.boss_name, jobs.boss_title, jobs.boss_avatar, jobs.experience, jobs.education, jobs.location, jobs.area_district, jobs.business_district, jobs.longitude, jobs.latitude, jobs.tags, jobs.welfare, jobs.work_type, jobs.source_site, jobs.source_url, jobs.publish_date, jobs.encrypt_job_id, jobs.job_labels, jobs.company_id, jobs.industry_code, jobs.city_code, jobs.industry_id, jobs.ai_parsed, jobs.ai_summary, jobs.ai_skills, jobs.ai_benefits, jobs.created_at, jobs.updated_at, jobs.is_active, jobs.is_crawl 
+FROM jobs 
+WHERE jobs.is_crawl = $1::INTEGER AND jobs.ai_parsed = $2::INTEGER 
+ LIMIT $3::INTEGER]
+[parameters: (1, 0, 10)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:22:46.696 | ERROR    | Celery | logging:callHandlers:1706 - process_job_parsing_task failed: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.salary_desc, jobs.boss_name, jobs.boss_title, jobs.boss_avatar, jobs.experience, jobs.education, jobs.location, jobs.area_district, jobs.business_district, jobs.longitude, jobs.latitude, jobs.tags, jobs.welfare, jobs.work_type, jobs.source_site, jobs.source_url, jobs.publish_date, jobs.encrypt_job_id, jobs.job_labels, jobs.company_id, jobs.industry_code, jobs.city_code, jobs.industry_id, jobs.ai_parsed, jobs.ai_summary, jobs.ai_skills, jobs.ai_benefits, jobs.created_at, jobs.updated_at, jobs.is_active, jobs.is_crawl 
+FROM jobs 
+WHERE jobs.is_crawl = $1::INTEGER AND jobs.ai_parsed = $2::INTEGER 
+ LIMIT $3::INTEGER]
+[parameters: (1, 0, 10)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:22:46.716 | ERROR    | Celery | core.celery_events:_log:225 - Failed to log task failure: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT task_logs.id, task_logs.task_id, task_logs.task_name, task_logs.status, task_logs.args, task_logs.kwargs, task_logs.result, task_logs.worker, task_logs.execution_time, task_logs.created_at 
+FROM task_logs 
+WHERE task_logs.task_id = $1::VARCHAR]
+[parameters: ('70a57fda-e51c-4d69-a6da-179245da0998',)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:22:46.718 | ERROR    | Celery | logging:callHandlers:1706 - Task jobCollectionWebApi.tasks.job_parser.process_job_parsing_task[70a57fda-e51c-4d69-a6da-179245da0998] raised unexpected: InterfaceError("(sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress")
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 848, in _start_transaction
+    await self._transaction.start()
+          │    └ <member '_transaction' of 'AsyncAdapt_asyncpg_connection' objects>
+          └ <AdaptedConnection <asyncpg.connection.Connection object at 0x0000018579986110>>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\asyncpg\transaction.py", line 146, in start
+    await self._connection.execute(query)
+          │    │                   └ 'SAVEPOINT __asyncpg_savepoint_2c__;'
+          │    └ <member '_connection' of 'Transaction' objects>
+          └ <asyncpg.Transaction state:failed 0x1857a7ff060>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\asyncpg\connection.py", line 354, in execute
+    result = await self._protocol.query(query, timeout)
+                   │    │               │      └ None
+                   │    │               └ 'SAVEPOINT __asyncpg_savepoint_2c__;'
+                   │    └ <member '_protocol' of 'Connection' objects>
+                   └ <asyncpg.connection.Connection object at 0x0000018579986110>
+  File "asyncpg/protocol/protocol.pyx", line 354, in query
+  File "asyncpg/protocol/protocol.pyx", line 735, in asyncpg.protocol.protocol.BaseProtocol._check_state
+
+asyncpg.exceptions._base.InterfaceError: cannot perform operation: another operation is in progress
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    │    │       └ <function DefaultDialect.do_execute at 0x0000018573427BA0>
+    │    └ <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x000001857482E050>
+    └ <sqlalchemy.engine.base.Connection object at 0x000001857A919610>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+    │      │       │          └ (1, 0, 10)
+    │      │       └ 'SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.sa...
+    │      └ <function AsyncAdapt_asyncpg_cursor.execute at 0x000001857496F7E0>
+    └ <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000018579C15540>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    │    └ <member '_adapt_connection' of 'AsyncAdapt_asyncpg_cursor' objects>
+    └ <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x0000018579C15540>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           │       │             └ <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000018579F369E0>
+           │       └ <attribute 'parent' of 'greenlet.greenlet' objects>
+           └ <_AsyncIoGreenlet object at 0x000001857A9190C0 (otid=0x0000018577951D40) dead>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+                  └ <coroutine object AsyncAdapt_asyncpg_cursor._prepare_and_execute at 0x0000018579F369E0>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 520, in _prepare_and_execute
+    await adapt_connection._start_transaction()
+          │                └ <function AsyncAdapt_asyncpg_connection._start_transaction at 0x0000018574970900>
+          └ <AdaptedConnection <asyncpg.connection.Connection object at 0x0000018579986110>>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 850, in _start_transaction
+    self._handle_exception(error)
+    │    └ <function AsyncAdapt_asyncpg_connection._handle_exception at 0x0000018574970540>
+    └ <AdaptedConnection <asyncpg.connection.Connection object at 0x0000018579986110>>
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+          │                     └ InterfaceError('cannot perform operation: another operation is in progress')
+          └ InterfaceError("<class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress")
+
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.InterfaceError: <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+> File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 453, in trace_task
+    R = retval = fun(*args, **kwargs)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 736, in __protected_call__
+    return self.run(*args, **kwargs)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\job_parser.py", line 158, in process_job_parsing_task
+    self.retry(exc=exc, countdown=60) # 60秒后重试
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\task.py", line 743, in retry
+    raise_with_context(exc)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\job_parser.py", line 154, in process_job_parsing_task
+    loop.run_until_complete(_process_batch_job_parsing(limit=10))
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\job_parser.py", line 63, in _process_batch_job_parsing
+    result = await session.execute(stmt)
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 449, in execute
+    result = await greenlet_spawn(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\orm\session.py", line 2351, in execute
+    return self._execute_internal(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\orm\session.py", line 2249, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\orm\context.py", line 306, in orm_execute_statement
+    result = conn.execute(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\sql\elements.py", line 526, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\engine\default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 520, in _prepare_and_execute
+    await adapt_connection._start_transaction()
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 850, in _start_transaction
+    self._handle_exception(error)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+
+sqlalchemy.exc.InterfaceError: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: SELECT jobs.id, jobs.title, jobs.description, jobs.requirements, jobs.salary_min, jobs.salary_max, jobs.salary_unit, jobs.salary_desc, jobs.boss_name, jobs.boss_title, jobs.boss_avatar, jobs.experience, jobs.education, jobs.location, jobs.area_district, jobs.business_district, jobs.longitude, jobs.latitude, jobs.tags, jobs.welfare, jobs.work_type, jobs.source_site, jobs.source_url, jobs.publish_date, jobs.encrypt_job_id, jobs.job_labels, jobs.company_id, jobs.industry_code, jobs.city_code, jobs.industry_id, jobs.ai_parsed, jobs.ai_summary, jobs.ai_skills, jobs.ai_benefits, jobs.created_at, jobs.updated_at, jobs.is_active, jobs.is_crawl 
+FROM jobs 
+WHERE jobs.is_crawl = $1::INTEGER AND jobs.ai_parsed = $2::INTEGER 
+ LIMIT $3::INTEGER]
+[parameters: (1, 0, 10)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 08:23:38.580 | ERROR    | Celery | core.celery_events:_log:129 - Failed to log task start: (sqlalchemy.dialects.postgresql.asyncpg.InterfaceError) <class 'asyncpg.exceptions._base.InterfaceError'>: cannot perform operation: another operation is in progress
+[SQL: INSERT INTO task_logs (id, task_id, task_name, status, args, kwargs, result, worker, execution_time, created_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::JSON, $6::JSON, $7::VARCHAR, $8::VARCHAR, $9::FLOAT, now()) RETURNING task_logs.created_at]
+[parameters: (549023566335709184, '0d2a01d3-7752-4b83-a49b-a5abb048679b', 'jobCollectionWebApi.tasks.job_parser.process_job_parsing_task', 'STARTED', '[]', '{}', None, 'celery@DESKTOP-7I2DOLV', None)]
+(Background on this error at: https://sqlalche.me/e/20/rvf5)
+2026-02-24 12:13:23.017 | ERROR    | Celery | logging:callHandlers:1706 - Task tasks.check_proxies[d1f28a2c-3583-4374-a9bc-0e3d8272edec] raised unexpected: ConnectionError('Error 22 while writing to socket. 指定的网络名不再可用。.')
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 494, in finish_recv
+    return ov.getresult()
+           │  └ <method 'getresult' of '_overlapped.Overlapped' objects>
+           └ <_overlapped.Overlapped object at 0x0000018579AA98F0>
+
+OSError: [WinError 64] 指定的网络名不再可用。
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 543, in send_packed_command
+    await self._writer.drain()
+          │    └ <member '_writer' of 'AbstractConnection' objects>
+          └ <redis.asyncio.connection.Connection(host=localhost,port=6379,db=0)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\streams.py", line 380, in drain
+    raise exc
+          └ ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             │   └ <method 'result' of '_asyncio.Future' objects>
+             └ <_OverlappedFuture finished exception=ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            │        │            │    └ <_overlapped.Overlapped object at 0x0000018579AA98F0>
+            │        │            └ 0
+            │        └ 0
+            └ <function IocpProactor.recv_into.<locals>.finish_recv at 0x0000018579D17D80>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 498, in finish_recv
+    raise ConnectionResetError(*exc.args)
+
+ConnectionResetError: [WinError 64] 指定的网络名不再可用。
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+> File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 453, in trace_task
+    R = retval = fun(*args, **kwargs)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 736, in __protected_call__
+    return self.run(*args, **kwargs)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\proxy_tasks.py", line 15, in check_proxies_task
+    loop.run_until_complete(proxy_service.check_proxies())
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+
+  File "D:\Code\job\jobCollectionWebApi\services\proxy_service.py", line 161, in check_proxies
+    proxies = await redis.smembers(PROXY_POOL_KEY)
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 55, in call_with_retry
+    raise error
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 554, in send_packed_command
+    raise ConnectionError(
+
+redis.exceptions.ConnectionError: Error 22 while writing to socket. 指定的网络名不再可用。.
+2026-02-24 16:13:10.194 | ERROR    | Celery | logging:callHandlers:1706 - Task tasks.check_proxies[f95e9641-adf5-4da4-b5f4-a35a9cf24f1d] raised unexpected: ConnectionError('Error 22 while writing to socket. 指定的网络名不再可用。.')
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 494, in finish_recv
+    return ov.getresult()
+           │  └ <method 'getresult' of '_overlapped.Overlapped' objects>
+           └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+
+OSError: [WinError 64] 指定的网络名不再可用。
+
+
+During handling of the above exception, another exception occurred:
+
+
+Traceback (most recent call last):
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 543, in send_packed_command
+    await self._writer.drain()
+          │    └ <member '_writer' of 'AbstractConnection' objects>
+          └ <redis.asyncio.connection.Connection(host=localhost,port=6379,db=0)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\streams.py", line 380, in drain
+    raise exc
+          └ ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\proactor_events.py", line 286, in _loop_reading
+    length = fut.result()
+             │   └ <method 'result' of '_asyncio.Future' objects>
+             └ <_OverlappedFuture finished exception=ConnectionResetError(22, '指定的网络名不再可用。', None, 64, None)>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            │        │            │    └ <_overlapped.Overlapped object at 0x000001857A4D7930>
+            │        │            └ 0
+            │        └ 0
+            └ <function IocpProactor.recv_into.<locals>.finish_recv at 0x000001857AA05620>
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\windows_events.py", line 498, in finish_recv
+    raise ConnectionResetError(*exc.args)
+
+ConnectionResetError: [WinError 64] 指定的网络名不再可用。
+
+
+The above exception was the direct cause of the following exception:
+
+
+Traceback (most recent call last):
+
+> File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 453, in trace_task
+    R = retval = fun(*args, **kwargs)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\celery\app\trace.py", line 736, in __protected_call__
+    return self.run(*args, **kwargs)
+
+  File "D:\Code\job\jobCollectionWebApi\tasks\proxy_tasks.py", line 15, in check_proxies_task
+    loop.run_until_complete(proxy_service.check_proxies())
+
+  File "D:\minicanda\mini\envs\job\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+
+  File "D:\Code\job\jobCollectionWebApi\services\proxy_service.py", line 161, in check_proxies
+    proxies = await redis.smembers(PROXY_POOL_KEY)
+
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 55, in call_with_retry
+    raise error
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\minicanda\mini\envs\job\Lib\site-packages\redis\asyncio\connection.py", line 554, in send_packed_command
+    raise ConnectionError(
+
+redis.exceptions.ConnectionError: Error 22 while writing to socket. 指定的网络名不再可用。.

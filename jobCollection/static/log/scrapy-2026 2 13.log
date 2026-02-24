@@ -1,0 +1,394 @@
+2026-02-13 19:38:10 [scrapy.utils.log] INFO: Scrapy 2.14.0 started (bot: jobCollection)
+2026-02-13 19:38:10 [scrapy.utils.log] INFO: Versions:
+{'lxml': '6.0.2',
+ 'libxml2': '2.11.9',
+ 'cssselect': '1.3.0',
+ 'parsel': '1.10.0',
+ 'w3lib': '2.3.1',
+ 'Twisted': '25.5.0',
+ 'Python': '3.11.14 | packaged by Anaconda, Inc. | (main, Oct 21 2025, '
+           '18:30:03) [MSC v.1929 64 bit (AMD64)]',
+ 'pyOpenSSL': '24.3.0 (OpenSSL 3.4.1 11 Feb 2025)',
+ 'cryptography': '44.0.3',
+ 'Platform': 'Windows-10-10.0.19045-SP0'}
+2026-02-13 19:38:10 [boss_monitor] INFO: Initialized boss_monitor with Task File: task_status.json
+2026-02-13 19:38:10 [scrapy.addons] INFO: Enabled addons:
+[]
+2026-02-13 19:38:10 [scrapy.extensions.telnet] INFO: Telnet Password: 75143ca1ca50296d
+2026-02-13 19:38:11 [scrapy.middleware] INFO: Enabled extensions:
+['scrapy.extensions.corestats.CoreStats',
+ 'scrapy.extensions.logcount.LogCount',
+ 'scrapy.extensions.telnet.TelnetConsole',
+ 'scrapy.extensions.logstats.LogStats']
+2026-02-13 19:38:11 [scrapy.crawler] INFO: Overridden settings:
+{'ASYNCIO_EVENT_LOOP': 'asyncio.SelectorEventLoop',
+ 'BOT_NAME': 'jobCollection',
+ 'CONCURRENT_REQUESTS': 1,
+ 'DOWNLOAD_TIMEOUT': 1800,
+ 'FEED_EXPORT_ENCODING': 'utf-8',
+ 'LOG_FILE': 'D:\\Code\\job\\jobCollection/static/log/scrapy-2026 2 13.log',
+ 'LOG_LEVEL': 'INFO',
+ 'NEWSPIDER_MODULE': 'jobCollection.spiders',
+ 'SPIDER_MODULES': ['jobCollection.spiders'],
+ 'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+               '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+2026-02-13 19:38:11 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\downloadermiddlewares\httpcompression.py:45: UserWarning: You have brotli installed. But 'br' encoding support now requires brotli's or brotlicffi's version >= 1.2.0. Please upgrade brotli/brotlicffi to make Scrapy decode 'br' encoded responses.
+  warnings.warn(
+
+2026-02-13 19:38:11 [scrapy.middleware] INFO: Enabled downloader middlewares:
+['scrapy.downloadermiddlewares.offsite.OffsiteMiddleware',
+ 'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
+ 'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
+ 'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware',
+ 'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware',
+ 'scrapy.downloadermiddlewares.retry.RetryMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware',
+ 'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware',
+ 'scrapy.downloadermiddlewares.cookies.CookiesMiddleware',
+ 'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware',
+ 'scrapy.downloadermiddlewares.stats.DownloaderStats']
+2026-02-13 19:38:11 [scrapy.middleware] INFO: Enabled spider middlewares:
+['scrapy.spidermiddlewares.start.StartSpiderMiddleware',
+ 'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware',
+ 'scrapy.spidermiddlewares.referer.RefererMiddleware',
+ 'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
+ 'scrapy.spidermiddlewares.depth.DepthMiddleware']
+2026-02-13 19:38:11 [scrapy.middleware] INFO: Enabled item pipelines:
+['jobCollection.pipelines.redis_dedup_pipeline.RedisDeduplicationPipeline',
+ 'jobCollection.pipelines.boss_pipeline.BossJobPipeline']
+2026-02-13 19:38:11 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\pipelines\__init__.py:41: ScrapyDeprecationWarning: RedisDeduplicationPipeline.open_spider() requires a spider argument, this is deprecated and the argument will not be passed in future Scrapy versions. If you need to access the spider instance you can save the crawler instance passed to from_crawler() and use its spider attribute.
+  self._check_mw_method_spider_arg(pipe.open_spider)
+
+2026-02-13 19:38:11 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\pipelines\__init__.py:47: ScrapyDeprecationWarning: RedisDeduplicationPipeline.process_item() requires a spider argument, this is deprecated and the argument will not be passed in future Scrapy versions. If you need to access the spider instance you can save the crawler instance passed to from_crawler() and use its spider attribute.
+  self._check_mw_method_spider_arg(pipe.process_item)
+
+2026-02-13 19:38:11 [scrapy.core.engine] INFO: Spider opened
+2026-02-13 19:38:13 [jobCollection.pipelines.redis_dedup_pipeline] INFO: Redis Bloom Filter Connected. Key: boss:bloomfilter:boss_monitor:20260213193813 Size: 2^26 (8.00 MB)
+2026-02-13 19:38:13 [common.databases.PostgresManager] INFO: All database tables created successfully
+2026-02-13 19:38:13 [common.databases.PostgresManager] INFO: PostgreSQL connection initialized successfully
+2026-02-13 19:38:13 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2026-02-13 19:38:13 [scrapy.extensions.telnet] INFO: Telnet console listening on 127.0.0.1:6023
+2026-02-13 19:38:13 [boss_monitor] INFO: Starting boss_monitor components...
+2026-02-13 19:38:13 [boss_monitor] INFO: Found mitmdump at: D:\minicanda\mini\envs\job\Scripts\mitmdump.exe
+2026-02-13 19:38:13 [boss_monitor] INFO: Upstream Proxy is DISABLED in settings. Proceeding with direct connection.
+2026-02-13 19:38:13 [boss_monitor] INFO: Starting Mitmproxy: D:\minicanda\mini\envs\job\Scripts\mitmdump.exe -s D:\Code\job\jobCollection\boss_mitm_addon.py -p 8888 -q --ssl-insecure
+2026-02-13 19:38:13 [boss_monitor] INFO: =================================================
+2026-02-13 19:38:13 [boss_monitor] INFO:    Mitmproxy Started (boss_monitor)             
+2026-02-13 19:38:13 [boss_monitor] INFO:    Listening for Data via Redis Queue            
+2026-02-13 19:38:13 [boss_monitor] INFO: =================================================
+2026-02-13 19:38:15 [boss_monitor] INFO: Assigning New Task: [5263] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101011
+2026-02-13 19:38:15 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101011 (ReqID: a100b2e8c916e27a0cab7f00c2d01a4a)
+2026-02-13 19:38:24 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:38:24 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:38:24 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:38:24 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.InvalidColumnReferenceError'>: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[SQL: INSERT INTO company (id, source_id, name, industry, scale, stage, logo, created_at, updated_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::TIMESTAMP WITHOUT TIME ZONE, $9::TIMESTAMP WITHOUT TIME ZONE), ($10::BIGINT, $11::VARCHAR, $12::VARCHAR, $13::VARCHAR, $14::VARCHAR, $15::VARCHAR, $16::VARCHAR, $17::TIMESTAMP WITHOUT TIME ZONE, $18::TIMESTAMP WITHOUT TIME ZONE), ($19::BIGINT, $20::VARCHAR, $21::VARCHAR, $22::VARCHAR, $23::VARCHAR, $24::VARCHAR, $25::VARCHAR, $26::TIMESTAMP WITHOUT TIME ZONE, $27::TIMESTAMP WITHOUT TIME ZONE), ($28::BIGINT, $29::VARCHAR, $30::VARCHAR, $31::VARCHAR, $32::VARCHAR, $33::VARCHAR, $34::VARCHAR, $35::TIMESTAMP WITHOUT TIME ZONE, $36::TIMESTAMP WITHOUT TIME ZONE), ($37::BIGINT, $38::VARCHAR, $39::VARCHAR, $40::VARCHAR, $41::VARCHAR, $42::VARCHAR, $43::VARCHAR, $44::TIMESTAMP WITHOUT TIME ZONE, $45::TIMESTAMP WITHOUT TIME ZONE), ($46::BIGINT, $47::VARCHAR, $48::VARCHAR, $49::VARCHAR, $50::VARCHAR, $51::VARCHAR, $52::VARCHAR, $53::TIMESTAMP WITHOUT TIME ZONE, $54::TIMESTAMP WITHOUT TIME ZONE), ($55::BIGINT, $56::VARCHAR, $57::VARCHAR, $58::VARCHAR, $59::VARCHAR, $60::VARCHAR, $61::VARCHAR, $62::TIMESTAMP WITHOUT TIME ZONE, $63::TIMESTAMP WITHOUT TIME ZONE), ($64::BIGINT, $65::VARCHAR, $66::VARCHAR, $67::VARCHAR, $68::VARCHAR, $69::VARCHAR, $70::VARCHAR, $71::TIMESTAMP WITHOUT TIME ZONE, $72::TIMESTAMP WITHOUT TIME ZONE), ($73::BIGINT, $74::VARCHAR, $75::VARCHAR, $76::VARCHAR, $77::VARCHAR, $78::VARCHAR, $79::VARCHAR, $80::TIMESTAMP WITHOUT TIME ZONE, $81::TIMESTAMP WITHOUT TIME ZONE), ($82::BIGINT, $83::VARCHAR, $84::VARCHAR, $85::VARCHAR, $86::VARCHAR, $87::VARCHAR, $88::VARCHAR, $89::TIMESTAMP WITHOUT TIME ZONE, $90::TIMESTAMP WITHOUT TIME ZONE), ($91::BIGINT, $92::VARCHAR, $93::VARCHAR, $94::VARCHAR, $95::VARCHAR, $96::VARCHAR, $97::VARCHAR, $98::TIMESTAMP WITHOUT TIME ZONE, $99::TIMESTAMP WITHOUT TIME ZONE), ($100::BIGINT, $101::VARCHAR, $102::VARCHAR, $103::VARCHAR, $104::VARCHAR, $105::VARCHAR, $106::VARCHAR, $107::TIMESTAMP WITHOUT TIME ZONE, $108::TIMESTAMP WITHOUT TIME ZONE) ON CONFLICT (source_id) DO UPDATE SET name = excluded.name, updated_at = $109::TIMESTAMP WITHOUT TIME ZONE]
+[parameters: (545207111047581696, 'cc4bb7939e2c9abe1HB-2t6-GFY~', '象形销售', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776000, '4fdadf3b56b943d503B43dW9FFM~', '百事通', '批发/零售', '20-99人', '未融资', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776001, 'd716bd137ccf89f11XZz29q4GVA~', '得乐信息科技', '批发/零售', '100-499人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20250903/7bf6f160950405e9fb7830f01204aaeb323ff0b48de74275a74bd43eceb7193b8781593d45179713.png.webp', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776002, '292125e5e999a8d303V-0tu5Elo~', '济南市茉莉云电子...', '批发/零售', '100-499人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776003, 'e258b2b59f724f880XF53t6-FA~~', '济南嘉德', '批发/零售', '20-99人', '不需要融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20250317/7bf6f160950405e951e8b20691d8e24c89a74f9a87f39fda8f0d99388f7e4bba1eb3f929918f17ea.png.webp', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776004, '5bb378c9236972fe3nF83t69EQ~~', '博纳科技', '批发/零售', '100-499人' ... 9 parameters truncated ... '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776006, '3ce55bb66cae2e330nB82Ny0GA~~', '天鑫达特钢', '批发/零售', '20-99人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20210628/d95f5bc84a802930f9139c460fc9ef4fb35aad866df4211b0b35bfcee617f005.jpg', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776007, 'cea9c6790981a75a1H182tW8FVY~', '山东十月佳丽生物工程', '批发/零售', '500-999人', 'D轮及以上', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776008, 'cf6ae55e516e2d9003F_39i6Els~', '臻视光学', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776009, '5693b2349340a8cd1nZy0ty4GFQ~', '山力新型建材', '批发/零售', '20-99人', '不需要融资', 'https://img.bosszhipin.com/beijin/upload/com/logo/20230221/7b5b554d84f9729c8a94a42c76ad6fb614b750185c17b5b1cf6de71d6986ea3db2eb69c1a5c998b5.jpg', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), 545207111051776010, '811210248888a49e03V40t29Ew~~', '子贡轩', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 724697), datetime.datetime(2026, 2, 13, 19, 38, 24, 727689))]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-02-13 19:38:26 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=2
+2026-02-13 19:38:26 [boss_monitor] INFO: Page 2 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:38:26 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:38:26 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.InvalidColumnReferenceError'>: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[SQL: INSERT INTO company (id, source_id, name, industry, scale, stage, logo, created_at, updated_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::TIMESTAMP WITHOUT TIME ZONE, $9::TIMESTAMP WITHOUT TIME ZONE), ($10::BIGINT, $11::VARCHAR, $12::VARCHAR, $13::VARCHAR, $14::VARCHAR, $15::VARCHAR, $16::VARCHAR, $17::TIMESTAMP WITHOUT TIME ZONE, $18::TIMESTAMP WITHOUT TIME ZONE), ($19::BIGINT, $20::VARCHAR, $21::VARCHAR, $22::VARCHAR, $23::VARCHAR, $24::VARCHAR, $25::VARCHAR, $26::TIMESTAMP WITHOUT TIME ZONE, $27::TIMESTAMP WITHOUT TIME ZONE), ($28::BIGINT, $29::VARCHAR, $30::VARCHAR, $31::VARCHAR, $32::VARCHAR, $33::VARCHAR, $34::VARCHAR, $35::TIMESTAMP WITHOUT TIME ZONE, $36::TIMESTAMP WITHOUT TIME ZONE), ($37::BIGINT, $38::VARCHAR, $39::VARCHAR, $40::VARCHAR, $41::VARCHAR, $42::VARCHAR, $43::VARCHAR, $44::TIMESTAMP WITHOUT TIME ZONE, $45::TIMESTAMP WITHOUT TIME ZONE), ($46::BIGINT, $47::VARCHAR, $48::VARCHAR, $49::VARCHAR, $50::VARCHAR, $51::VARCHAR, $52::VARCHAR, $53::TIMESTAMP WITHOUT TIME ZONE, $54::TIMESTAMP WITHOUT TIME ZONE), ($55::BIGINT, $56::VARCHAR, $57::VARCHAR, $58::VARCHAR, $59::VARCHAR, $60::VARCHAR, $61::VARCHAR, $62::TIMESTAMP WITHOUT TIME ZONE, $63::TIMESTAMP WITHOUT TIME ZONE), ($64::BIGINT, $65::VARCHAR, $66::VARCHAR, $67::VARCHAR, $68::VARCHAR, $69::VARCHAR, $70::VARCHAR, $71::TIMESTAMP WITHOUT TIME ZONE, $72::TIMESTAMP WITHOUT TIME ZONE), ($73::BIGINT, $74::VARCHAR, $75::VARCHAR, $76::VARCHAR, $77::VARCHAR, $78::VARCHAR, $79::VARCHAR, $80::TIMESTAMP WITHOUT TIME ZONE, $81::TIMESTAMP WITHOUT TIME ZONE), ($82::BIGINT, $83::VARCHAR, $84::VARCHAR, $85::VARCHAR, $86::VARCHAR, $87::VARCHAR, $88::VARCHAR, $89::TIMESTAMP WITHOUT TIME ZONE, $90::TIMESTAMP WITHOUT TIME ZONE), ($91::BIGINT, $92::VARCHAR, $93::VARCHAR, $94::VARCHAR, $95::VARCHAR, $96::VARCHAR, $97::VARCHAR, $98::TIMESTAMP WITHOUT TIME ZONE, $99::TIMESTAMP WITHOUT TIME ZONE), ($100::BIGINT, $101::VARCHAR, $102::VARCHAR, $103::VARCHAR, $104::VARCHAR, $105::VARCHAR, $106::VARCHAR, $107::TIMESTAMP WITHOUT TIME ZONE, $108::TIMESTAMP WITHOUT TIME ZONE) ON CONFLICT (source_id) DO UPDATE SET name = excluded.name, updated_at = $109::TIMESTAMP WITHOUT TIME ZONE]
+[parameters: (545207119243251712, '280a34c71c563de403F93d6-E1o~', '德州诚佑生物科技', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251713, '1eb6860a5860a9581HZ-09u4FlM~', '山东锘诚', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251714, 'bd565956a9c6df181HF-09m5EVM~', '济南乐淘网络科技', '批发/零售', '20-99人', '未融资', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251715, '97d5d6d0493fd0d81Hd6392_EVE~', '山东嘉优餐饮管理', '批发/零售', '100-499人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20250219/7bf6f160950405e9e36b0c6112edfd497fddc036ec00af8f24dd5348c76e9ce52ff773485fbbd253.png.webp', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251716, 'cea9c6790981a75a1H182tW8FVY~', '山东十月佳丽生物工程', '批发/零售', '500-999人', 'D轮及以上', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251717, 'e7196c5fcf44bd6e03Z_2tu-GFE~', '山东鼎通钢铁有限公司', '批发/零售', '20-99人' ... 9 parameters truncated ... '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251719, 'f087bdf2a09bd0c703F_2NW6GVQ~', '济南新福达光学眼镜', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251720, 'd716bd137ccf89f11XZz29q4GVA~', '得乐信息科技', '批发/零售', '100-499人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20250903/7bf6f160950405e9fb7830f01204aaeb323ff0b48de74275a74bd43eceb7193b8781593d45179713.png.webp', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251721, '304732fc6dd1b0e41nBy2tm0FFY~', '杏林大药店', '批发/零售', '100-499人', '', 'https://img.bosszhipin.com/beijin/app/mobile/normal-0e3f1e4441a21d4874cece3a3d81f0fe.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251722, '6b7223545b5a24491HNz2NW5FVY~', '山东平海商贸有限公司', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), 545207119243251723, 'ef910de8773d6cce0ndy09y1Eg~~', '文视影音设备', '批发/零售', '0-20人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/logo/20190808/382cb9c487fd7285cdb9331762e37b8a54051febfb9ce4736d495572268321ad.png', datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 681834), datetime.datetime(2026, 2, 13, 19, 38, 26, 682858))]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-02-13 19:38:29 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=3
+2026-02-13 19:38:29 [boss_monitor] INFO: Page 3 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:38:29 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:38:29 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.InvalidColumnReferenceError'>: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[SQL: INSERT INTO company (id, source_id, name, industry, scale, stage, logo, created_at, updated_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR, $8::TIMESTAMP WITHOUT TIME ZONE, $9::TIMESTAMP WITHOUT TIME ZONE), ($10::BIGINT, $11::VARCHAR, $12::VARCHAR, $13::VARCHAR, $14::VARCHAR, $15::VARCHAR, $16::VARCHAR, $17::TIMESTAMP WITHOUT TIME ZONE, $18::TIMESTAMP WITHOUT TIME ZONE), ($19::BIGINT, $20::VARCHAR, $21::VARCHAR, $22::VARCHAR, $23::VARCHAR, $24::VARCHAR, $25::VARCHAR, $26::TIMESTAMP WITHOUT TIME ZONE, $27::TIMESTAMP WITHOUT TIME ZONE), ($28::BIGINT, $29::VARCHAR, $30::VARCHAR, $31::VARCHAR, $32::VARCHAR, $33::VARCHAR, $34::VARCHAR, $35::TIMESTAMP WITHOUT TIME ZONE, $36::TIMESTAMP WITHOUT TIME ZONE), ($37::BIGINT, $38::VARCHAR, $39::VARCHAR, $40::VARCHAR, $41::VARCHAR, $42::VARCHAR, $43::VARCHAR, $44::TIMESTAMP WITHOUT TIME ZONE, $45::TIMESTAMP WITHOUT TIME ZONE), ($46::BIGINT, $47::VARCHAR, $48::VARCHAR, $49::VARCHAR, $50::VARCHAR, $51::VARCHAR, $52::VARCHAR, $53::TIMESTAMP WITHOUT TIME ZONE, $54::TIMESTAMP WITHOUT TIME ZONE), ($55::BIGINT, $56::VARCHAR, $57::VARCHAR, $58::VARCHAR, $59::VARCHAR, $60::VARCHAR, $61::VARCHAR, $62::TIMESTAMP WITHOUT TIME ZONE, $63::TIMESTAMP WITHOUT TIME ZONE), ($64::BIGINT, $65::VARCHAR, $66::VARCHAR, $67::VARCHAR, $68::VARCHAR, $69::VARCHAR, $70::VARCHAR, $71::TIMESTAMP WITHOUT TIME ZONE, $72::TIMESTAMP WITHOUT TIME ZONE), ($73::BIGINT, $74::VARCHAR, $75::VARCHAR, $76::VARCHAR, $77::VARCHAR, $78::VARCHAR, $79::VARCHAR, $80::TIMESTAMP WITHOUT TIME ZONE, $81::TIMESTAMP WITHOUT TIME ZONE), ($82::BIGINT, $83::VARCHAR, $84::VARCHAR, $85::VARCHAR, $86::VARCHAR, $87::VARCHAR, $88::VARCHAR, $89::TIMESTAMP WITHOUT TIME ZONE, $90::TIMESTAMP WITHOUT TIME ZONE), ($91::BIGINT, $92::VARCHAR, $93::VARCHAR, $94::VARCHAR, $95::VARCHAR, $96::VARCHAR, $97::VARCHAR, $98::TIMESTAMP WITHOUT TIME ZONE, $99::TIMESTAMP WITHOUT TIME ZONE), ($100::BIGINT, $101::VARCHAR, $102::VARCHAR, $103::VARCHAR, $104::VARCHAR, $105::VARCHAR, $106::VARCHAR, $107::TIMESTAMP WITHOUT TIME ZONE, $108::TIMESTAMP WITHOUT TIME ZONE), ($109::BIGINT, $110::VARCHAR, $111::VARCHAR, $112::VARCHAR, $113::VARCHAR, $114::VARCHAR, $115::VARCHAR, $116::TIMESTAMP WITHOUT TIME ZONE, $117::TIMESTAMP WITHOUT TIME ZONE), ($118::BIGINT, $119::VARCHAR, $120::VARCHAR, $121::VARCHAR, $122::VARCHAR, $123::VARCHAR, $124::VARCHAR, $125::TIMESTAMP WITHOUT TIME ZONE, $126::TIMESTAMP WITHOUT TIME ZONE) ON CONFLICT (source_id) DO UPDATE SET name = excluded.name, updated_at = $127::TIMESTAMP WITHOUT TIME ZONE]
+[parameters: (545207133042511872, '8afdb924b4ecbba703F90tq6EVo~', '山东新之驰商贸', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511873, 'd1b0424ba24d6cb91XB43Ni9GVQ~', '书坤优选', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511874, 'cea9c6790981a75a1H182tW8FVY~', '山东十月佳丽生物工程', '批发/零售', '500-999人', 'D轮及以上', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511875, '1674d37b9d974cd503R42N24F1I~', '济南星嘉文化传媒', '批发/零售', '20-99人', '未融资', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511876, '212c3c074484817603d63ti9FlU~', '山东钢超物资', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511877, '2a91caaee0ade6911nNz3t-5Elc~', '融钢', '批发/零售', '20-99人' ... 27 parameters truncated ... '未融资', 'https://img.bosszhipin.com/beijin/upload/com/logo/20220205/7b5b554d84f9729c28049be4935e1722d4e99307508e39554b960d78732ed901008bdc8d9dc0e8f1.jpg', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511881, 'ca805f66083ae03a03J72tu1E1E~', '济南市天桥区乐行...', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511882, '8d3a47253d5a5e9703R73dm9GVE~', '济南弘泽商贸服务', '批发/零售', '0-20人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511883, '3ce55bb66cae2e330nB82Ny0GA~~', '天鑫达特钢', '批发/零售', '20-99人', '未融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20210628/d95f5bc84a802930f9139c460fc9ef4fb35aad866df4211b0b35bfcee617f005.jpg', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511884, '811210248888a49e03V40t29Ew~~', '子贡轩', '批发/零售', '20-99人', '', 'https://img.bosszhipin.com/beijin/icon/894ce6fa7e58d64d57e7f22d2f3a9d18afa7fcceaa24b8ea28f56f1bb14732c0.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), 545207133042511885, '7b825b6e7d547d2803B-09-1EA~~', '一本图书', '批发/零售', '500-999人', '不需要融资', 'https://img.bosszhipin.com/beijin/upload/com/workfeel/20230615/7bf6f160950405e97605baf2c4441abb3c8b7f76ae7649e1f597bbd6208b50cc10d4bdbcb723630c.png', datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 970326), datetime.datetime(2026, 2, 13, 19, 38, 29, 971902))]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-02-13 19:39:13 [scrapy.extensions.logstats] INFO: Crawled 265 pages (at 265 pages/min), scraped 45 items (at 45 items/min)
+2026-02-13 19:39:13 [scrapy.extensions.logstats] INFO: Crawled 266 pages (at 1 pages/min), scraped 45 items (at 0 items/min)
+2026-02-13 19:39:45 [scrapy.crawler] INFO: Received SIGINT, shutting down gracefully. Send again to force 
+2026-02-13 19:39:45 [scrapy.core.engine] INFO: Closing spider (shutdown)
+2026-02-13 19:39:45 [boss_monitor] INFO: Closing spider...
+2026-02-13 19:39:45 [scrapy.statscollectors] INFO: Dumping Scrapy stats:
+{'downloader/request_bytes': 118821,
+ 'downloader/request_count': 414,
+ 'downloader/request_method_count/GET': 414,
+ 'downloader/response_bytes': 9525,
+ 'downloader/response_count': 414,
+ 'downloader/response_status_count/200': 414,
+ 'elapsed_time_seconds': 92.366702,
+ 'finish_reason': 'shutdown',
+ 'finish_time': datetime.datetime(2026, 2, 13, 11, 39, 45, 884530, tzinfo=datetime.timezone.utc),
+ 'item_scraped_count': 45,
+ 'items_per_minute': 29.34782608695652,
+ 'log_count/ERROR': 3,
+ 'log_count/INFO': 26,
+ 'request_depth_max': 414,
+ 'response_received_count': 414,
+ 'responses_per_minute': 270.0,
+ 'scheduler/dequeued': 414,
+ 'scheduler/dequeued/memory': 414,
+ 'scheduler/enqueued': 415,
+ 'scheduler/enqueued/memory': 415,
+ 'start_time': datetime.datetime(2026, 2, 13, 11, 38, 13, 517828, tzinfo=datetime.timezone.utc)}
+2026-02-13 19:39:45 [scrapy.core.engine] INFO: Spider closed (shutdown)
+2026-02-13 19:39:52 [scrapy.utils.log] INFO: Scrapy 2.14.0 started (bot: jobCollection)
+2026-02-13 19:39:52 [scrapy.utils.log] INFO: Versions:
+{'lxml': '6.0.2',
+ 'libxml2': '2.11.9',
+ 'cssselect': '1.3.0',
+ 'parsel': '1.10.0',
+ 'w3lib': '2.3.1',
+ 'Twisted': '25.5.0',
+ 'Python': '3.11.14 | packaged by Anaconda, Inc. | (main, Oct 21 2025, '
+           '18:30:03) [MSC v.1929 64 bit (AMD64)]',
+ 'pyOpenSSL': '24.3.0 (OpenSSL 3.4.1 11 Feb 2025)',
+ 'cryptography': '44.0.3',
+ 'Platform': 'Windows-10-10.0.19045-SP0'}
+2026-02-13 19:39:52 [boss_monitor] INFO: Initialized boss_monitor with Task File: task_status.json
+2026-02-13 19:39:52 [scrapy.addons] INFO: Enabled addons:
+[]
+2026-02-13 19:39:52 [scrapy.extensions.telnet] INFO: Telnet Password: 8501301e8150512e
+2026-02-13 19:39:52 [scrapy.middleware] INFO: Enabled extensions:
+['scrapy.extensions.corestats.CoreStats',
+ 'scrapy.extensions.logcount.LogCount',
+ 'scrapy.extensions.telnet.TelnetConsole',
+ 'scrapy.extensions.logstats.LogStats']
+2026-02-13 19:39:52 [scrapy.crawler] INFO: Overridden settings:
+{'ASYNCIO_EVENT_LOOP': 'asyncio.SelectorEventLoop',
+ 'BOT_NAME': 'jobCollection',
+ 'CONCURRENT_REQUESTS': 1,
+ 'DOWNLOAD_TIMEOUT': 1800,
+ 'FEED_EXPORT_ENCODING': 'utf-8',
+ 'LOG_FILE': 'D:\\Code\\job\\jobCollection/static/log/scrapy-2026 2 13.log',
+ 'LOG_LEVEL': 'INFO',
+ 'NEWSPIDER_MODULE': 'jobCollection.spiders',
+ 'SPIDER_MODULES': ['jobCollection.spiders'],
+ 'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+               '(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+2026-02-13 19:39:52 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\downloadermiddlewares\httpcompression.py:45: UserWarning: You have brotli installed. But 'br' encoding support now requires brotli's or brotlicffi's version >= 1.2.0. Please upgrade brotli/brotlicffi to make Scrapy decode 'br' encoded responses.
+  warnings.warn(
+
+2026-02-13 19:39:52 [scrapy.middleware] INFO: Enabled downloader middlewares:
+['scrapy.downloadermiddlewares.offsite.OffsiteMiddleware',
+ 'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
+ 'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
+ 'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware',
+ 'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware',
+ 'scrapy.downloadermiddlewares.retry.RetryMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware',
+ 'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware',
+ 'scrapy.downloadermiddlewares.cookies.CookiesMiddleware',
+ 'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware',
+ 'scrapy.downloadermiddlewares.stats.DownloaderStats']
+2026-02-13 19:39:52 [scrapy.middleware] INFO: Enabled spider middlewares:
+['scrapy.spidermiddlewares.start.StartSpiderMiddleware',
+ 'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware',
+ 'scrapy.spidermiddlewares.referer.RefererMiddleware',
+ 'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
+ 'scrapy.spidermiddlewares.depth.DepthMiddleware']
+2026-02-13 19:39:52 [scrapy.middleware] INFO: Enabled item pipelines:
+['jobCollection.pipelines.redis_dedup_pipeline.RedisDeduplicationPipeline',
+ 'jobCollection.pipelines.boss_pipeline.BossJobPipeline']
+2026-02-13 19:39:52 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\pipelines\__init__.py:41: ScrapyDeprecationWarning: RedisDeduplicationPipeline.open_spider() requires a spider argument, this is deprecated and the argument will not be passed in future Scrapy versions. If you need to access the spider instance you can save the crawler instance passed to from_crawler() and use its spider attribute.
+  self._check_mw_method_spider_arg(pipe.open_spider)
+
+2026-02-13 19:39:52 [py.warnings] WARNING: D:\minicanda\mini\envs\job\Lib\site-packages\scrapy\pipelines\__init__.py:47: ScrapyDeprecationWarning: RedisDeduplicationPipeline.process_item() requires a spider argument, this is deprecated and the argument will not be passed in future Scrapy versions. If you need to access the spider instance you can save the crawler instance passed to from_crawler() and use its spider attribute.
+  self._check_mw_method_spider_arg(pipe.process_item)
+
+2026-02-13 19:39:52 [scrapy.core.engine] INFO: Spider opened
+2026-02-13 19:39:54 [jobCollection.pipelines.redis_dedup_pipeline] INFO: Redis Bloom Filter Connected. Key: boss:bloomfilter:boss_monitor:20260213193954 Size: 2^26 (8.00 MB)
+2026-02-13 19:39:54 [common.databases.PostgresManager] INFO: All database tables created successfully
+2026-02-13 19:39:54 [common.databases.PostgresManager] INFO: PostgreSQL connection initialized successfully
+2026-02-13 19:39:54 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2026-02-13 19:39:54 [scrapy.extensions.telnet] INFO: Telnet console listening on 127.0.0.1:6023
+2026-02-13 19:39:54 [boss_monitor] INFO: Starting boss_monitor components...
+2026-02-13 19:39:54 [boss_monitor] INFO: Found mitmdump at: D:\minicanda\mini\envs\job\Scripts\mitmdump.exe
+2026-02-13 19:39:54 [boss_monitor] INFO: Upstream Proxy is DISABLED in settings. Proceeding with direct connection.
+2026-02-13 19:39:54 [boss_monitor] INFO: Starting Mitmproxy: D:\minicanda\mini\envs\job\Scripts\mitmdump.exe -s D:\Code\job\jobCollection\boss_mitm_addon.py -p 8888 -q --ssl-insecure
+2026-02-13 19:39:54 [boss_monitor] INFO: =================================================
+2026-02-13 19:39:54 [boss_monitor] INFO:    Mitmproxy Started (boss_monitor)             
+2026-02-13 19:39:54 [boss_monitor] INFO:    Listening for Data via Redis Queue            
+2026-02-13 19:39:54 [boss_monitor] INFO: =================================================
+2026-02-13 19:39:57 [boss_monitor] INFO: Assigning New Task: [5264] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101012
+2026-02-13 19:39:57 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101012 (ReqID: 7150c78f2c2b846aabebcf0d9c536986)
+2026-02-13 19:40:03 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:40:03 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:03 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:04 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:05 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:40:05 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:05 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:05 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: 'NoneType' object has no attribute 'get'
+2026-02-13 19:40:07 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=2
+2026-02-13 19:40:07 [boss_monitor] INFO: Page 2 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:07 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:07 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: 'NoneType' object has no attribute 'get'
+2026-02-13 19:40:15 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=3
+2026-02-13 19:40:15 [boss_monitor] INFO: Page 3 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:15 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:16 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: 'NoneType' object has no attribute 'get'
+2026-02-13 19:40:19 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=4
+2026-02-13 19:40:19 [boss_monitor] INFO: Page 4 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:19 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:19 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:35 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=5
+2026-02-13 19:40:35 [boss_monitor] INFO: Page 5 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:35 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:36 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:37 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=6
+2026-02-13 19:40:37 [boss_monitor] INFO: Page 6 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:37 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:38 [jobCollection.pipelines.boss_pipeline] ERROR: Flush error: 'NoneType' object has no attribute 'get'
+2026-02-13 19:40:40 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=7
+2026-02-13 19:40:40 [boss_monitor] INFO: Page 7 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:40 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:40 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:51 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=8
+2026-02-13 19:40:51 [boss_monitor] INFO: Page 8 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:51 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:51 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:54 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=9
+2026-02-13 19:40:54 [boss_monitor] INFO: Page 9 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:54 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:54 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:40:54 [scrapy.extensions.logstats] INFO: Crawled 266 pages (at 266 pages/min), scraped 150 items (at 150 items/min)
+2026-02-13 19:40:57 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=10
+2026-02-13 19:40:57 [boss_monitor] INFO: Page 10 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:40:57 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:40:58 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:01 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=11
+2026-02-13 19:41:01 [boss_monitor] INFO: Page 11 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:01 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:01 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:04 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=12
+2026-02-13 19:41:04 [boss_monitor] INFO: Page 12 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:04 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:04 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:06 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=13
+2026-02-13 19:41:06 [boss_monitor] INFO: Page 13 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:06 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:06 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:08 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=14
+2026-02-13 19:41:08 [boss_monitor] INFO: Page 14 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:08 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:08 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:10 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=15
+2026-02-13 19:41:10 [boss_monitor] INFO: Page 15 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:10 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:10 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:11 [boss_monitor] INFO: Received List: 2 jobs. has_more=False, page=16
+2026-02-13 19:41:11 [boss_monitor] INFO: No more pages (has_more=False). Task Done.
+2026-02-13 19:41:11 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:11 [boss_monitor] INFO: Assigning New Task: [5265] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101001
+2026-02-13 19:41:11 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101001 (ReqID: 861a1ca4810fab6e77e33024d65764fe)
+2026-02-13 19:41:12 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 2 jobs.
+2026-02-13 19:41:17 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:41:17 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:17 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:17 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:18 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=2
+2026-02-13 19:41:18 [boss_monitor] INFO: Page 2 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:18 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:18 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:21 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=3
+2026-02-13 19:41:21 [boss_monitor] INFO: Page 3 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:21 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:21 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:25 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=4
+2026-02-13 19:41:25 [boss_monitor] INFO: Page 4 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:25 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:25 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:28 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=5
+2026-02-13 19:41:28 [boss_monitor] INFO: Page 5 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:28 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:28 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:31 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=6
+2026-02-13 19:41:31 [boss_monitor] INFO: Page 6 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:31 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:31 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:34 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=7
+2026-02-13 19:41:34 [boss_monitor] INFO: Page 7 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:34 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:35 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:38 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=8
+2026-02-13 19:41:38 [boss_monitor] INFO: Page 8 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:38 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:38 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:41 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=9
+2026-02-13 19:41:41 [boss_monitor] INFO: Page 9 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:41 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:41 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:44 [boss_monitor] INFO: Received List: 5 jobs. has_more=False, page=10
+2026-02-13 19:41:44 [boss_monitor] INFO: No more pages (has_more=False). Task Done.
+2026-02-13 19:41:44 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:44 [boss_monitor] INFO: Assigning New Task: [5266] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101003
+2026-02-13 19:41:44 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101003 (ReqID: 84cbc7484f1d4527f8706dce9d1cada9)
+2026-02-13 19:41:45 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 5 jobs.
+2026-02-13 19:41:49 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:41:49 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:49 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:49 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:51 [boss_monitor] INFO: Received List: 13 jobs. has_more=False, page=2
+2026-02-13 19:41:51 [boss_monitor] INFO: No more pages (has_more=False). Task Done.
+2026-02-13 19:41:51 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:51 [boss_monitor] INFO: Assigning New Task: [5267] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101009
+2026-02-13 19:41:51 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101009 (ReqID: d997d2230bbc5b1429f30a0bd67be7cb)
+2026-02-13 19:41:51 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 13 jobs.
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 274 pages/min), scraped 410 items (at 260 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:54 [scrapy.extensions.logstats] INFO: Crawled 540 pages (at 0 pages/min), scraped 410 items (at 0 items/min)
+2026-02-13 19:41:55 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:41:55 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:41:55 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:55 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:41:57 [boss_monitor] INFO: Received List: 13 jobs. has_more=False, page=2
+2026-02-13 19:41:57 [boss_monitor] INFO: No more pages (has_more=False). Task Done.
+2026-02-13 19:41:57 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:41:57 [boss_monitor] INFO: Assigning New Task: [5268] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101010
+2026-02-13 19:41:57 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101010 (ReqID: 17d3dbcb4c83cac6b4f1d5cc112bbb86)
+2026-02-13 19:41:57 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 13 jobs.
+2026-02-13 19:42:01 [boss_monitor] INFO: Received List: 11 jobs. has_more=False, page=1
+2026-02-13 19:42:01 [boss_monitor] INFO: No more pages (has_more=False). Task Done.
+2026-02-13 19:42:01 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:42:01 [boss_monitor] INFO: Assigning New Task: [5269] https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101002
+2026-02-13 19:42:01 [boss_monitor] INFO: Pushed Monitor Command: https://www.zhipin.com/web/geek/jobs?city=101120100&industry=101002 (ReqID: d750d4c8b606aca72e3b53f11e5c4811)
+2026-02-13 19:42:02 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 11 jobs.
+2026-02-13 19:42:07 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=1
+2026-02-13 19:42:07 [boss_monitor] INFO: Page 1 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:42:07 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:42:07 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:42:09 [boss_monitor] INFO: Received List: 15 jobs. has_more=True, page=2
+2026-02-13 19:42:09 [boss_monitor] INFO: Page 2 processed. has_more=True. Signaling GUI to scroll.
+2026-02-13 19:42:09 [boss_monitor] INFO: Processed Redis Data for List
+2026-02-13 19:42:09 [jobCollection.pipelines.boss_pipeline] INFO: Batch wrote 15 jobs.
+2026-02-13 19:42:20 [scrapy.crawler] INFO: Received SIGINT, shutting down gracefully. Send again to force 
+2026-02-13 19:42:20 [scrapy.core.engine] INFO: Closing spider (shutdown)
+2026-02-13 19:42:20 [boss_monitor] INFO: Closing spider...
+2026-02-13 19:42:20 [scrapy.statscollectors] INFO: Dumping Scrapy stats:
+{'downloader/request_bytes': 187988,
+ 'downloader/request_count': 655,
+ 'downloader/request_method_count/GET': 655,
+ 'downloader/response_bytes': 15068,
+ 'downloader/response_count': 655,
+ 'downloader/response_status_count/200': 655,
+ 'elapsed_time_seconds': 145.222461,
+ 'finish_reason': 'shutdown',
+ 'finish_time': datetime.datetime(2026, 2, 13, 11, 42, 20, 92458, tzinfo=datetime.timezone.utc),
+ 'item_scraped_count': 479,
+ 'items_per_minute': 198.20689655172416,
+ 'log_count/ERROR': 4,
+ 'log_count/INFO': 168,
+ 'request_depth_max': 655,
+ 'response_received_count': 655,
+ 'responses_per_minute': 271.0344827586207,
+ 'scheduler/dequeued': 655,
+ 'scheduler/dequeued/memory': 655,
+ 'scheduler/enqueued': 656,
+ 'scheduler/enqueued/memory': 656,
+ 'start_time': datetime.datetime(2026, 2, 13, 11, 39, 54, 869997, tzinfo=datetime.timezone.utc)}
+2026-02-13 19:42:20 [scrapy.core.engine] INFO: Spider closed (shutdown)
