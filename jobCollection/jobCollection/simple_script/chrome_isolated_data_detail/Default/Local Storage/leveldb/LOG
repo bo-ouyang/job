@@ -1,6 +1,0 @@
-2026/02/23-21:54:28.358 501c Reusing MANIFEST D:\Code\job\jobCollection\jobCollection\simple_script\chrome_isolated_data_detail\Default\Local Storage\leveldb/MANIFEST-000001
-2026/02/23-21:54:28.366 501c Recovering log #3
-2026/02/23-21:54:28.372 501c Reusing old log D:\Code\job\jobCollection\jobCollection\simple_script\chrome_isolated_data_detail\Default\Local Storage\leveldb/000003.log 
-2026/02/23-22:37:29.063 674 Level-0 table #5: started
-2026/02/23-22:37:29.072 674 Level-0 table #5: 19495 bytes OK
-2026/02/23-22:37:29.083 674 Delete type=0 #3
