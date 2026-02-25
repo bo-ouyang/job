@@ -42,27 +42,65 @@ class BossDetailDrissionSpider(scrapy.Spider):
         self.page = None
         self.current_proxy = None
         self.running = True
+        self.ip_request_count = 0
+        self.fp_request_count = 0
+        self.proxy_start_time = 0
 
-    def _get_random_user_agent(self):
+    def _get_random_fingerprint(self):
+        """Generate a dictionary with randomized browser parameters for advanced spoofing"""
+        from fake_useragent import UserAgent
         import random
-        uas = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
-        ]
-        return random.choice(uas)
+        
+        try:
+            ua = UserAgent(os="windows", browsers=["chrome", "edge"]).random
+        except Exception:
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        
+        # Resolutions
+        resolutions = [(1920, 1080), (1366, 768), (1440, 900), (1536, 864)]
+        res = random.choice(resolutions)
+        
+        # Languages
+        langs = ["zh-CN,zh;q=0.9,en;q=0.8", "zh-CN,zh;q=0.9", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"]
+        lang = random.choice(langs)
+        
+        return {
+            "ua": ua,
+            "width": res[0],
+            "height": res[1],
+            "lang": lang,
+            "hw_concurrency": random.choice([4, 8, 12, 16]),
+            "device_memory": random.choice([4, 8, 16, 32]),
+            "webgl_vendor": random.choice(["Google Inc. (NVIDIA)", "Google Inc. (AMD)"]),
+            "webgl_renderer": random.choice([
+                "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"
+            ])
+        }
 
     def _get_browser(self, proxy_url=None):
         """Configure and launch ChromiumPage"""
         co = ChromiumOptions()
-        
         # 1. Randomize Fingerprint on browser restart
-        ua = self._get_random_user_agent()
-        self.logger.info(f"Setting Fingerprint UA: {ua}")
-        co.set_user_agent(ua)
+        fp = self._get_random_fingerprint()
+        self.logger.info(f"Setting Fingerprint UA: {fp['ua']}, Res: {fp['width']}x{fp['height']}")
+        
+        # Apply standard options
+        co.set_user_agent(fp['ua'])
+        co.set_argument(f"--lang={fp['lang']}")
+        
+        # Advanced spoofing via arguments
+        co.set_argument(f"--window-size={fp['width']},{fp['height']}")
+        co.set_argument("--disable-blink-features=AutomationControlled")
+        
+        # Pretend to be a normal browser
+        co.set_argument("--disable-infobars")
+        co.set_argument("--hide-scrollbars")
+        
+        # Suppress WebRTC IP leaks
+        co.set_argument("--enforce-webrtc-ip-permission-check")
+        co.set_argument("--force-webrtc-ip-handling-policy=disable-non-proxied-udp")
         
         if proxy_url:
             if '@' in proxy_url:
@@ -93,6 +131,23 @@ class BossDetailDrissionSpider(scrapy.Spider):
         # Set page load strategy to 'none' - don't wait for all resources to finish
         page.set.load_mode.none()
         
+        # Inject JavaScript to override navigator properties and WebGL
+        stealth_js = f"""
+        Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
+        window.navigator.chrome = {{runtime: {{}}}};
+        
+        const getParameter = WebGLRenderingContext.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {{
+            if (parameter === 37445) return '{fp["webgl_vendor"]}';
+            if (parameter === 37446) return '{fp["webgl_renderer"]}';
+            return getParameter(parameter);
+        }};
+        
+        Object.defineProperty(navigator, 'hardwareConcurrency', {{get: () => {fp["hw_concurrency"]}}});
+        Object.defineProperty(navigator, 'deviceMemory', {{get: () => {fp["device_memory"]}}});
+        """
+        page.run_cdp('Page.addScriptToEvaluateOnNewDocument', source=stealth_js)
+        
         return page
 
     async def start(self):
@@ -104,6 +159,7 @@ class BossDetailDrissionSpider(scrapy.Spider):
         """
         # We start the browser
         self.current_proxy = proxy_manager.get_proxy()
+        self.proxy_start_time = time.time()
         try:
             self.page = self._get_browser(self.current_proxy)
             self.logger.info("Browser initialized successfully.")
@@ -150,12 +206,64 @@ class BossDetailDrissionSpider(scrapy.Spider):
                     # 4. Save to DB
                     await self._update_job_in_db(encrypt_job_id, job_desc)
                     self.logger.info(f"Successfully processed and updated {encrypt_job_id}")
+                    self.ip_request_count += 1
+                    self.fp_request_count += 1
                 else:
                     self.logger.warning(f"Could not extract description for {encrypt_job_id}. Layout change?")
                     await self._update_job_in_db(encrypt_job_id, "解析失败: 未找到描述")
     
                 # 5. Very short sleep to let DP breathe and prevent instant IP blocks
                 await asyncio.sleep(3)
+                
+                # 6. Automatic IP Rotation after X successful requests
+                if self.ip_request_count >= 100:
+                   self.logger.info(f"[Rotation Strategy] Reached {self.ip_request_count} requests on current IP. Forcing Proxy Rotation...")
+                   await self._force_rotate_proxy()
+                   self.ip_request_count = 0
+                   
+                # 6.5 Time-based IP Rotation (KDL proxy valid for 5-10 mins, rotate every 4.5 mins)
+                elif time.time() - self.proxy_start_time > 270:
+                   self.logger.info(f"[Rotation Strategy] Proxy lifetime exceeded 4.5 minutes. Forcing Proxy Rotation...")
+                   await self._force_rotate_proxy()
+                   self.ip_request_count = 0
+                   
+                # 7. Automatic Fingerprint Rotation after Y successful requests
+                if self.fp_request_count >= 150:
+                   self.logger.info(f"[Rotation Strategy] Reached {self.fp_request_count} requests. Forcing full Fingerprint & Browser Swap...")
+                   await self._force_rotate_fingerprint()
+                   self.fp_request_count = 0
+                   self.ip_request_count = 0 # FP rotation also rotates IP inherently if we want, or just restarts browser
+                   
+    async def _force_rotate_proxy(self):
+        """Intentionally discard current proxy and restart browser with a new one"""
+        if self.current_proxy:
+           proxy_manager.remove_proxy(self.current_proxy)
+        self.current_proxy = proxy_manager.get_proxy()
+        self.proxy_start_time = time.time()
+        
+        try:
+            if getattr(self, 'page', None):
+                self.page.quit()
+        except: pass
+        await asyncio.sleep(2)
+        self.page = self._get_browser(self.current_proxy)
+        
+    async def _force_rotate_fingerprint(self):
+        """Intentionally restart browser to generate a completely new fingerprint AND take a new proxy"""
+        if self.current_proxy:
+           proxy_manager.remove_proxy(self.current_proxy)
+        self.current_proxy = proxy_manager.get_proxy()
+        self.proxy_start_time = time.time()
+        
+        try:
+            if getattr(self, 'page', None):
+                try:
+                    self.page.cookies.clear()
+                except: pass
+                self.page.quit()
+        except: pass
+        await asyncio.sleep(3)
+        self.page = self._get_browser(self.current_proxy)
 
     async def _navigate_with_anti_bot(self, url):
         """Navigate to URL, handle anti-spider blocks, rotate proxy if necessary"""
@@ -184,8 +292,8 @@ class BossDetailDrissionSpider(scrapy.Spider):
             
             # self.page.url might be a property, but it's safe to check
             current_url = self.page.url if getattr(self.page, 'url', None) else ""
-            security_urls = ['https://www.zhipin.com/web/user/safe','security']
-            is_security_url = any(security_url in current_url for security_url in security_urls)
+            security_urls = ['user/safe','security']
+            is_security_url = all(security_url in current_url for security_url in security_urls)
             #is_blocked or
             if is_security_url:
                 
@@ -193,10 +301,10 @@ class BossDetailDrissionSpider(scrapy.Spider):
                 self.logger.warning("[Anti-Bot] You have 60 seconds. Waiting...")
                 
                 # Pause and poll for user manual solving
-                for i in range(20):
+                for i in range(5):
                     await asyncio.sleep(3)
                     current_url = self.page.url if getattr(self, 'page', None) else ""
-                    if current_url and not any(url in current_url for url in security_urls):
+                    if current_url and all(url in current_url for url in security_urls):
                          self.logger.info("[Anti-Bot] Captcha manually solved! Resuming task.")
                          return True
                          

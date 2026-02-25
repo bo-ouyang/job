@@ -29,7 +29,7 @@ logs/
 jobCollectionWebApi/logs/
 jobCollectionWebApi/celerybeat-schedule
 jobCollection/logs/
-
+jobCollection/simple_script/chrome_isolated_data_drission_spider*/
 # Node
 node_modules/
 dist/

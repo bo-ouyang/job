@@ -1,5 +1,13 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+    "python.analysis.extraPaths": [
+        "./jobCollectionWebApi",
+        "./jobCollection",
+        "./jobCollection/jobCollection"
+    ],
+    "python.autoComplete.extraPaths": [
+        "./jobCollectionWebApi",
+        "./jobCollection",
+        "./jobCollection/jobCollection"
+    ],
+    "python.defaultInterpreterPath": "D:\\minicanda\\mini\\envs\\job\\python.exe"
 }

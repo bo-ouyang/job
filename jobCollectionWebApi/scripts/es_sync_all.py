@@ -9,9 +9,8 @@ from sqlalchemy.orm import selectinload
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
+from common.database.PostgresManager import db_manager
 from config import settings
-from common.databases.PostgresManager import db_manager
 from common.search.conn import get_es, es_manager
 from common.databases.models.job import Job
 from elasticsearch.helpers import async_bulk
