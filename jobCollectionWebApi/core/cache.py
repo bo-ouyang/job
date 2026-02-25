@@ -6,13 +6,12 @@ from fastapi import Request, Response
 from common.databases.RedisManager import redis_manager
 from jobCollectionWebApi.config import settings
 import inspect
-import logging
+from core.logger import sys_logger as logger
 
 import random
 import asyncio
 from redis.exceptions import LockError
 
-logger = logging.getLogger(__name__)
 
 def _params_to_dict(v: Any) -> Any:
     """递归将对象转换为可序列化的字典/列表"""

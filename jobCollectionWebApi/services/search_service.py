@@ -1,11 +1,10 @@
 from typing import List, Optional, Tuple, Any
-import logging
+from core.logger import sys_logger as logger
 from common.databases.PostgresManager import db_manager # Use PostgresManager
 from crud.job import job as crud_job # Reuse existing DB search logic
 from common.search.conn import get_es
 from config import settings
 
-logger = logging.getLogger(__name__)
 
 class SearchService:
     """职位搜索服务 (ES + PostgreSQL Fallback Implementation)"""
@@ -49,7 +48,7 @@ class SearchService:
                  must_clauses.append({"match_all": {}})
                 
             if location:
-                filter_clauses.append({"term": {"city": location}})
+                filter_clauses.append({"term": {"city_code": location}})
             if experience:
                 filter_clauses.append({"prefix": {"experience": experience}})
             if education:
@@ -87,7 +86,7 @@ class SearchService:
                  source = hit["_source"]
                  # 返回 ES document 包含的数据，不需要再查关联表。这是 ES 冗余设计的优势
                  job_list.append({
-                     "id": source.get("id"),
+                     #"id": source.get("id"),
                      "title": source.get("title"),
                      "description": source.get("description"),
                      "requirements": source.get("requirements"),

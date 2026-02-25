@@ -5,10 +5,9 @@ print(project_root)
 sys.path.insert(0, project_root)
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.sql import text
-import logging
+from jobCollectionWebApi.core.logger import sys_logger as logger
 from jobCollectionWebApi.config import settings
 
-logger = logging.getLogger(__name__)
 
 class MySQLManager:
     """数据库管理器"""

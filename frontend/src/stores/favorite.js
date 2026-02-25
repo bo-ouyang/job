@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import api from "../core/api";
+import { favoriteAPI } from "@/api/favorite";
 
 export const useFavoriteStore = defineStore("favorite", () => {
   const favoriteJobs = ref([]);
@@ -8,12 +8,12 @@ export const useFavoriteStore = defineStore("favorite", () => {
   const isLoading = ref(false);
 
   const fetchFavoriteJobs = async () => {
-    const res = await api.get("/favorites/jobs");
+    const res = await favoriteAPI.getFavoriteJobs();
     favoriteJobs.value = res.data;
   };
 
   const fetchFollowedCompanies = async () => {
-    const res = await api.get("/favorites/companies");
+    const res = await favoriteAPI.getFollowedCompanies();
     followedCompanies.value = res.data;
   };
 
@@ -27,22 +27,22 @@ export const useFavoriteStore = defineStore("favorite", () => {
   };
 
   const addFavoriteJob = async (jobId) => {
-    await api.post(`/favorites/jobs/${jobId}`);
+    await favoriteAPI.addFavoriteJob(jobId);
     await fetchFavoriteJobs();
   };
 
   const removeFavoriteJob = async (jobId) => {
-    await api.delete(`/favorites/jobs/${jobId}`);
+    await favoriteAPI.removeFavoriteJob(jobId);
     await fetchFavoriteJobs();
   };
 
   const addFollowCompany = async (companyId) => {
-    await api.post(`/favorites/companies/${companyId}`);
+    await favoriteAPI.addFollowCompany(companyId);
     await fetchFollowedCompanies();
   };
 
   const removeFollowCompany = async (companyId) => {
-    await api.delete(`/favorites/companies/${companyId}`);
+    await favoriteAPI.removeFollowCompany(companyId);
     await fetchFollowedCompanies();
   };
 

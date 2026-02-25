@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import api from '../core/api';
+import { companyAPI } from '@/api/company';
+import { commonAPI } from '@/api/common';
 
 const router = useRouter();
 const companies = ref([]);
@@ -21,7 +22,7 @@ const industryOptions = ref([]);
 
 const fetchIndustries = async () => {
     try {
-        const res = await api.get('/industries/industries/level/0');
+        const res = await commonAPI.getIndustries(0);
         industryOptions.value = res.data;
     } catch (e) {
         console.error("Failed to fetch industries", e);
@@ -38,7 +39,7 @@ const fetchCompanies = async () => {
             industry: filters.industry !== '不限' ? filters.industry : '',
             location: filters.location !== '全部' ? filters.location : ''
         };
-        const res = await api.get('/companies', { params });
+        const res = await companyAPI.getCompanies(params);
         companies.value = res.data.items;
         total.value = res.data.total;
         totalPages.value = res.data.pages;

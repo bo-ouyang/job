@@ -1,4 +1,4 @@
-import logging
+from core.logger import sys_logger as logger
 from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -25,7 +25,6 @@ import json
 from common.databases.RedisManager import redis_manager
 from common.databases.models.user import User
 
-logger = logging.getLogger(__name__)
 
 class AuthService:
     """认证服务类"""

@@ -29,7 +29,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             from tasks.es_sync import sync_job_to_es
             sync_job_to_es.delay(db_obj.id)
         except Exception as e:
-            import logging
+            from core.logger import sys_logger as logger
             logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for new job {db_obj.id}: {e}")
         return db_obj
 
@@ -44,7 +44,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             from tasks.es_sync import sync_job_to_es
             sync_job_to_es.delay(db_obj.id)
         except Exception as e:
-            import logging
+            from core.logger import sys_logger as logger
             logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for update job {db_obj.id}: {e}")
         return db_obj
 
@@ -58,7 +58,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
                 from tasks.es_sync import delete_job_from_es
                 delete_job_from_es.delay(id)
             except Exception as e:
-                import logging
+                from core.logger import sys_logger as logger
                 logging.getLogger(__name__).warning(f"Failed to dispatch Celery delete task for job {id}: {e}")
         return db_obj
 

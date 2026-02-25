@@ -2,11 +2,10 @@ from typing import List, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.auth_service import auth_service
 from common.databases.models.user import User
-import logging
+from core.logger import sys_logger as logger
 import json
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 class ConnectionManager:
     def __init__(self):

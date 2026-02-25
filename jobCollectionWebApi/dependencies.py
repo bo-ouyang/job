@@ -1,16 +1,15 @@
 from fastapi import Depends, HTTPException, status, Header, Query,Request
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
+from core.logger import sys_logger as logger
 import time
 from typing import AsyncGenerator, Optional
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
+from core.logger import sys_logger as logger
 from config import settings
 from core.security import verify_token, is_token_blacklisted
 from crud import user as crud_user
 from schemas.token import TokenData
-logger = logging.getLogger(__name__)
 from common.databases.PostgresManager import db_manager
 from common.databases.RedisManager import get_redis,RedisManager
 from fastapi import Depends, HTTPException, status, Request

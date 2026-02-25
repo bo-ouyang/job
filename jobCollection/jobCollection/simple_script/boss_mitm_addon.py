@@ -7,10 +7,19 @@ from datetime import datetime
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-TASK_FILE = "task_status.json"
 import redis.asyncio as redis
 import sys
 import os
+
+# Import our new proxy manager
+try:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    from proxy_manager import proxy_manager
+except ImportError as e:
+    logger.error(f"Could not import proxy_manager: {e}")
+    proxy_manager = None
 try:
     from jobCollection.settings import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB
 except ImportError:
@@ -98,7 +107,34 @@ class BossRecJobInterceptor:
                         await self.push_to_redis(flow.request.url, html_content, has_more=None, type="detail_html")
                 except Exception as e:
                     logger.error(f"Failed to process Detail response: {e}")
+
+    def request(self, flow: http.HTTPFlow):
+        """ Dynamically route requests through KDL proxy """
+        if proxy_manager is None:
+            return
             
+        # Don't proxy local requests or our bridge
+        if "localhost" in flow.request.host or "127.0.0.1" in flow.request.host or flow.request.host == "dps.kdlapi.com":
+            return
+            
+        current_proxy = proxy_manager.get_proxy()
+        if current_proxy:
+            # Format: http://user:pass@ip:port
+            try:
+                # Remove http://
+                proxy_str = current_proxy.replace("http://", "")
+                auth_part, ip_port_part = proxy_str.split("@")
+                user, pwd = auth_part.split(":")
+                proxy_ip, proxy_port = ip_port_part.split(":")
+                
+                # Set upstream proxy for this specific flow
+                flow.server_conn.via = http.server.UpstreamProxy(
+                    address=(proxy_ip, int(proxy_port)),
+                    auth=(user, pwd)
+                )
+                # logger.info(f"Routed via proxy: {proxy_ip}")
+            except Exception as e:
+                logger.error(f"Failed to set upstream proxy: {e}")
 
 
 addons = [

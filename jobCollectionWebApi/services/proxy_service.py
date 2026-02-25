@@ -1,6 +1,6 @@
 import json
 import asyncio
-import logging
+from core.logger import sys_logger as logger
 import aiohttp
 import time
 from sqlalchemy import select, update, insert
@@ -16,7 +16,6 @@ PROXY_POOL_KEY = "proxy_pool" # Set of "ip:port"
 PROXY_SCORE_KEY = "proxy_score" # Sorted Set: "ip:port" -> score
 PROXY_INFO_KEY = "proxy_info" # Hash: "ip:port" -> json({protocol, source, latency, fail_count...})
 
-logger = logging.getLogger(__name__)
 
 class ProxyService:
     def __init__(self, redis_url=None):

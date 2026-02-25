@@ -1,4 +1,4 @@
-import logging
+from core.logger import sys_logger as logger
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -14,7 +14,7 @@ from crud import product as crud_product
 from crud import wallet as crud_wallet
 from common.databases.models.payment import PaymentOrder, PaymentStatus, PaymentMethod
 from common.databases.RedisManager import redis_manager
-import logging
+from core.logger import sys_logger as logger
 from schemas.payment import (
     PaymentOrderCreate, 
     PaymentOrderResponse, 
@@ -23,7 +23,6 @@ from schemas.payment import (
 )
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 # --- SDK Initialization ---
 

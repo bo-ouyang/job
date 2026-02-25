@@ -83,6 +83,10 @@ class AIAdviceRequest(BaseModel):
     major_name: str
     skills: List[str]
 
+class CareerCompassRequest(BaseModel):
+    major_name: str
+    target_industry: Optional[str] = None
+
 class APILogInDB(APILogBase, TimestampSchema):
     id: int
 
@@ -97,7 +101,7 @@ class MajorAnalysisRequest(BaseModel):
 class TaskLogBase(BaseModel):
     task_id: str = Field(..., description="Celery 任务 ID")
     task_name: str = Field(..., description="任务名称")
-    job_id: Optional[int] = Field(None, description="关联职位 ID")
+    #job_id: Optional[int] = Field(None, description="关联职位 ID")
     status: str = Field(..., description="任务状态")
     args: Optional[Union[Dict[str, Any], List[Any]]] = None
     kwargs: Optional[Dict[str, Any]] = None

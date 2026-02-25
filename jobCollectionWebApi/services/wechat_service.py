@@ -1,10 +1,9 @@
 import aiohttp
 import json
 from typing import Optional, Dict, Any
-import logging
+from core.logger import sys_logger as logger
 from jobCollectionWebApi.config import settings
 
-logger = logging.getLogger(__name__)
 
 class WeChatService:
     """微信登录服务"""

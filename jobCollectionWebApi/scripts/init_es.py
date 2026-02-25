@@ -9,11 +9,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.search.conn import get_es, es_manager
 from schemas.es_mapping import JOB_INDEX_MAPPING
 from config import settings
-import logging
+from core.logger import sys_logger as logger
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 async def init_es_index():
     """初始化 ES 索引"""

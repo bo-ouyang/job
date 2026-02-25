@@ -1,13 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import api from '../core/api';
+import { messageAPI } from '@/api/message';
 
 const messages = ref([]);
 const loading = ref(true);
 
 const fetchMessages = async () => {
     try {
-        const res = await api.get('/messages/');
+        const res = await messageAPI.getMessages();
         messages.value = res.data;
     } catch (e) {
         console.error(e);
@@ -19,7 +19,7 @@ const fetchMessages = async () => {
 const markAsRead = async (msg) => {
     if (msg.is_read) return;
     try {
-        await api.put(`/messages/${msg.id}/read`);
+        await messageAPI.markAsRead(msg.id);
         msg.is_read = true;
     } catch (e) {
         console.error(e);
@@ -28,7 +28,7 @@ const markAsRead = async (msg) => {
 
 const markAllRead = async () => {
     try {
-        await api.post('/messages/mark-all-read');
+        await messageAPI.markAllAsRead();
         messages.value.forEach(m => m.is_read = true);
     } catch (e) {
         console.error(e);

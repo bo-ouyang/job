@@ -9,15 +9,19 @@ venv.bak/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
+__pycache__*/
 *.py[cod]
 *$py.class
-__pycache__
+
 # IDE / Editor
 .idea/
 .vscode/
 *.swp
 *.swo
+
+# Browser data
 chrome_isolated_data*/
+
 # Project specific
 logs/
 *.log
@@ -26,7 +30,7 @@ jobCollectionWebApi/logs/
 jobCollectionWebApi/celerybeat-schedule
 jobCollection/logs/
 
-# Node (if frontend exists)
+# Node
 node_modules/
 dist/
 dist-ssr/

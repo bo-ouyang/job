@@ -62,6 +62,7 @@ class TaskLog(Base):
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     task_id = Column(String(50), nullable=False, index=True)
     task_name = Column(String(100), index=True)
+    #job_id = Column(BigInteger, nullable=True, index=True) # 关联职位 ID
     status = Column(String(20), index=True) # PENDING, STARTED, SUCCESS, FAILURE
     args = Column(JSON)      # 任务参数
     kwargs = Column(JSON)

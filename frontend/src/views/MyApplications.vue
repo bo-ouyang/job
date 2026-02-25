@@ -1,13 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import api from '../core/api';
+import { applicationAPI } from '@/api/application';
 
 const applications = ref([]);
 const loading = ref(true);
 
 const fetchApplications = async () => {
     try {
-        const res = await api.get('/applications/');
+        const res = await applicationAPI.getMyApplications();
         applications.value = res.data;
     } catch (e) {
         console.error(e);

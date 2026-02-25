@@ -2,7 +2,8 @@
 import { onMounted, ref, reactive, watch, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import * as echarts from "echarts";
-import api from "../core/api";
+import { analysisAPI } from '@/api/analysis';
+import { commonAPI } from '@/api/common';
 
 const route = useRoute();
 const chartContainer = ref(null);
@@ -43,7 +44,7 @@ let salaryChart = null;
 
 const fetchIndustries = async () => {
   try {
-    const res = await api.get("/industries/industries/level/0");
+    const res = await commonAPI.getIndustries(0);
     industryOptions.value = res.data || [];
 
     // Default L1
@@ -63,18 +64,18 @@ const fetchSubIndustries = async (parentCode) => {
     filters.industry = "";
     return;
   }
-  
+
   // Find ID from Code
-  const parent = industryOptions.value.find(i => i.code === parentCode);
+  const parent = industryOptions.value.find((i) => i.code === parentCode);
   const parentId = parent ? parent.code : null;
 
   if (!parentId) {
-      console.warn("Parent Industry ID not found for code:", parentCode);
-      return;
+    console.warn("Parent Industry ID not found for code:", parentCode);
+    return;
   }
 
   try {
-    const res = await api.get(`/industries/industries/parent/${parentId}`);
+    const res = await commonAPI.getIndustries(parentId);
     subIndustryOptions.value = res.data || [];
     filters.industry = ""; // Default to All (Level 2)
   } catch (e) {
@@ -84,7 +85,7 @@ const fetchSubIndustries = async (parentCode) => {
 
 const fetchCities = async () => {
   try {
-    const res = await api.get("/cities/level/1");
+    const res = await commonAPI.getCities(1);
     cityOptions.value = res.data || [];
     // Set default if not set
     if (!filters.location && cityOptions.value.length > 0) {
@@ -116,20 +117,20 @@ const fetchData = async () => {
       params.experience = filters.experience;
     if (filters.education && filters.education !== "不限")
       params.education = filters.education;
-    
-    // Industry Logic: 
+
+    // Industry Logic:
     // industry = Parent Code
     // industry_2 = Sub Code (if present)
-    
+
     if (selectedParentIndustry.value) {
-        params.industry = selectedParentIndustry.value.toString();
-    }
-    
-    if (filters.industry) {
-        params.industry_2 = filters.industry;
+      params.industry = selectedParentIndustry.value.toString();
     }
 
-    const res = await api.get("/analysis/stats", { params });
+    if (filters.industry) {
+      params.industry_2 = filters.industry;
+    }
+
+    const res = await analysisAPI.getJobStats(params);
     updateCharts(res.data);
   } catch (e) {
     console.error("Failed to fetch analysis stats", e);
@@ -197,7 +198,7 @@ const initSkillsChart = () => {
         data: [],
         itemStyle: {
           color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
-            { offset: 0, color: "#818cf8" },
+            { offset: 0, color: "#8b5cf6" },
             { offset: 1, color: "#38bdf8" },
           ]),
           borderRadius: [0, 4, 4, 0],
@@ -233,7 +234,7 @@ const initSalaryChart = () => {
         radius: ["40%", "70%"],
         avoidLabelOverlap: false,
         itemStyle: {
-          borderRadius: 10,
+          borderRadius: 8,
           borderColor: "#1e293b",
           borderWidth: 2,
         },
@@ -243,7 +244,7 @@ const initSalaryChart = () => {
             show: true,
             fontSize: 20,
             fontWeight: "bold",
-            color: "#fff",
+            color: "#f8fafc",
           },
         },
         labelLine: { show: false },
@@ -307,7 +308,11 @@ watch(
           @change="onParentIndustryChange"
         >
           <option value="">一级行业</option>
-          <option v-for="ind in industryOptions" :key="ind.id" :value="ind.code">
+          <option
+            v-for="ind in industryOptions"
+            :key="ind.id"
+            :value="ind.code"
+          >
             {{ ind.name }}
           </option>
         </select>
@@ -358,8 +363,14 @@ watch(
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .header {
@@ -371,7 +382,7 @@ watch(
   font-size: 2.5rem;
   margin-bottom: 0.5rem;
   letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #fff, #94a3b8);
+  background: linear-gradient(to right, #38bdf8, #818cf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -453,15 +464,20 @@ watch(
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+  transition:
+    transform var(--transition-normal),
+    box-shadow var(--transition-normal);
   overflow: hidden;
 }
 
 /* 高级折射边缘内发光 */
 .chart-card::before {
-  content: '';
+  content: "";
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   border-radius: inherit;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
   pointer-events: none;
@@ -469,12 +485,20 @@ watch(
 
 .chart-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3), 0 0 30px rgba(14, 165, 233, 0.05);
+  box-shadow:
+    0 15px 50px rgba(0, 0, 0, 0.3),
+    0 0 30px rgba(14, 165, 233, 0.05);
   border-color: rgba(14, 165, 233, 0.2);
 }
 
 @media (max-width: 768px) {
-  .charts-grid { grid-template-columns: 1fr; }
-  .filter-group select, .search-input { min-width: 100%; width: 100%; }
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .filter-group select,
+  .search-input {
+    min-width: 100%;
+    width: 100%;
+  }
 }
 </style>

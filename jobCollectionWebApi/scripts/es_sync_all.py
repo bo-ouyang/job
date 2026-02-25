@@ -2,7 +2,7 @@ import asyncio
 import sys
 import os
 import json
-import logging
+from core.logger import sys_logger as logger
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -17,7 +17,6 @@ from common.databases.models.job import Job
 from elasticsearch.helpers import async_bulk
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 async def fetch_jobs_from_pg(session, skip: int, limit: int):
     """Fetch jobs with company and industry relations"""

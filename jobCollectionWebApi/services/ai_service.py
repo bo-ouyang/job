@@ -1,8 +1,7 @@
 from config import settings
-import logging
+from core.logger import sys_logger as logger
 import json
 
-logger = logging.getLogger(__name__)
 
 class AIService:
     async def generate_career_advice(self, major: str, skills: list) -> str:
@@ -34,6 +33,62 @@ class AIService:
 - **拥抱开源**: 哪怕是提交一次文档修正，也是技术热情的最好证明。
 
 *(💡 提示: 在配置文件中设置真实 AI API Key，可解锁针对您个人情况的实时深度分析)*"""
+
+    async def get_career_navigation_report(self, major_name: str, es_stats: dict) -> str:
+        """根据 ES 的真实岗位数据和特定专业生成职业病理诊断与规划报告"""
+        
+        system_prompt = """
+你是一名面向大学生的“专家级职业规划导师”。
+你的任务是根据系统提供的一份【真实的招聘市场宏观数据】以及【学生的就读专业】，为学生出具一份详尽、一针见血的《职业罗盘诊断报告》。
+请保持语言干练、客观，带有洞察力，直接指出该专业在当前市场下的优劣势，并提供明确的转型或补充学习方向。
+
+格式要求使用 Markdown：
+## 🗺️ {专业名称} 的全景市场透视
+## 💸 薪水天花板预估
+## 🎯 核心落地行业与岗位
+## ⚔️ 差距预警 (Gap Analysis)
+## 🚀 行动指南
+"""
+        user_prompt = f"""
+学生就读专业：{major_name}
+
+=== 市场真实客观数据 (基于十万级有效招聘需求聚合) ===
+{json.dumps(es_stats, ensure_ascii=False, indent=2)}
+====================================
+
+请严格基于上述客观数据（不能瞎编数据，要引用上述的行业分布和技能需求频率），为该专业的学生撰写完整的《职业罗盘诊断报告》。重点做 Gap Analysis，也就是学校教的理论同企业真实要的硬技能的差距。
+"""
+        return await self._call_llm_generic_text(system_prompt, user_prompt)
+        
+    async def _call_llm_generic_text(self, system_prompt: str, user_prompt: str) -> str:
+        """通用 LLM 纯文本调用"""
+        try:
+            import aiohttp
+            headers = {
+                "Authorization": f"Bearer {settings.AI_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": settings.AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.7, 
+                "stream": False
+            }
+            url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
+            timeout = aiohttp.ClientTimeout(total=90)
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status != 200:
+                        return f"❌ AI 分析引擎维护中 (HTTP {resp.status})"
+                    data = await resp.json()
+                    return data['choices'][0]['message']['content']
+        except Exception as e:
+            logger.error(f"Generate report error: {e}")
+            return "❌ AI 职业分析暂时不可用，请稍后再试。"
 
     async def _call_llm(self, major, skills):
         """调用大模型 API (OpenAI 兼容格式)"""

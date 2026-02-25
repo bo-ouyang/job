@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import api from '../core/api';
+import { companyAPI } from '@/api/company';
+import { jobAPI } from '@/api/job';
 
 const route = useRoute();
 const router = useRouter();
@@ -16,8 +17,8 @@ const fetchCompanyData = async () => {
         
         // Parallel requests
         const [compRes, jobsRes] = await Promise.all([
-            api.get(`/companies/${id}`),
-            api.get('/jobs/jobs', { params: { company_id: id } })
+            companyAPI.getCompanyDetail(id),
+            jobAPI.getJobs({ company_id: id })
         ]);
         
         company.value = compRes.data;

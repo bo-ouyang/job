@@ -2,14 +2,13 @@ from sqlalchemy import select
 from common.databases.PostgresManager import db_manager
 from common.databases.models.boss_spider_filter import BossSpiderFilter
 from common.databases.models.boss_crawl_task import BossCrawlTask
-import logging
+from core.logger import sys_logger as logger
 
-import logging
+from core.logger import sys_logger as logger
 import subprocess
 import sys
 import os
 
-logger = logging.getLogger(__name__)
 
 class CrawlerService:
     @staticmethod

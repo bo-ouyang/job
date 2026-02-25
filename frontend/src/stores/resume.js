@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import api from "../core/api";
+import { resumeAPI } from "@/api/resume";
 
 export const useResumeStore = defineStore("resume", () => {
   const resume = ref(null);
@@ -11,7 +11,7 @@ export const useResumeStore = defineStore("resume", () => {
     isLoading.value = true;
     error.value = null;
     try {
-      const res = await api.get("/resumes/me");
+      const res = await resumeAPI.getMyResume();
       resume.value = res.data;
     } catch (err) {
       if (err.response && err.response.status === 404) {
@@ -27,7 +27,7 @@ export const useResumeStore = defineStore("resume", () => {
   const createResume = async (data) => {
     isLoading.value = true;
     try {
-      const res = await api.post("/resumes/me", data);
+      const res = await resumeAPI.createResume(data);
       resume.value = res.data;
       return res.data;
     } catch (err) {
@@ -40,7 +40,7 @@ export const useResumeStore = defineStore("resume", () => {
   const updateResume = async (data) => {
     isLoading.value = true;
     try {
-      const res = await api.put("/resumes/me", data);
+      const res = await resumeAPI.updateResume(data);
       resume.value = res.data; // Update local
       return res.data;
     } catch (err) {
@@ -51,35 +51,27 @@ export const useResumeStore = defineStore("resume", () => {
   };
 
   const addEducation = async (data) => {
-    const res = await api.post("/resumes/me/educations", data);
+    const res = await resumeAPI.addEducation(data);
     resume.value = res.data;
   };
 
   const deleteEducation = async (id) => {
-    const res = await api.delete(`/resumes/me/educations/${id}`);
+    const res = await resumeAPI.deleteEducation(id);
     resume.value = res.data;
   };
 
-  // Work Experience Actions
   const addWorkExperience = async (data) => {
-    const res = await api.post("/resumes/me/works", data);
+    const res = await resumeAPI.addWorkExperience(data);
     resume.value = res.data;
   };
 
   const deleteWorkExperience = async (id) => {
-    const res = await api.delete(`/resumes/me/works/${id}`);
+    const res = await resumeAPI.deleteWorkExperience(id);
     resume.value = res.data;
   };
 
-  // Upload File
   const uploadFile = async (file) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await api.post("/upload/", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
+    const res = await resumeAPI.uploadFile(file);
     return res.data; // { filename, url, content_type }
   };
 

@@ -4,9 +4,8 @@ from common.databases.PostgresManager import db_manager
 from crud.job import job as crud_job
 from common.search.conn import get_es
 from config import settings
-import logging
+from core.logger import sys_logger as logger
 
-logger = logging.getLogger(__name__)
 
 async def _sync_job_logic(job_id: int):
     """Core async logic for syncing job"""
@@ -34,7 +33,7 @@ async def _sync_job_logic(job_id: int):
                 except Exception:
                     return [str(field_data)]        
             doc = {
-                "id": job.id,
+            "id": job.id,
             "title": job.title,
             "description": job.description or "",
             "requirements": job.requirements or "",

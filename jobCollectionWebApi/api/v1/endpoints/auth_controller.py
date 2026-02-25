@@ -2,7 +2,7 @@ from datetime import timedelta
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
+from core.logger import sys_logger as logger
 from config import settings
 from dependencies import get_db, get_client_info
 from crud import user as crud_user, verification_code as crud_verification_code
@@ -21,7 +21,6 @@ from services.auth_service import auth_service
 from services.wechat_service import wechat_service 
 from services.sms_service import sms_service
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 @router.post("/register", response_model=LoginResponse)
 async def register(

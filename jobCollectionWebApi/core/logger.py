@@ -1,8 +1,8 @@
-import logging
+#from core.logger import sys_logger as logger
 import sys
 import os
 from loguru import logger
-
+import logging
 # 拦截标准库日志并转发给 Loguru 的拦截器
 class InterceptHandler(logging.Handler):
     def emit(self, record: logging.LogRecord):
@@ -68,13 +68,21 @@ def setup_logger(log_dir: str = "logs"):
     )
 
     # 6. 接管所有使用标准库的日志体系 (尤其是 Uvicorn 和 FastAPI 内置)
-    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+    # 检测是否在 Scrapy 环境运行
+    is_scrapy = "scrapy" in sys.modules or (len(sys.argv) > 0 and "scrapy" in sys.argv[0].lower())
     
-    # 强制让常见的自带库也流入 Loguru
-    for logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error", "fastapi"):
-        logging_logger = logging.getLogger(logger_name)
-        logging_logger.handlers = [InterceptHandler()]
-        logging_logger.propagate = False # 防止它自己打印两次
+    if not is_scrapy:
+        logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+        
+        # 强制让常见的自带库也流入 Loguru
+        for logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error", "fastapi"):
+            logging_logger = logging.getLogger(logger_name)
+            logging_logger.handlers = [InterceptHandler()]
+            logging_logger.propagate = False # 防止它自己打印两次
+    else:
+        # 如果是 Scrapy，我们依然可以把 Loguru 的输出文件加上，但不拦截 logging 标准库
+        # 这样 Scrapy 自己的日志还是走 Scrapy，但如果代码里显式用了 logger.info 还是能进文件
+        pass
 
     return logger
 

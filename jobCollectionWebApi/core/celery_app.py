@@ -10,7 +10,8 @@ celery_app = Celery(
     include=[
         "jobCollectionWebApi.tasks.resume_parser", 
         "jobCollectionWebApi.tasks.proxy_tasks",
-        "jobCollectionWebApi.tasks.job_parser"
+        "jobCollectionWebApi.tasks.job_parser",
+        "jobCollectionWebApi.tasks.es_sync"
     ],
 )
 
@@ -34,9 +35,9 @@ celery_app.conf.update(
             'task': 'tasks.sync_proxies',
             'schedule': 3600*12, # 12 hours
         },
-        'fetch-and-parse-jobs-every-2-minutes': {
+        'fetch-and-parse-jobs-every-1-minutes': {
             'task': 'jobCollectionWebApi.tasks.job_parser.process_job_parsing_task',
-            'schedule': 120.0, # 每隔2分钟捞取一次
+            'schedule': 60, # 每隔1分钟捞取一次
         }
     }
 )

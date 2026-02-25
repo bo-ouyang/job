@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import api from '../core/api';
+import { jobAPI } from '@/api/job';
+import { applicationAPI } from '@/api/application';
 
 const route = useRoute();
 const router = useRouter();
@@ -12,7 +13,7 @@ const error = ref(null);
 const fetchJob = async () => {
     loading.value = true;
     try {
-        const res = await api.get(`/jobs/${route.params.id}`);
+        const res = await jobAPI.getJobDetail(route.params.id);
         job.value = res.data;
     } catch (e) {
         error.value = "职位不存在或已被移除";
@@ -42,7 +43,7 @@ const isApplied = ref(false);
 
 const handleApply = async () => {
     try {
-        await api.post('/applications/', { job_id: job.value.id });
+        await applicationAPI.applyForJob(job.value.id);
         alert("投递成功！HR将尽快与您联系。");
         isApplied.value = true;
     } catch (e) {

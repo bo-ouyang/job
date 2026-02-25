@@ -4,9 +4,8 @@ from common.databases.RedisManager import redis_manager
 from common.databases.PostgresManager import db_manager
 from crud.job import job as crud_job
 from common.search.conn import get_es
-import logging
+from core.logger import sys_logger as logger
 
-logger = logging.getLogger(__name__)
 
 class AnalysisService:
     """数据分析服务 (ES Aggregations + PostgreSQL Fallback)"""
@@ -161,5 +160,48 @@ class AnalysisService:
                 
             await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
             return result
+
+    async def get_skill_cloud_stats(self, keyword: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """获取指定关键词相关职位的核心技能词云数据 (ES Aggs)"""
+        if not keyword:
+            return []
+            
+        cache_key = f"analysis:skill_cloud:{keyword}:{limit}"
+        cached_result = await redis_manager.get_cache(cache_key)
+        if cached_result is not None:
+            return cached_result
+            
+        try:
+            es = await get_es()
+            query_dsl = {
+                "query": {
+                    "multi_match": {
+                        "query": keyword,
+                        "fields": ["title^3", "description"]
+                    }
+                },
+                "size": 0,
+                "aggs": {
+                    "top_skills": {
+                        "terms": {
+                            "field": "skills", 
+                            "size": limit,
+                            "exclude": [keyword.lower(), keyword.upper(), keyword.capitalize()] # Exclude the search keyword itself
+                        }
+                    }
+                }
+            }
+            
+            resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
+            aggs = resp.get("aggregations", {})
+            buckets = aggs.get("top_skills", {}).get("buckets", [])
+            
+            result = [{"name": b["key"], "value": b["doc_count"]} for b in buckets if b["key"].strip()]
+            
+            await redis_manager.set_cache(cache_key, result, expire=3600, jitter=True) # Cache for 1 hour
+            return result
+        except Exception as e:
+            logger.error(f"Failed to fetch skill cloud stats from ES: {e}")
+            return []
 
 analysis_service = AnalysisService()

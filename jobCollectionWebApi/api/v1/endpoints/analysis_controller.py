@@ -11,7 +11,8 @@ from schemas.analysis import (
     UserQueryCreate,
     MajorAnalysisRequest,
     MajorCategory,
-    AIAdviceRequest
+    AIAdviceRequest,
+    CareerCompassRequest
 )
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
@@ -55,6 +56,20 @@ async def get_job_statistics(
             salary_min=job_params.salary_min,
             salary_max=job_params.salary_max
         )
+
+@router.get("/skill-cloud")
+async def get_skill_cloud(
+    keyword: str,
+    limit: int = 20,
+):
+    """获取技能词云数据 (基于 ES 聚合)"""
+    if not keyword:
+        return []
+    try:
+        return await analysis_service.get_skill_cloud_stats(keyword=keyword, limit=limit)
+    except Exception as e:
+        logger.error(f"Skill cloud API failed: {e}")
+        return []
 
 @router.get("/results", response_model=AnalysisResultList)
 async def read_analysis_results(
@@ -247,3 +262,51 @@ async def get_major_presets(
 async def get_ai_advice(req: AIAdviceRequest):
     """获取 AI 职业建议"""
     return await ai_service.generate_career_advice(req.major_name, req.skills)
+
+@router.post("/career-compass")
+async def get_career_compass(
+    req: CareerCompassRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    【核心功能】BI职业数据大盘与 AI 职业罗盘分析
+    根据专业名称，聚合ES中的职位数据，并交由大模型生成诊断报告。
+    """
+    cache_key = f"analysis:career_compass:v1:{req.major_name}:{req.target_industry or 'all'}"
+    cached_report = await redis_manager.get_cache(cache_key)
+    if cached_report:
+        return {"report": cached_report}
+        
+    try:
+        # 1. 确定搜索关键词与行业
+        keywords = []
+        if req.target_industry:
+            keywords.append(req.target_industry)
+        else:
+            # 根据专业名获取预设关键词
+            relation = await crud_major.get_relation_by_major_name(db, req.major_name)
+            if relation and relation.keywords:
+                keywords = [k.strip() for k in relation.keywords.split(',')]
+            else:
+                keywords = [req.major_name]
+                
+        # 2. 从 ES 获取客观聚合数据
+        main_keyword = keywords[0] if keywords else req.major_name
+        # To avoid passing complex lists to ES (which expects a string keyword), we use the primary keyword
+        es_stats = await analysis_service.get_job_stats(keyword=main_keyword)
+        
+        # 3. 将客观数据交由大模型生成深度分析报告
+        ai_report = await ai_service.get_career_navigation_report(
+            major_name=req.major_name, 
+            es_stats=es_stats
+        )
+        
+        # 4. 写入缓存 (12小时)
+        if not ai_report.startswith("❌"):
+             await redis_manager.set_cache(cache_key, ai_report, expire=43200)
+             
+        return {"report": ai_report}
+        
+    except Exception as e:
+        logger.error(f"Career Compass Analysis Failed: {e}")
+        raise HTTPException(status_code=500, detail="生成职业罗盘报告失败")

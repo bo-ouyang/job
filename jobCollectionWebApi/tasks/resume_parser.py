@@ -1,4 +1,4 @@
-import logging
+from core.logger import sys_logger as logger
 import pdfplumber
 import json
 from jobCollectionWebApi.core.celery_app import celery_app
@@ -7,7 +7,6 @@ from api.v1.endpoints.ws_controller import manager
 import asyncio
 import os
 
-logger = logging.getLogger(__name__)
 
 async def _extract_text_from_pdf(file_path: str) -> str:
     text = ""

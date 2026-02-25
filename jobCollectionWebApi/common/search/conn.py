@@ -1,8 +1,7 @@
 from elasticsearch import AsyncElasticsearch
 from config import settings
-import logging
+from core.logger import sys_logger as logger
 
-logger = logging.getLogger(__name__)
 
 class ESManager:
     def __init__(self):

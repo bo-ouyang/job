@@ -1,13 +1,13 @@
 import asyncio
 from celery import shared_task
-from celery.utils.log import get_task_logger
+#from celery.utils.log import get_task_logger
 from sqlalchemy import select
 from typing import List
 
 # Import Database components
 from common.databases.PostgresManager import db_manager
 from common.databases.models.job import Job
-
+from core.logger import sys_logger as logger
 # Try to import LangChain gracefully, otherwise log warning
 try:
     from langchain_openai import ChatOpenAI
@@ -36,7 +36,7 @@ except ImportError:
     LANGCHAIN_AVAILABLE = False
 
 
-logger = get_task_logger(__name__)
+#logger = get_task_logger(__name__)
 
 def get_env_cleaned(key: str, default: str = None) -> str:
     """Get env var and strip quotes if present."""
@@ -59,7 +59,7 @@ async def _process_batch_job_parsing(limit: int = 10):
         session_obj = await db_manager.get_session()
         async with session_obj as session:
             # 寻找状态为已爬取 (is_crawl=1) 但未解析 (ai_parsed=0) 的数据
-            stmt = select(Job).where(Job.is_crawl == 1, Job.ai_parsed == 0).limit(limit)
+            stmt = select(Job).where(Job.is_crawl == 1, Job.ai_parsed == 0,Job.description != "").limit(limit)
             result = await session.execute(stmt)
             jobs = result.scalars().all()
 
@@ -125,7 +125,12 @@ async def _process_batch_job_parsing(limit: int = 10):
                     job.ai_summary = parsed_result.get('summary', '')
                     await session.commit()
                     logger.info(f"Successfully updated Job ID {job.id} with AI insight.")
-                    
+                    try:
+                        from tasks.es_sync import sync_job_to_es
+                        #sync_job_to_es.delay()
+                        sync_job_to_es.delay(job.id)
+                    except Exception as e:
+                        logger.warning(f"Failed to dispatch Celery sync task for new job {job.id}: {e}")
                 except Exception as llm_err:
                     logger.error(f"Error parsing job {job.id}: {llm_err}")
                     # 回滚状态使其参与下一次补漏

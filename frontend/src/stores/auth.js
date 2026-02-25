@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import api from "../core/api";
+import { authAPI } from "@/api/auth";
 
 export const useAuthStore = defineStore("auth", () => {
   // State
@@ -13,54 +13,51 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Actions
   const login = async (username, password) => {
-    const response = await api.post("/auth/login", { username, password });
+    const response = await authAPI.login(username, password);
     handleLoginSuccess(response.data);
     return response.data;
   };
 
   const register = async (userData) => {
-    const response = await api.post("/auth/register", userData);
+    const response = await authAPI.register(userData);
     handleLoginSuccess(response.data);
     return response.data;
   };
 
   const loginWithPhone = async (phone, code) => {
-    const response = await api.post("/auth/login/phone", {
-      phone,
-      verification_code: code,
-    });
+    const response = await authAPI.loginWithPhone(phone, code);
     handleLoginSuccess(response.data);
     return response.data;
   };
 
   const loginWithWechat = async (code) => {
-    const response = await api.post("/auth/login/wechat", { code });
+    const response = await authAPI.loginWithWechat(code);
     handleLoginSuccess(response.data);
     return response.data;
   };
 
   const sendSmsCode = async (phone, type = "login") => {
-    const response = await api.post("/auth/send-sms", { phone, type });
+    const response = await authAPI.sendSmsCode(phone, type);
     return response.data;
   };
 
   // QR Code Login Actions
   const getQrCode = async () => {
-    const response = await api.get("/auth/qrcode/generate");
+    const response = await authAPI.getQrCode();
     return response.data;
   };
 
   const checkQrCodeStatus = async (ticket) => {
-    const response = await api.get(`/auth/qrcode/status?ticket=${ticket}`);
+    const response = await authAPI.checkQrCodeStatus(ticket);
     return response.data;
   };
 
   const mockScanQrCode = async (ticket) => {
-    return await api.post(`/auth/qrcode/dev/scan?ticket=${ticket}`);
+    return await authAPI.mockScanQrCode(ticket);
   };
 
   const mockConfirmQrCode = async (ticket) => {
-    return await api.post(`/auth/qrcode/dev/confirm?ticket=${ticket}`);
+    return await authAPI.mockConfirmQrCode(ticket);
   };
 
   const handleLoginSuccess = (data) => {
@@ -76,7 +73,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   const logout = async () => {
     try {
-      await api.post("/auth/logout");
+      await authAPI.logout();
     } catch (e) {
       console.error("Logout error:", e);
     } finally {
@@ -90,7 +87,7 @@ export const useAuthStore = defineStore("auth", () => {
   };
 
   const updateProfile = async (userData) => {
-    const response = await api.put("/users/me", userData);
+    const response = await authAPI.updateProfile(userData);
     user.value = response.data;
     localStorage.setItem("user", JSON.stringify(user.value));
     return response.data;
@@ -105,6 +102,10 @@ export const useAuthStore = defineStore("auth", () => {
     loginWithPhone,
     loginWithWechat,
     sendSmsCode,
+    getQrCode,
+    checkQrCodeStatus,
+    mockScanQrCode,
+    mockConfirmQrCode,
     logout,
     updateProfile,
   };

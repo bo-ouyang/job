@@ -5,10 +5,9 @@ import hashlib
 import hmac
 import base64
 from typing import Optional
-import logging
+from core.logger import sys_logger as logger
 from jobCollectionWebApi.config import settings
 
-logger = logging.getLogger(__name__)
 
 class SMSService:
     """短信服务（阿里云示例）"""

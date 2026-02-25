@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from "vue";
-import api from "../core/api";
+import { walletAPI } from '@/api/wallet';
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
@@ -17,7 +17,7 @@ const quickAmounts = [10, 50, 100, 200];
 
 const fetchBalance = async () => {
   try {
-    const res = await api.get("/wallet/balance");
+    const res = await walletAPI.getBalance();
     balance.value = res.data.balance;
   } catch (e) {
     console.error("Failed to fetch balance", e);
@@ -29,7 +29,7 @@ const handleTopUp = async () => {
 
   loading.value = true;
   try {
-    const res = await api.post("/payment/create", {
+    const res = await walletAPI.createPayment({
       amount: topUpAmount.value,
       product_type: "wallet_topup",
       payment_method: "alipay", // Default to alipay for now, or add selector
@@ -57,7 +57,7 @@ const pollStatus = () => {
   if (checkInterval) clearInterval(checkInterval);
   checkInterval = setInterval(async () => {
     try {
-      const res = await api.get(`/payment/check/${paymentOrderNo.value}`);
+      const res = await walletAPI.checkPaymentStatus(paymentOrderNo.value);
       if (res.data.status === "paid") {
         paymentStatus.value = "paid";
         clearInterval(checkInterval);

@@ -8,8 +8,9 @@ from urllib.parse import urlparse
 
 try:
     from DrissionPage import ChromiumPage, ChromiumOptions
-except ImportError:
-    print("Please install requirements: pip install DrissionPage redis")
+    from proxy_manager import proxy_manager
+except ImportError as e:
+    print(f"Please install requirements: pip install DrissionPage redis httpx. Error: {e}")
     sys.exit(1)
 
 from dotenv import load_dotenv
@@ -27,12 +28,27 @@ REDIS_DB = int(os.getenv('REDIS_DB', 0))
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', '')
 REDIS_QUEUE_KEY = 'boss_browser_command_queue'
 
-def get_browser():
+def get_browser(proxy_url=None):
     """Configure and launch ChromiumPage"""
     co = ChromiumOptions()
     
-    # Proxy Configuration (Point to Mitmproxy)
-    co.set_proxy("127.0.0.1:8889")
+    # Proxy Configuration
+    # Fallback to local mitmproxy if no proxy provided (but user wants KDL for detail!)
+    # Actually, if we use KDL, we bypass Mitmproxy! 
+    # WAIT: if we bypass Mitmproxy, the Scrapy parser won't get the JSON because mitmproxy isn't intercepting it!
+    # Ah! If we use a direct proxy here, Mitmproxy won't see it unless we configure Mitmproxy to use an Upstream Proxy instead.
+    # But since this is the *Detail* page, does the Detail Spider rely on Mitmproxy JSON interception, or raw DOM parsing?
+    # Detail pages might just use DOM. Let's assume DP renders it and DP saves DOM? No, Scrapy runs `boss_detail` which fetches the DB URL itself, or DP just visits it?
+    # Looking at the run_pipeline.py, Detail Spider runs scrapy. DP just triggers it? Or DP loads the page so Scrapy can parse DB?
+    # Actually, in DrissionPage detail controller, it relies on Mitmproxy to intercept details?
+    # Let's set the proxy. If Mitmproxy is needed, the proxy should be set in Mitmproxy. 
+    # Assuming DP triggers some background API or simply bypasses anti-bot.
+    if proxy_url:
+        print(f"   [Browser] Setting proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
+        co.set_proxy(proxy_url)
+    else:
+        # If no KDL proxy available, optionally fallback or run direct
+        co.set_proxy("127.0.0.1:8889") # Mitmproxy fallback
     
     # Isolate user data to prevent proxy bypass due to existing chrome instances
     user_data_dir = os.path.join(current_dir, "chrome_isolated_data_detail")
@@ -42,10 +58,6 @@ def get_browser():
     co.set_argument("--blink-settings=imagesEnabled=false") # Disable images
     co.set_argument("--ignore-certificate-errors")
     co.mute(True) # Mute audio
-    
-    # Use existing Chrome if available, or launch new one
-    # DrissionPage handles this automatically usually, but let's be explicit about port if needed
-    # co.set_local_port(9222) 
     
     page = ChromiumPage(co)
     return page
@@ -66,9 +78,11 @@ def main():
         sys.exit(1)
 
     # Initialize Browser
+    current_proxy = proxy_manager.get_proxy()
+    page = None
     try:
-        page = get_browser()
-        print("   Browser Initialized.")
+        page = get_browser(current_proxy)
+        print("   Browser Initialized with Proxy.")
     except Exception as e:
         print(f"   Failed to initialize browser: {e}")
         sys.exit(1)
@@ -91,12 +105,37 @@ def main():
                 
                 # Navigate
                 try:
-                    page.get(url)
+                    if page:
+                        page.get(url)
                     # No need to wait for full load if we rely on Mitmproxy interception
                     # But a small wait helps ensure the request goes out
                     time.sleep(4) 
+                    
+                    # Anti-Bot Check
+                    if page and ("安全拦截" in page.html or "验证码" in page.html or "系统检测到您" in page.html):
+                        print("   [Anti-Bot] 检测到反爬/验证码拦截！")
+                        proxy_manager.remove_proxy(current_proxy)
+                        current_proxy = proxy_manager.get_proxy()
+                        print("   [Anti-Bot] 重启浏览器切换IP...")
+                        if page:
+                            page.quit()
+                        time.sleep(2)
+                        page = get_browser(current_proxy)
+                        # Push task back to queue for retry
+                        r.rpush(REDIS_QUEUE_KEY, payload)
+                        continue
+                        
                 except Exception as e:
                     print(f"   Browser Error: {e}")
+                    proxy_manager.remove_proxy(current_proxy)
+                    current_proxy = proxy_manager.get_proxy()
+                    try:
+                        if page:
+                            page.quit()
+                    except: pass
+                    page = get_browser(current_proxy)
+                    r.rpush(REDIS_QUEUE_KEY, payload)
+                    continue
                 
                 # Wait for Spider to signal completion
                 print(f"等待数据抓取 (Job: {job_id})...")
@@ -121,6 +160,7 @@ def main():
                 
         except KeyboardInterrupt:
             print("\n停止 Controller。")
+            if page: page.quit()
             break
         except Exception as e:
             print(f"\nError in loop: {e}")

@@ -115,7 +115,7 @@ class JobWithRelations(JobInDB):
 
 # 列表项模式（精简版）
 class JobSimple(BaseModel):
-    id: int
+    #id: int
     title: str
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None

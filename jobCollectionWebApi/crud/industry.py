@@ -8,9 +8,8 @@ from datetime import datetime
 import time
 
 from sqlalchemy import select, text
-import logging
+from core.logger import sys_logger as logger
 
-logger = logging.getLogger(__name__)
 
 class IndustryCRUD:
     

@@ -13,8 +13,8 @@ SIMPLE_SCRIPT_DIR = os.path.join(BASE_DIR, "jobCollection", "simple_script")
 LIST_SPIDER_CMD = "scrapy crawl boss_list"
 LIST_CONTROLLER_SCRIPT = "boss_list_gui_controller.py"
 
-DETAIL_SPIDER_CMD = "scrapy crawl boss_detail"
-DETAIL_CONTROLLER_SCRIPT = "boss_detail_gui_controller.py"
+# New monolithic spider for detail
+DETAIL_SPIDER_CMD = "scrapy crawl boss_detail_drission"
 
 def kill_process_by_name(name):
     """Utility to ensure clean states by killing straggler processes"""
@@ -113,29 +113,9 @@ def run_detail_spider():
     print("   Filling details for all is_crawl=0 DB rows")
     print("=============================================")
     
-    # 1. Clean up old orphan GUI controllers
-    kill_process_by_name(DETAIL_CONTROLLER_SCRIPT)
-    
-    # 2. Launch GUI Controller (Background)
-    print(f"[Pipeline] Launching Detail GUI Controller: {DETAIL_CONTROLLER_SCRIPT}")
-    gui_controller = subprocess.Popen(
-        [PYTHON_EXECUTABLE, DETAIL_CONTROLLER_SCRIPT], 
-        cwd=SIMPLE_SCRIPT_DIR
-    )
-    
-    # Give it a second to connect to Redis
-    time.sleep(2)
-    
-    # 3. Launch the Scrapy Detail Process
+    # 3. Launch the new standalone Scrapy Detail Process
     print(f"[Pipeline] Launching Scrapy Detail Spider: {DETAIL_SPIDER_CMD}")
     try:
-        # We run the scrapy command as an executable blocking call
-        # It will automatically exit when there are no more is_crawl=0 jobs to process!
-        # Because we yield from DB and Stop on Idle (Wait, actually BossBaseSpider has Idle loop...)
-        # Wait, the BossBaseSpider `spider_idle` currently prevents it from closing (DontCloseSpider),
-        # as it continuously pings Redis. You might need to Ctrl+C it manually, 
-        # OR we just let it run perpetually as a final resting state.
-        
         scrapy_args = DETAIL_SPIDER_CMD.split()
         # Ensure it runs globally in jobCollection where scrapy.cfg is
         scrapy_process = subprocess.Popen(scrapy_args, shell=True, cwd=BASE_DIR)
@@ -145,13 +125,7 @@ def run_detail_spider():
     except KeyboardInterrupt:
          print("\n[Pipeline] Interrupted by user during Detail Phase. Shutting down Workers...")
     finally:
-         if gui_controller.poll() is None:
-              gui_controller.terminate()
-              try:
-                  gui_controller.wait(5)
-              except:
-                  gui_controller.kill()
-         if scrapy_process and scrapy_process.poll() is None:
+         if 'scrapy_process' in locals() and scrapy_process and scrapy_process.poll() is None:
               scrapy_process.terminate()
 
 def run():
