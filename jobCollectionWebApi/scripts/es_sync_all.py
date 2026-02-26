@@ -2,20 +2,20 @@ import asyncio
 import sys
 import os
 import json
-from core.logger import sys_logger as logger
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 # Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from common.database.PostgresManager import db_manager
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.databases.PostgresManager import db_manager
 from config import settings
 from common.search.conn import get_es, es_manager
 from common.databases.models.job import Job
 from elasticsearch.helpers import async_bulk
-
-logging.basicConfig(level=logging.INFO)
+from core.logger import sys_logger as logger
+#logging.basicConfig(level=logging.INFO)
 
 async def fetch_jobs_from_pg(session, skip: int, limit: int):
     """Fetch jobs with company and industry relations"""
@@ -78,7 +78,8 @@ def format_job_for_es(job: Job) -> dict:
             "skills": skills,
             "tags": skills,
             "publish_date": job.publish_date.isoformat() if job.publish_date else None,
-            "created_at": job.created_at.isoformat() if job.created_at else None
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "location": job.location
         }
     }
 
@@ -87,7 +88,7 @@ async def sync_all_jobs_to_es():
     es = await get_es()
     await db_manager.initialize()
     
-    batch_size = 500
+    batch_size = 200
     skip = 0
     total_synced = 0
     
@@ -104,7 +105,7 @@ async def sync_all_jobs_to_es():
             
             from elasticsearch.helpers import BulkIndexError
             try:
-                success, failed = await async_bulk(es, actions, stats_only=True)
+                success, failed = await async_bulk(es, actions, stats_only=True,chunk_size=200,request_timeout=60)
                 total_synced += success
                 logger.info(f"Successfully Bulk Inserted: {success} | Failed: {failed}")
             except BulkIndexError as e:
