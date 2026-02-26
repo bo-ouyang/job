@@ -18,7 +18,7 @@ const onRefreshed = (token) => {
 };
 
 // Request interceptor
-api.interceptors.request.use(
+service.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
     if (token) {
@@ -30,7 +30,7 @@ api.interceptors.request.use(
 );
 
 // Response interceptor
-api.interceptors.response.use(
+service.interceptors.response.use(
   (response) => {
     // Auto-unwrap unified response structure
     if (
@@ -63,8 +63,8 @@ api.interceptors.response.use(
         isRefreshing = true;
         try {
           // No interceptors for this specific call to avoid loop
-          // Use the same baseURL as the main api instance
-          const refreshUrl = `${api.defaults.baseURL}/auth/refresh-token`;
+          // Use the same baseURL as the main service instance
+          const refreshUrl = `${service.defaults.baseURL}/auth/refresh-token`;
           console.log(
             `Token expired (401). Attempting silent refresh via ${refreshUrl}...`,
           );
@@ -106,7 +106,7 @@ api.interceptors.response.use(
       return new Promise((resolve) => {
         subscribeTokenRefresh((token) => {
           originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(api(originalRequest));
+          resolve(service(originalRequest));
         });
       });
     }
@@ -126,4 +126,4 @@ function handleLogout() {
   }
 }
 
-export default api;
+export default service;

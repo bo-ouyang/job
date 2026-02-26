@@ -104,7 +104,7 @@ class SearchService:
                          "id": 0, 
                          "name": source.get("industry", "")
                      },
-                     "tags": source.get("skills", [])
+                     "tags": list(set(source.get("skills", []) + source.get("ai_skills", [])))
                  })
                  
             logger.info("Successfully fetched search results from Elasticsearch.")
@@ -134,11 +134,22 @@ class SearchService:
                 if job.tags:
                     try:
                         import json
-                        skills = job.tags if isinstance(job.tags, (list, dict)) else json.loads(job.tags)
-                        if isinstance(skills, str): skills = [skills]
+                        parsed_tags = job.tags if isinstance(job.tags, (list, dict)) else json.loads(job.tags)
+                        if isinstance(parsed_tags, str): parsed_tags = [parsed_tags]
+                        skills.extend(parsed_tags)
                     except:
-                        skills = [str(job.tags)]
-
+                        skills.append(str(job.tags))
+                
+                if job.ai_skills:
+                    try:
+                        import json
+                        parsed_ai = job.ai_skills if isinstance(job.ai_skills, (list, dict)) else json.loads(job.ai_skills)
+                        if isinstance(parsed_ai, str): parsed_ai = [parsed_ai]
+                        skills.extend(parsed_ai)
+                    except:
+                        skills.append(str(job.ai_skills))
+                        
+                skills = list(set(skills))
                 job_dict = {
                     "id": job.id,
                     "title": job.title,
@@ -282,7 +293,7 @@ class SearchService:
                      "publish_date": source.get("publish_date"),
                      "company": {"id": 0, "name": source.get("company_name", "")},
                      "industry": {"id": 0, "name": source.get("industry", "")},
-                     "tags": source.get("skills", [])
+                     "tags": list(set(source.get("skills", []) + source.get("ai_skills", [])))
                  })
                  
             return job_list, total
@@ -305,11 +316,22 @@ class SearchService:
                 if job.tags:
                     try:
                         import json
-                        skills = job.tags if isinstance(job.tags, (list, dict)) else json.loads(job.tags)
-                        if isinstance(skills, str): skills = [skills]
+                        parsed_tags = job.tags if isinstance(job.tags, (list, dict)) else json.loads(job.tags)
+                        if isinstance(parsed_tags, str): parsed_tags = [parsed_tags]
+                        skills.extend(parsed_tags)
                     except:
-                        skills = [str(job.tags)]
-
+                        skills.append(str(job.tags))
+                
+                if job.ai_skills:
+                    try:
+                        import json
+                        parsed_ai = job.ai_skills if isinstance(job.ai_skills, (list, dict)) else json.loads(job.ai_skills)
+                        if isinstance(parsed_ai, str): parsed_ai = [parsed_ai]
+                        skills.extend(parsed_ai)
+                    except:
+                        skills.append(str(job.ai_skills))
+                        
+                skills = list(set(skills))
                 job_list.append({
                     "id": job.id,
                     "title": job.title,

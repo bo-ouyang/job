@@ -39,7 +39,10 @@ class Industry(IndustryBase):
         from_attributes = True
 
 # 行业树形结构
-class IndustryTree(Industry):
+class IndustryTree(BaseModel):
+    code: int
+    name: str
+    level: int
     children: List['IndustryTree'] = []
     
     class Config:

@@ -183,7 +183,7 @@ if __name__ == "__main__":
         port=8000,
         reload=True,
         log_config=None,  # !!! 禁用 Uvicorn 原生的纯文本日志配置，强迫它被我们刚才接管 !!!
-        reload_dirs=["./app", "./api", "./core"],
+        reload_dirs=["."],
         reload_excludes=["./tests/*", "./logs/*"],
         reload_delay=0.5,
         access_log=False, # 防止 Uvicorn 疯狂刷 Access 阻碍我们排错，可以在 Loguru 这边处理或靠 Middleware 打印

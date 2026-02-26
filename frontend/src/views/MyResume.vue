@@ -85,21 +85,6 @@ const handleResumeUpload = async (event) => {
 // AI Parsing
 const parsingStatus = ref("");
 import { resumeAPI } from '@/api/resume';
-// We need to listen to WS events.
-// Ideally we use a store or global event bus.
-// For now, let's poll or rely on App.vue to dispatch event?
-// Or better: pass a callback to App.vue via store?
-// Simplest: App.vue updates a store, we watch store.
-// Let's assume user stays on this page.
-// We can also just listen to WS here if we had access to the socket instance.
-// But App.vue owns the socket.
-// Let's use `window.addEventListener('job-ws-message')` pattern if App.vue dispatches it?
-// Or just let user wait and refresh?
-// Let's implement a store-based message queue or just use a dirty polling for resume updates?
-// Actually the backend sends "resume_parsed" event.
-// Let's try to allow App.vue to emit a global event.
-// In App.vue: window.dispatchEvent(new CustomEvent('ws-message', { detail: data }));
-// Here: window.addEventListener('ws-message', ...)
 
 const handleSmartParse = async (event) => {
   const file = event.target.files[0];

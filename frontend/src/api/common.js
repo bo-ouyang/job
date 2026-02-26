@@ -11,4 +11,7 @@ export const commonAPI = {
     }
     return request.get(`/industries/industries/parent/${level_or_parent}`);
   },
+  getIndustryTree() {
+    return request.get(`/industries/industries/tree/`);
+  },
 };

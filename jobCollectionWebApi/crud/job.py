@@ -290,11 +290,11 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             conditions.append(Job.salary_min <= salary_max)
         
         # 行业筛选逻辑
-        if industry_2:
-             # 二级行业 (Sub Industry Code)
-             conditions.append(Job.industry_code == industry_2)
+        # if industry_2:
+        #      # 二级行业 (Sub Industry Code)
+        #      conditions.append(Job.industry_code == industry_2)
              
-        elif industry:
+        if industry:
              # 一级行业 (Parent Industry Code)
              # 查找该父行业下所有子行业的 Code，以及父行业本身的 Code
              # Industry.parent_id 关联的是 Code
@@ -347,35 +347,39 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         # 4. 技能分布 (优化：使用数据库 JSON 函数聚合)
         # 注意: 前提是 tags 字段存储的是 JSON 数组
         try:
+             q1 = select(func.jsonb_array_elements_text(Job.tags).label("tag")).where(and_(base_filter, Job.tags.isnot(None)))
+             q2 = select(func.jsonb_array_elements_text(Job.ai_skills).label("tag")).where(and_(base_filter, Job.ai_skills.isnot(None)))
+             combined = q1.union_all(q2).subquery()
+             
              skills_stmt = (
                 select(
-                    func.jsonb_array_elements_text(Job.tags).label("tag"),
+                    combined.c.tag,
                     func.count().label("cnt")
                 )
-                .where(base_filter)
-                .group_by("tag")
+                .group_by(combined.c.tag)
                 .order_by(desc("cnt"))
                 .limit(10)
             )
              skills_res = await db.execute(skills_stmt)
-             skill_dist = [{"name": row.tag, "value": row.cnt} for row in skills_res.all()]
+             skill_dist = [{"name": row.tag, "value": row.cnt} for row in skills_res.all() if row.tag]
         except Exception as e:
              await db.rollback()
              # 降级: 如果数据库不支持或数据格式错误，回退到部分采样统计
              # print(f"DB Skill Aggregation failed: {e}, falling back to sampling.")
-             skills_stmt = select(Job.tags).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
+             skills_stmt = select(Job.tags, Job.ai_skills).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
              skills_res = await db.execute(skills_stmt)
              all_tags = []
-             for row in skills_res.scalars():
-                 if row:
-                     try:
-                         tags = row if isinstance(row, (list, dict)) else json.loads(row)
-                         if isinstance(tags, list): all_tags.extend(tags)
-                         else: all_tags.append(str(tags))
-                     except:
-                         pass
+             for row in skills_res.all():
+                 for item in [row[0], row[1]]:
+                     if item:
+                         try:
+                             tags = item if isinstance(item, (list, dict)) else json.loads(item)
+                             if isinstance(tags, list): all_tags.extend(tags)
+                             else: all_tags.append(str(tags))
+                         except:
+                             pass
              skill_counts = Counter(all_tags).most_common(12)
-             skill_dist = [{"name": name, "value": count} for name, count in skill_counts]
+             skill_dist = [{"name": name, "value": count} for name, count in skill_counts if name]
 
         # 5. 统计总数
         total_stmt = select(func.count(Job.id)).where(base_filter)
@@ -448,16 +452,19 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             .order_by(func.count(Job.id).desc())
             .limit(5)
         )
+        q1 = select(func.jsonb_array_elements_text(Job.tags).label("tag")).where(and_(base_filter, Job.tags.isnot(None)))
+        q2 = select(func.jsonb_array_elements_text(Job.ai_skills).label("tag")).where(and_(base_filter, Job.ai_skills.isnot(None)))
+        combined = q1.union_all(q2).subquery()
+        
         skills_stmt = (
-                select(
-                    func.jsonb_array_elements_text(Job.tags).label("tag"),
-                    func.count().label("cnt")
-                )
-                .where(base_filter)
-                .group_by("tag")
-                .order_by(func.count().desc())
-                .limit(10000)
+            select(
+                combined.c.tag,
+                func.count().label("cnt")
             )
+            .group_by(combined.c.tag)
+            .order_by(desc("cnt"))
+            .limit(15)
+        )
         total_stmt = select(func.count(Job.id)).where(base_filter)
         #print(industry_stmt) 
         # 1. 执行各个查询 (Sequential execution to avoid transaction issues)
@@ -472,23 +479,24 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         try:
             skills_res = await db.execute(skills_stmt)
             skill_rows = skills_res.all()
-            skill_dist = [{"name": row[0], "value": row[1]} for row in skill_rows][:15]
+            skill_dist = [{"name": row[0], "value": row[1]} for row in skill_rows if row[0]][:15]
         except Exception as e:
             await db.rollback()
             # 降级: 如果数据库抛出 JSON 操作异常，回退到内存级采样分析
-            fallback_stmt = select(Job.tags).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
+            fallback_stmt = select(Job.tags, Job.ai_skills).where(base_filter).order_by(Job.publish_date.desc()).limit(10000)
             fallback_res = await db.execute(fallback_stmt)
             all_tags = []
-            for row in fallback_res.scalars():
-                if row:
-                    try:
-                        tags = row if isinstance(row, (list, dict)) else json.loads(row)
-                        if isinstance(tags, list): all_tags.extend(tags)
-                        else: all_tags.append(str(tags))
-                    except:
-                        pass
+            for row in fallback_res.all():
+                for item in [row[0], row[1]]:
+                    if item:
+                        try:
+                            tags = item if isinstance(item, (list, dict)) else json.loads(item)
+                            if isinstance(tags, list): all_tags.extend(tags)
+                            else: all_tags.append(str(tags))
+                        except:
+                            pass
             skill_counts = Counter(all_tags).most_common(15)
-            skill_dist = [{"name": name, "value": count} for name, count in skill_counts]
+            skill_dist = [{"name": name, "value": count} for name, count in skill_counts if name]
 
         total_res = await db.execute(total_stmt)
         total = total_res.scalar_one()

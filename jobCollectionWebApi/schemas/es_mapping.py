@@ -66,7 +66,8 @@ JOB_INDEX_MAPPING = {
             "skills": {"type": "keyword"}, # 列表
             "tags": {"type": "keyword"},   # 列表
             "publish_date": {"type": "date"},
-            "created_at": {"type": "date"}
+            "created_at": {"type": "date"},
+            "location": {"type": "keyword"}
         }
     }
 }

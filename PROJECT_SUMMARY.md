@@ -174,3 +174,36 @@
 #### C. 数据映射与 AI 端点修复 (Mapping Calibration)
 - 修正了 ES 同步脚本 (`es_sync_all.py` / `es_sync.py`) 的抽取规则：支持完整的 `city_code` 和 `industry_code` 整型建树并同步至 Elasticsearch。
 - 修复了 `analysis_service.py` 层级连投递 ID 参数（如 `industry`, `location`）导致的查询报错。消除了强制拦截抛出的 `ValueError`，在 ES 查询 DSL 构建时：若传 `location`，则直接匹配 `city_code`；若传 `industry` 大类，则利用映射的 PostgreSQL 关系回溯补查全系子行业 Code 并带入 ES 的 `terms` (In 查询) 中完美解决数据穿透过滤。
+
+## 10. 最近更新 (2026-02-25 ~ 2026-02-26)
+
+### 职业罗盘功能精细化与后端级联查询优化 (Career Compass & Materialized Path Optimization)
+
+本次迭代大幅提升了“职业罗盘 (Career Compass)”的交互准确性与底层数据查询效率：
+
+#### A. 行业级联搜索的 Materialized Path 改造
+- **树形查询极致优化**：放弃了原先在 `get_rollup_codes` 与子节点下探查询中使用的**递归 CTE (Recursive CTE)**，为行业表 (`industries`) 引入了经典的 **Materialized Path (物化路径)** 字段 `path`。现在获取任意分类下的所有叶子节点仅需一次原生的 `LIKE '0/1000/%'` 极速前缀匹配，大幅度削减了分析大盘时的数据库耗时。
+- **内存级别树组装**：重写了 `/industries/tree/` API，现在只进行**一次全量扫描查询**，随后在 Python 内存中使用字典 Hash-Map 将线性数据转化为多级树形结构，从 O(N^2) N+1 查询复杂度断崖式降至 O(N)。
+- **安全拦截过滤**：修改了输出至前端的 `IndustryTree` Pydantic Schema，显式剔除了 `id` 和 `parent_id` 等底层数据库结构痕迹，保证对外网透出的 API 只存留 `code` 及其业务形态。
+
+#### B. 罗盘大盘 (Career Compass) 联动改造
+- **前端 CSS 布局扩容**：重构了 `CareerCompass.vue` 顶部的复合级联框样式，放宽了 `max-width` 限制并引入弹性边界，解决了级联菜单过长导致的元素挤压或同行断行问题。
+- **全链路 Code 穿透**：重写了整个 AI 罗盘与词云 (Skill Cloud) 获取链路，将前置由 Vue 发出的 `行业名称 (String)` 强制替换为精确的 **级联行业 Code (Int)**。
+- **两级下探精准画像**：修改了 `analysis_service.py` 中的 Elasticsearch 聚合统计逻辑，现在的 ES 请求支持同时接收并解析主行业与次级行业的 Code (例如 `industry` 和 `industry_2`)，使得生成的词云与 AI 职业规划报告极度贴合用户的最后一次精准鼠标落点。
+
+## 11. 最近更新 (2026-02-26 追加)
+
+### 职业数据大盘深度修缮与缓存架构重构 (Dashboard Refinement & Cache Refactoring)
+
+本次追加更新针对前端“职业罗盘”渲染生命周期、后端的缓存封装维度及基础 API 路由规范进行了系统级别的修缮与重塑。
+
+#### A. Vue 渲染生命周期与 ECharts 挂载修复 (ECharts Lifecycle Fix)
+- **DOM 挂载劫持修正**：修复了 `CareerCompass.vue` 界面中，当处于加载状态 (`v-loading`) 时 Vue 卸载宿主 DOM 节点，导致 ECharts 实例绑空 (`Initialize failed`) 的核心 Bug。
+- **安全的 NextTick 释放**：重构了 `handleAnalyze` 函数的最终块 (`finally`)，利用 `nextTick` 确保 loading 状态彻底切断出队且真实 DOM 回归后才执行图表的 `initCharts` 与 `updateCharts`。同时增加了内置的实例清理机制 (`dispose()`)，彻底根除了前端页面的内存飙升泄漏问题。
+
+#### B. API 路由基础规范回退修复 (API Routing Remediation)
+- **405 动词冲突收敛**：根治了 `GET /api/v1/jobs` 抛出 `405 Method Not Allowed` 且被 307 重定向污染的问题。将 Controller 层中针对获取职位列表错误配置的 `@router.get("/jobs")` 修缮回基底 `@router.get("")`，打通了前端职位集市的数据血脉。
+
+#### C. 服务端装饰器级的高阶缓存重构 (Decorator-driven Cache Architecture)
+- **智能装饰器替换**：梳理界定了 `Service` 层“强防击穿缓存”与 `Controller` 层“防并发缓存”的边界界限。面向具备高频低负担的查询端点（如 获取行业树、获取级联类目），全面移除了繁冗的 Redis 编程式手搓代码。
+- **切面注入**：以 `core.cache.py` 内部提供的泛型 `@cache` 装饰器一键接管了 Controller 层级的序列化 Hash 锁，精简了大量核心代码量的同时赋予了 API 本征态长效期与短期弹性的自控能力。保留底层核心 ES 查询的强阻断缓存锁机制，构成内外双层的完美缓存生态壁垒。

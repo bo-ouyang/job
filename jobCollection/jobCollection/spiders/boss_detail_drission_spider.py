@@ -184,55 +184,56 @@ class BossDetailDrissionSpider(scrapy.Spider):
 
             # `jobs` is practically a list from SQLAlchemy's .all(), but Pyre2 might struggle
             
-            for job in jobs:
-                encrypt_job_id = job.encrypt_job_id
-                url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
-                self.logger.info(f"Processing Task: {encrypt_job_id} -> {url}")
+            #for job in jobs:
+            job = jobs[0]
+            encrypt_job_id = job.encrypt_job_id
+            url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
+            self.logger.info(f"Processing Task: {encrypt_job_id} -> {url}")
     
-                # 2. Navigate and Anti-Bot Check
-                success = await self._navigate_with_anti_bot(url)
+            # 2. Navigate and Anti-Bot Check
+            success = await self._navigate_with_anti_bot(url)
                 
-                if not success:
+            if not success:
                    self.logger.warning(f"Failed to navigate properly for {encrypt_job_id}, retrying later.")
                    # Revert task state to pending
                    await self._revert_task(encrypt_job_id)
                    continue
                    
                 # 3. Extract Data
-                html_content = self.page.html if self.page else ""
-                job_desc = self._extract_job_desc(html_content)
+            html_content = self.page.html if self.page else ""
+            job_desc = self._extract_job_desc(html_content)
                 
-                if job_desc:
-                    # 4. Save to DB
-                    await self._update_job_in_db(encrypt_job_id, job_desc)
-                    self.logger.info(f"Successfully processed and updated {encrypt_job_id}")
-                    self.ip_request_count += 1
-                    self.fp_request_count += 1
-                else:
-                    self.logger.warning(f"Could not extract description for {encrypt_job_id}. Layout change?")
-                    await self._update_job_in_db(encrypt_job_id, "解析失败: 未找到描述")
-    
-                # 5. Very short sleep to let DP breathe and prevent instant IP blocks
-                await asyncio.sleep(3)
+            if job_desc:
+                # 4. Save to DB
+                await self._update_job_in_db(encrypt_job_id, job_desc)
+                self.logger.info(f"Successfully processed and updated {encrypt_job_id}")
+                self.ip_request_count += 1
+                self.fp_request_count += 1
+            else:
+                self.logger.warning(f"Could not extract description for {encrypt_job_id}. Layout change?")
+                await self._update_job_in_db(encrypt_job_id, "解析失败: 未找到描述")
+
+            # 5. Very short sleep to let DP breathe and prevent instant IP blocks
+            await asyncio.sleep(3)
+            
+            # 6. Automatic IP Rotation after X successful requests
+            if self.ip_request_count >= 500:
+                self.logger.info(f"[Rotation Strategy] Reached {self.ip_request_count} requests on current IP. Forcing Proxy Rotation...")
+                await self._force_rotate_proxy()
+                self.ip_request_count = 0
                 
-                # 6. Automatic IP Rotation after X successful requests
-                if self.ip_request_count >= 100:
-                   self.logger.info(f"[Rotation Strategy] Reached {self.ip_request_count} requests on current IP. Forcing Proxy Rotation...")
-                   await self._force_rotate_proxy()
-                   self.ip_request_count = 0
-                   
-                # 6.5 Time-based IP Rotation (KDL proxy valid for 5-10 mins, rotate every 4.5 mins)
-                elif time.time() - self.proxy_start_time > 270:
-                   self.logger.info(f"[Rotation Strategy] Proxy lifetime exceeded 4.5 minutes. Forcing Proxy Rotation...")
-                   await self._force_rotate_proxy()
-                   self.ip_request_count = 0
-                   
-                # 7. Automatic Fingerprint Rotation after Y successful requests
-                if self.fp_request_count >= 150:
-                   self.logger.info(f"[Rotation Strategy] Reached {self.fp_request_count} requests. Forcing full Fingerprint & Browser Swap...")
-                   await self._force_rotate_fingerprint()
-                   self.fp_request_count = 0
-                   self.ip_request_count = 0 # FP rotation also rotates IP inherently if we want, or just restarts browser
+            # 6.5 Time-based IP Rotation (KDL proxy valid for 5-10 mins, rotate every 4.5 mins)
+            elif time.time() - self.proxy_start_time > 360:
+                self.logger.info(f"[Rotation Strategy] Proxy lifetime exceeded 6 minutes. Forcing Proxy Rotation...")
+                await self._force_rotate_proxy()
+                self.ip_request_count = 0
+                
+            # 7. Automatic Fingerprint Rotation after Y successful requests
+            if self.fp_request_count >= 500:
+                self.logger.info(f"[Rotation Strategy] Reached {self.fp_request_count} requests. Forcing full Fingerprint & Browser Swap...")
+                await self._force_rotate_fingerprint()
+                self.fp_request_count = 0
+                self.ip_request_count = 0 # FP rotation also rotates IP inherently if we want, or just restarts browser
                    
     async def _force_rotate_proxy(self):
         """Intentionally discard current proxy and restart browser with a new one"""
@@ -292,7 +293,7 @@ class BossDetailDrissionSpider(scrapy.Spider):
             
             # self.page.url might be a property, but it's safe to check
             current_url = self.page.url if getattr(self.page, 'url', None) else ""
-            security_urls = ['user/safe','security']
+            security_urls = ['user/safe']
             is_security_url = all(security_url in current_url for security_url in security_urls)
             #is_blocked or
             if is_security_url:
@@ -498,11 +499,18 @@ class BossDetailDrissionSpider(scrapy.Spider):
                 job = result.scalar_one_or_none()
                 
                 if job:
-                    job.description = job_desc
-                    job.is_crawl = 1 # Finished
-                    job.updated_at = datetime.now()
-                    await session.commit()
-                    return True
+                    if job_desc != '解析失败: 未找到描述':
+
+                        job.description = job_desc
+                        job.is_crawl = 1 # Finished
+                        job.updated_at = datetime.now()
+                        await session.commit()
+                        return True
+                    else:
+                        job.is_crawl = 0 # Failed
+                        job.updated_at = datetime.now()
+                        await session.commit()
+                        return False
                 else:
                     self.logger.warning(f"Job {encrypt_job_id} not found in DB during update")
                     return False

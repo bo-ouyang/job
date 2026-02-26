@@ -85,7 +85,10 @@ class AIAdviceRequest(BaseModel):
 
 class CareerCompassRequest(BaseModel):
     major_name: str
-    target_industry: Optional[str] = None
+    target_industry: Optional[int] = None
+    target_industry_2: Optional[int] = None
+    target_industry_name: Optional[str] = None
+    target_industry_2_name: Optional[str] = None
 
 class APILogInDB(APILogBase, TimestampSchema):
     id: int

@@ -78,10 +78,10 @@ def main():
         sys.exit(1)
 
     # Initialize Browser
-    current_proxy = proxy_manager.get_proxy()
+    #current_proxy = proxy_manager.get_proxy()
     page = None
     try:
-        page = get_browser(current_proxy)
+        page = get_browser()
         print("   Browser Initialized with Proxy.")
     except Exception as e:
         print(f"   Failed to initialize browser: {e}")

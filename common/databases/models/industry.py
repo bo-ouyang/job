@@ -31,6 +31,7 @@ class Industry(Base):
     # 层级关系
     parent_id = Column(Integer, ForeignKey('industries.code'), nullable=True, comment='父级ID')
     level = Column(Integer, nullable=False, default=0, comment='层级：0-一级行业，1-二级行业')
+    path = Column(String(255), nullable=True, index=True, comment='路径，如 0/1000/1001/')
     
     # 其他属性
     tip = Column(Text, nullable=True, comment='提示信息')
@@ -80,6 +81,7 @@ class Industry(Base):
             'centerGeo': self.center_geo,
             'value': self.value,
             'parentId': self.parent_id,
+            'path': self.path,
             'level': self.level,
             'createdAt': self.created_at,
             'updatedAt': self.updated_at

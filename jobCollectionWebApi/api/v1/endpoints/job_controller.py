@@ -123,7 +123,7 @@ async def ai_search_jobs(
             detail=f"AI Search Failed: {str(e)}"
         )
 
-@router.get("/jobs", response_model=JobList)
+@router.get("", response_model=JobList)
 @cache(expire=300)
 async def read_jobs(
     request: Request,
@@ -168,14 +168,14 @@ async def read_jobs(
         )
     
     # DEBUG
-    if jobs:
-        print(f"DEBUG: jobs[0] type: {type(jobs[0])}", flush=True)
-        if hasattr(jobs[0], 'industry'):
-             print(f"DEBUG: jobs[0].industry: {jobs[0].industry}", flush=True)
-             if jobs[0].industry:
-                 print(f"DEBUG: jobs[0].industry type: {type(jobs[0].industry)}", flush=True)
-                 if hasattr(jobs[0].industry, '__dict__'):
-                     print(f"DEBUG: jobs[0].industry dict: {jobs[0].industry.__dict__}", flush=True)
+    # if jobs:
+    #     print(f"DEBUG: jobs[0] type: {type(jobs[0])}", flush=True)
+    #     if hasattr(jobs[0], 'industry'):
+    #          print(f"DEBUG: jobs[0].industry: {jobs[0].industry}", flush=True)
+    #          if jobs[0].industry:
+    #              print(f"DEBUG: jobs[0].industry type: {type(jobs[0].industry)}", flush=True)
+    #              if hasattr(jobs[0].industry, '__dict__'):
+    #                  print(f"DEBUG: jobs[0].industry dict: {jobs[0].industry.__dict__}", flush=True)
     
     # 2. 构造结果
     result = JobList(

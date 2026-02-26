@@ -6,7 +6,7 @@ from common.databases.models.industry import Industry
 from common.databases.PostgresManager import db_manager
 from datetime import datetime
 import time
-
+from sqlalchemy.orm import selectinload
 from sqlalchemy import select, text
 from core.logger import sys_logger as logger
 
@@ -44,28 +44,62 @@ class IndustryCRUD:
         )
         return result.scalars().all()
     
-    async def get_industry_tree(self, db: AsyncSession, parent_id: Optional[int] = None):
-        """获取行业树形结构"""
-        if parent_id is None:
-            # 获取所有一级行业
-            stmt = select(Industry).filter(Industry.level == 0)
+    async def get_industry_tree(self, db: AsyncSession, parent_id: Optional[int] = None, current_level: int = 0, max_level: Optional[int] = 1):
+        """获取行业树形结构 (极速单次查询自动组装)
+        :param current_level: (保留以兼容旧签名，不再需要通过它递归)
+        :param max_level: 允许获取的最大层级。为 None 时获取全部。
+        """
+        # 决定查询的层级范围
+        if max_level is not None:
+            max_depth = current_level + max_level
+            stmt = select(Industry).where(Industry.level <= max_depth)
         else:
-            # 获取指定父级的子行业
-            stmt = select(Industry).filter(Industry.parent_id == parent_id)
+            stmt = select(Industry)
+
+        # 决定查询的父节点（基于 path 前缀过滤）
+        if parent_id is not None:
+            parent_stmt = text("SELECT path FROM industries WHERE code = :code LIMIT 1")
+            parent_result = await db.execute(parent_stmt, {"code": parent_id})
+            parent_path = parent_result.scalar_one_or_none()
+            if parent_path:
+                stmt = stmt.where(Industry.path.like(f"{parent_path}%"))
+            else:
+                return [] # 父节点不存在
         
+        # 按照 level 排序，确保父节点先处理
+        stmt = stmt.order_by(Industry.level, Industry.rank)
         result = await db.execute(stmt)
-        root_industries = result.scalars().all()
+        all_industries = result.scalars().all()
         
-        result_list = []
-        for industry in root_industries:
-            industry_dict = industry.to_dict()
-            # 递归获取子行业
-            children = await self.get_industry_tree(db, industry.id)
-            if children:
-                industry_dict['children'] = children
-            result_list.append(industry_dict)
+        # O(N) 内存组装树
+        industry_map = {}
+        root_list = []
         
-        return result_list
+        for industry in all_industries:
+            ind_dict = industry.to_dict()
+            ind_dict['children'] = []
+            
+            industry_map[industry.code] = ind_dict
+            
+            # 判断究竟该挂在谁的下面
+            # 如果我们传了 parent_id，那么顶层节点应该是 parent_id 或者其直接子节点 depending on query logic.
+            # 严格地说，所有没有挂载目标父节点的，或者 parent_id is None的，算作本轮组装的 roots。
+            if industry.parent_id is None or (parent_id is not None and industry.parent_id == parent_id and parent_id not in industry_map):
+                root_list.append(ind_dict)
+            else:
+                # 挂载到父节点
+                if industry.parent_id in industry_map:
+                    industry_map[industry.parent_id]['children'].append(ind_dict)
+                else:
+                    # 断层了（数据异常），默认放到根
+                    root_list.append(ind_dict)
+
+        # 清除空的 children 以节省带宽
+        for ind_dict in industry_map.values():
+            if not ind_dict['children']:
+                del ind_dict['children']
+
+        return root_list
     
     async def upsert_industry(self, db: AsyncSession, industry_data: Dict[str, Any]):
         """插入或更新行业数据"""
@@ -253,30 +287,91 @@ class IndustryCRUD:
         except Exception as e:
             await db.rollback()
             raise
-    async def get_rollup_codes(self, db: AsyncSession, codes: List[int]) -> List[int]:
+
+    async def classify_codes_by_level(self, db: AsyncSession, codes: List[int]) -> tuple[List[int], List[str]]:
+        """
+        根据传入的行业 codes 进行层级分解：
+        - Level 0/1: 真正的行业，返回这些 codes (后续用于 get_rollup_codes)
+        - Level >= 2: 职位/招聘类型，返回它们的 name 文本 (后续作为 keywords)
+        
+        Returns:
+            ([industry_codes_level_0_1], [job_type_names_level_2_plus])
+        """
+        if not codes:
+            return [], []
+            
+        stmt = select(Industry).where(Industry.code.in_(codes))
+        result = await db.execute(stmt)
+        industries = result.scalars().all()
+        
+        industry_codes = []
+        job_type_names = []
+        
+        for ind in industries:
+            if ind.level <= 1:
+                industry_codes.append(ind.code)
+            else:
+                if ind.name:
+                    job_type_names.append(ind.name)
+        
+        return industry_codes, job_type_names
+
+    async def get_rollup_codes(self, db: AsyncSession, codes: List[int], level: int = 0) -> List[int]:
         if not codes: return []
         
-        # 使用递归 CTE 向上查找直到 level=1
-        stmt = text("""
-            WITH RECURSIVE industry_tree AS (
-                -- Base case: select starting nodes
-                SELECT code, parent_id, level
-                FROM industries
-                WHERE code = ANY(:codes) OR parent_id = ANY(:codes)
-                
-                UNION ALL
-                
-                -- Recursive step: join with parents
-                SELECT i.code, i.parent_id, i.level
-                FROM industries i
-                INNER JOIN industry_tree it ON i.code = it.parent_id
-            )
-            SELECT code FROM industry_tree WHERE level <= 1;
-        """)
+        # 使用 path 字段获取祖先 code (Level 0 和 Level 1)
+        stmt = select(Industry).where(Industry.code.in_(codes))
+        result = await db.execute(stmt)
+        industries = result.scalars().all()
         
-        result = await db.execute(stmt, {"codes": codes})
-        return result.scalars().all()
+        rollup_codes = set()
+        for ind in industries:
+            if not ind.path: continue
+            parts = [int(x) for x in ind.path.strip('/').split('/') if x]
+            # 取 level 0 和 level 1 的 code (前两个节点)
+            rollup_codes.update(parts[:level+1])
+            
+        return list(rollup_codes)
+    
+    async def get_industry_trees_by_codes(self, db: AsyncSession, target_codes: list[int]):
+        if not target_codes:
+            return []
 
+        # 1. 构建查询：筛选 level=0 且在目标 codes 列表中的记录
+        # 并使用 selectinload 预先加载它们的 children
+        stmt = (
+            select(Industry)
+            .where(Industry.code.in_(target_codes))
+            .options(selectinload(Industry.children))
+            #.order_by(Industry.rank)
+        )
+        
+        result = await db.execute(stmt)
+        parents = result.scalars().all()
+
+        # 2. 组装为前端需要的树形字典列表
+        tree = []
+        for parent in parents:
+            # parent.children 已经被预加载，直接读取毫无延迟
+            children_list = [
+                {"code": child.code, "name": child.name} 
+                for child in parent.children 
+                if child.level == 1 # 确保只挂载 level=1 的数据
+            ]
+            
+            node = {
+                "code": parent.code,
+                "name": parent.name,
+            }
+            
+            # 为了前端级联选择器友好，仅在有子节点时才挂载 children 字段
+            if children_list:
+                node["children"] = children_list
+                
+            tree.append(node)
+
+        return tree
+    
     # async def get_rollup_codes(self, db: AsyncSession, codes: List[int]) -> List[int]:
         # """
         # 1. 找到 industry 表中 code 在 codes 中，或者 parent_id 在 codes 中的数据。

@@ -5,7 +5,8 @@ from typing import List, Optional
 from dependencies import get_db
 from crud.industry import IndustryCRUD
 from schemas.industry import Industry, IndustryCreate, IndustryUpdate, IndustryTree, IndustryResponse
-
+from common.databases.RedisManager import redis_manager
+import json
 router = APIRouter(prefix="/industries", tags=["industries"])
 industry_crud = IndustryCRUD()
 
@@ -56,7 +57,10 @@ async def get_children_industries(
     """获取子行业"""
     return await industry_crud.get_children_industries(db, parent_id)
 
+from core.cache import cache
+
 @router.get("/tree/", response_model=List[IndustryTree])
+@cache(expire=604800, key_prefix="api:industries:tree:v2")
 async def get_industry_tree(
     parent_id: Optional[int] = Query(None, description="父级ID，为空则获取所有一级行业"),
     db: AsyncSession = Depends(get_db)

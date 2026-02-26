@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue';
 import { analysisAPI } from '../api/analysis';
+import { commonAPI } from '../api/common';
 import { ElMessage } from 'element-plus';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -10,11 +11,16 @@ import 'echarts-wordcloud';
 // State
 const loading = ref(false);
 const submitting = ref(false);
+const selectedCategory = ref('');
 const majorName = ref('');
 const targetIndustry = ref(''); // Optional
 const reportMarkdown = ref('');
 
 const majorPresets = ref([]);
+const categoryOptions = ref([]);
+const majorOptions = ref([]);
+const industryOptions = ref([]);
+
 const statsData = ref({ salary: [], skills: [], industries: [] });
 const skillCloudData = ref([]);
 
@@ -43,19 +49,91 @@ const fetchPresets = async () => {
   try {
     const res = await analysisAPI.getMajorPresets();
     majorPresets.value = res.data || [];
+    categoryOptions.value = majorPresets.value.map(c => c.name);
   } catch (error) {
     console.error("Failed to load major presets", error);
   }
 };
 
+const handleCategoryChange = () => {
+  majorName.value = '';
+  majorOptions.value = [];
+  targetIndustry.value = '';
+  industryOptions.value = [];
+  
+  if (selectedCategory.value) {
+    const category = majorPresets.value.find(c => c.name === selectedCategory.value);
+    if (category) {
+      majorOptions.value = category.majors.map(m => ({
+        name: m.major_name,
+        hotIndex: m.hot_index
+      }));
+    }
+  }
+};
+
+import { watch } from 'vue';
+
+const targetIndustryLoading = ref(false);
+
+const fetchMajorIndustries = async (major) => {
+  if (!major) {
+    industryOptions.value = [];
+    targetIndustry.value = '';
+    return;
+  }
+  
+  targetIndustryLoading.value = true;
+  try {
+    const res = await analysisAPI.getMajorIndustries(major);
+    const treeData = res.data || [];
+    
+    industryOptions.value = treeData.map(l0 => {
+      const parent = {
+        value: l0.code,
+        label: l0.name,
+        children: []
+      };
+      
+      if (l0.children && l0.children.length > 0) {
+        parent.children = l0.children.map(l1 => ({
+          value: l1.code,
+          label: l1.name
+        }));
+      } else {
+        delete parent.children;
+      }
+      
+      return parent;
+    });
+    
+    // Auto-clear selected target if new options don't contain it, or just always clear
+    targetIndustry.value = '';
+    
+  } catch (error) {
+    console.error("Failed to load major specific industries tree", error);
+    ElMessage.error('无法获取该专业匹配的行业数据');
+    industryOptions.value = [];
+  } finally {
+    targetIndustryLoading.value = false;
+  }
+};
+
+watch(majorName, (newVal) => {
+  fetchMajorIndustries(newVal);
+});
+
 const initCharts = () => {
   if (salaryChartRef.value) {
+    if (salaryChartInstance) salaryChartInstance.dispose();
     salaryChartInstance = echarts.init(salaryChartRef.value);
   }
   if (industryChartRef.value) {
+    if (industryChartInstance) industryChartInstance.dispose();
     industryChartInstance = echarts.init(industryChartRef.value);
   }
   if (skillChartRef.value) {
+    if (skillChartInstance) skillChartInstance.dispose();
     skillChartInstance = echarts.init(skillChartRef.value);
   }
 };
@@ -139,8 +217,32 @@ const updateCharts = () => {
 
 const handleAnalyze = async () => {
   if (!majorName.value) {
-    ElMessage.warning('请输入或选择您在读的专业名称');
+    ElMessage.warning('请输入或选择您在读的具体专业');
     return;
+  }
+  
+  if (!targetIndustry.value || targetIndustry.value.length === 0) {
+    ElMessage.warning('请选择向往的行业方向');
+    return;
+  }
+
+  // extract the level 0 and level 1 selected in cascader
+  const industry1 = Array.isArray(targetIndustry.value) && targetIndustry.value.length > 0 
+    ? targetIndustry.value[0] : null;
+  const industry2 = Array.isArray(targetIndustry.value) && targetIndustry.value.length > 1 
+    ? targetIndustry.value[1] : null;
+    
+  let industry1Name = null;
+  let industry2Name = null;
+  if (industry1) {
+    const l0 = industryOptions.value.find(item => item.value === industry1);
+    if (l0) {
+      industry1Name = l0.label;
+      if (industry2 && l0.children) {
+        const l1 = l0.children.find(child => child.value === industry2);
+        if (l1) industry2Name = l1.label;
+      }
+    }
   }
 
   loading.value = true;
@@ -149,18 +251,21 @@ const handleAnalyze = async () => {
 
   try {
     // 1. Fetch Skill Cloud
-    const skillRes = await analysisAPI.getSkillCloud(majorName.value, 30);
+    const skillRes = await analysisAPI.getSkillCloud(majorName.value, industry1, industry2, industry1Name, industry2Name, 30);
     skillCloudData.value = skillRes.data || [];
 
     // 2. Fetch Job Stats (Macro Dashboard)
-    const statsRes = await analysisAPI.getJobStats({ q: majorName.value });
+    const statsRes = await analysisAPI.getJobStats({ 
+      q: majorName.value, 
+      industry: industry1,
+      industry_2: industry2,
+      industry_name: industry1Name,
+      industry_2_name: industry2Name
+    });
     statsData.value = statsRes.data || { salary: [], industries: [], skills: [] };
     
-    // Update Charts Immediately after fetching stats
-    nextTick(() => { updateCharts(); });
-
     // 3. Fetch AI Diagnostic Report
-    const reportRes = await analysisAPI.getCareerCompass(majorName.value, targetIndustry.value);
+    const reportRes = await analysisAPI.getCareerCompass(majorName.value, industry1, industry2, industry1Name, industry2Name);
     const reportRaw = reportRes.data?.report || '未能生成报告。';
     
     // Parse Markdown securely
@@ -172,6 +277,11 @@ const handleAnalyze = async () => {
   } finally {
     loading.value = false;
     submitting.value = false;
+    
+    nextTick(() => {
+      initCharts();
+      updateCharts();
+    });
   }
 };
 
@@ -185,45 +295,62 @@ const handleAnalyze = async () => {
       
       <div class="search-box">
         <el-select
+          v-model="selectedCategory"
+          placeholder="🎯 专业大类"
+          size="large"
+          class="category-select"
+          @change="handleCategoryChange"
+        >
+          <el-option
+            v-for="cat in categoryOptions"
+            :key="cat"
+            :label="cat"
+            :value="cat"
+          ></el-option>
+        </el-select>
+
+        <el-select
           v-model="majorName"
           filterable
           allow-create
           default-first-option
-          placeholder="搜索或直接输入您的大学专业 (例: 软件工程)"
+          placeholder="搜索或输入具体专业"
           size="large"
           class="major-select"
+          :disabled="!selectedCategory"
         >
-          <el-option-group
-            v-for="group in majorPresets"
-            :key="group.name"
-            :label="group.name"
+          <el-option
+            v-for="item in majorOptions"
+            :key="item.name"
+            :label="item.name"
+            :value="item.name"
           >
-            <el-option
-              v-for="item in group.majors"
-              :key="item.major_name"
-              :label="item.major_name"
-              :value="item.major_name"
-            >
-              <span style="float: left">{{ item.major_name }}</span>
-              <span style="float: right; color: #8492a6; font-size: 13px">
-                🔥 热度 {{ item.hot_index }}
-              </span>
-            </el-option>
-          </el-option-group>
+            <span style="float: left">{{ item.name }}</span>
+            <span style="float: right; color: #8492a6; font-size: 13px">
+              🔥 热度 {{ item.hotIndex }}
+            </span>
+          </el-option>
         </el-select>
 
-        <el-input 
-          v-model="targetIndustry" 
-          placeholder="向往行业 (选填：如 互联网)" 
-          size="large" 
-          class="target-input" 
-        />
+        <el-cascader
+          v-model="targetIndustry"
+          :options="industryOptions"
+          :props="{ expandTrigger: 'hover' }"
+          :placeholder="industryOptions.length === 0 ? '👈 请先选择具体专业' : '🏢 向往行业 (必填)'"
+          size="large"
+          class="target-input"
+          clearable
+          filterable
+          :disabled="industryOptions.length === 0 || targetIndustryLoading"
+          v-loading="targetIndustryLoading"
+        ></el-cascader>
         
         <el-button 
           type="primary" 
           size="large" 
           @click="handleAnalyze" 
           :loading="submitting"
+          :disabled="!majorName || !targetIndustry || targetIndustry.length === 0"
           color="#1e3a8a"
           dark
         >
@@ -301,18 +428,31 @@ const handleAnalyze = async () => {
 
 .search-box {
   display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 16px;
-  max-width: 800px;
+  gap: 12px;
+  max-width: 1100px;
+  width: 100%;
   margin: 0 auto;
 }
 
+.category-select {
+  flex: 1;
+  min-width: 150px;
+}
+
 .major-select {
-  flex: 2;
+  flex: 1.5;
+  min-width: 200px;
 }
 
 .target-input {
-  flex: 1;
+  flex: 1.5;
+  min-width: 200px;
+}
+
+.search-box .el-button {
+  flex: 0 0 auto;
 }
 
 /* Dashboard Grid */
