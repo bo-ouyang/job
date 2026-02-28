@@ -444,8 +444,8 @@ class BossDetailDrissionSpider(scrapy.Spider):
     #  Cookie 持久化
     # ------------------------------------------------------------------ #
 
-    def _cookie_file_path(self) -> str:
-        return os.path.join(simple_script_dir, "cookies_detail.json")
+    def _cookie_file_path(self,file_path:str="cookies_detail.json") -> str:
+        return os.path.join(simple_script_dir, file_path)
 
     def _save_cookies_to_disk(self):
         """将当前浏览器 Cookie 保存到磁盘。"""

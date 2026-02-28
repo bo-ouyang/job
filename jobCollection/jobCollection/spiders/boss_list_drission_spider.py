@@ -450,7 +450,12 @@ class BossListDrissionSpider(scrapy.Spider):
         self.proxy_started_at = time.time()
 
         co = ChromiumOptions()
-        co.auto_port(True)   # 自动选空闲端口，避免与其他爬虫实例冲突
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            free_port = s.getsockname()[1]
+        co.set_address(f'127.0.0.1:{free_port}')
+        #co.auto_port(True)   # 自动选空闲端口，避免与其他爬虫实例冲突
         co.set_argument("--disable-blink-features=AutomationControlled")
         co.set_argument("--ignore-certificate-errors")
         co.set_argument("--disable-infobars")
@@ -473,7 +478,7 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.logger.info(f"使用代理: {self.current_proxy}")
         else:
             self.logger.warning("代理池为空，使用直连")
-
+        #co.headless(True)
         self.page = ChromiumPage(co)
         self.page.set.load_mode.none()
         self.logger.info("浏览器已创建，开始登录验证...")

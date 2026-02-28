@@ -19,8 +19,39 @@ from common.databases.models import user, job, company, resume, favorite
 from api.v1.api import api_router
 from core.logger import sys_logger as logger
 from middleware.log_middleware import APILogMiddleware
-#from common.search.conn import es_manager
+from common.search.conn import es_manager
+from schemas.es_mapping import JOB_INDEX_MAPPING
+from prometheus_fastapi_instrumentator import Instrumentator
+from core.metrics import infra_health, circuit_breaker_state, circuit_breaker_failures
+from middleware.response_middleware import UnifiedResponseMiddleware
+from core.status_code import StatusCode
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
+
+async def _infra_health_probe_loop():
+    """Periodically probe DB/ES and update Prometheus gauges (every 15s)."""
+    while True:
+        try:
+            db_ok = await db_manager.health_check()
+            infra_health.labels(component="database").set(1 if db_ok else 0)
+
+            es_ok = await es_manager.health_check()
+            infra_health.labels(component="elasticsearch").set(1 if es_ok else 0)
+
+            # Update circuit breaker gauge
+            from core.circuit_breaker import ai_circuit_breaker, CircuitState
+            state_map = {CircuitState.CLOSED: 0, CircuitState.HALF_OPEN: 1, CircuitState.OPEN: 2}
+            circuit_breaker_state.labels(breaker_name="ai_llm").set(
+                state_map.get(ai_circuit_breaker.state, -1)
+            )
+            circuit_breaker_failures.labels(breaker_name="ai_llm").set(
+                ai_circuit_breaker._failure_count
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(15)
 
     
     
@@ -38,23 +69,37 @@ async def lifespan(app: FastAPI):
     
     logger.success("Database connection established successfully")
     
-    # 初始化并检查 ES 连接
-    # if await es_manager.health_check():
-    #     logger.success("Elasticsearch connection established successfully")
-    # else:
-    #     logger.warning("Elasticsearch connection failed on startup, some features may be unavailable")
+    # 初始化 ES 连接并确保索引存在
+    try:
+        await es_manager.ensure_index(
+            index_name=settings.ES_INDEX_JOB,
+            mapping=JOB_INDEX_MAPPING
+        )
+        if await es_manager.health_check():
+            logger.success("Elasticsearch connection established successfully")
+        else:
+            logger.warning("Elasticsearch connection failed on startup, some features may be unavailable")
+    except Exception as e:
+        logger.warning(f"Elasticsearch initialization failed: {e}, some features may be unavailable")
     
     # Start Redis Listener for WebSocket
     from api.v1.endpoints.ws_controller import manager, start_redis_listener
     redis_task = asyncio.create_task(start_redis_listener(manager))
     logger.info("Redis Sub/Pub Listener started for WebSockets.")
 
+    # Start periodic health probe (updates Prometheus infra gauges)
+    health_task = asyncio.create_task(_infra_health_probe_loop())
+
     yield  # 应用运行期间
+
+    # Cancel background tasks
+    health_task.cancel()
     
     # Cancel Redis Listener
     redis_task.cancel()
     
     # 关闭时清理资源
+    await es_manager.close()
     await db_manager.close()
     logger.info("Application shutdown complete")
 
@@ -77,14 +122,17 @@ app.add_middleware(
 
 # 注册 API 全局日志中间件
 app.add_middleware(APILogMiddleware)
-
-from middleware.response_middleware import UnifiedResponseMiddleware
 app.add_middleware(UnifiedResponseMiddleware)
 
-from core.status_code import StatusCode
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+# ── Prometheus Instrumentator ────────────────────────────────
+# Auto-instruments all HTTP endpoints with RED metrics and exposes /metrics
+Instrumentator(
+    should_group_status_codes=True,
+    should_ignore_untemplated=True,
+    should_group_untemplated=True,
+    excluded_handlers=["/metrics", "/health", "/docs", "/openapi.json"],
+).instrument(app).expose(app, include_in_schema=False)
+
 
 # 全局异常处理
 @app.exception_handler(StarletteHTTPException)
@@ -152,10 +200,6 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # 挂载静态文件目录
 # 确保目录存在
 static_dir = os.path.join(project_root, "static")
-# --- Admin Panel (Starlette-Admin) ---
-# Moved to main_admin.py (Port 8001)
-# from core.admin import setup_admin
-# setup_admin(app, db_manager.engine)
 
 @app.get("/")
 async def root():
@@ -165,11 +209,13 @@ async def root():
 async def health_check():
     """健康检查接口"""
     db_health = await db_manager.health_check()
-    #es_health = await es_manager.health_check()
+    es_health = await es_manager.health_check()
     
+    all_healthy = db_health and es_health
     return {
-        "status": "healthy" if db_health else "degraded",
+        "status": "healthy" if all_healthy else "degraded",
         "database": "connected" if db_health else "disconnected",
+        "elasticsearch": "connected" if es_health else "disconnected",
         "environment": settings.ENVIRONMENT
     }
 

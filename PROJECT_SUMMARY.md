@@ -264,3 +264,36 @@
 - **`JobMarket.vue`**：`executeAiSearch` 改为任务提交 → 轮询/缓存直返双通道。
 - **向下兼容**：所有前端改造均保留了对旧版同步响应格式的兼容逻辑（`if (!taskId) ...`）。
 
+## 13. 最近更新 (2026-02-28 追加)
+
+### 可观测性体系与架构文档化 (Observability Stack & Architecture Documentation)
+
+本次追加更新引入了 **Prometheus + Grafana** 全链路监控与项目架构的系统性文档化。
+
+#### A. Prometheus 可观测性集成 (Metrics Pipeline)
+- **新增 `core/metrics.py`**：定义了 12 项自定义 Prometheus 指标，覆盖：
+  - **Circuit Breaker**：熔断器状态 Gauge (`circuit_breaker_state`)、连续失败计数 (`circuit_breaker_failure_count`)、熔断触发总次数 Counter (`circuit_breaker_trips_total`)。
+  - **AI / LLM**：调用总数 (`ai_llm_calls_total`)、调用耗时直方图 (`ai_llm_call_duration_seconds`)、缓存命中 (`ai_cache_hits_total`)。
+  - **业务计费**：扣费次数 (`ai_billing_charges_total`)、拒绝次数 (`ai_billing_rejections_total`)。
+  - **基础设施**：DB / ES 健康状态 (`infra_component_healthy`)，WebSocket 在线连接数 (`ws_connections_active`)。
+- **FastAPI Instrumentator**：在 `main.py` 中集成 `prometheus-fastapi-instrumentator`，自动暴露 `/metrics` 端点，提供全路由的 HTTP RED 指标（Rate / Errors / Duration）。
+- **后台健康探针**：新增 `_infra_health_probe_loop` 异步任务，每 15 秒探测 PostgreSQL / Elasticsearch / Circuit Breaker 状态并写入 Prometheus Gauge。
+- **熔断器指标联动**：修改 `circuit_breaker.py`，在 CLOSED→OPEN 转换时自动递增 `circuit_breaker_trips_total` Counter。
+
+#### B. Grafana 看板预置 (Zero-Config Dashboard)
+- **自动化配置**：创建 `grafana/provisioning/` 目录，包含数据源 (`prometheus.yml`) 和看板加载器 (`default.yml`)，容器启动即自动注册 Prometheus 并加载预置看板。
+- **预置看板 `job_platform_overview.json`**：共 12 个面板，分三大区域：
+  - 🚦 **服务概览**：HTTP QPS + 5xx 速率、P50/P95/P99 延迟、DB/ES 健康状态灯。
+  - 🤖 **AI 监控**：熔断器状态灯 (🟢/🟡/🔴)、失败仪表盘、熔断次数、缓存命中。
+  - 📊 **业务指标**：Celery 任务提交趋势、热门 API TOP10、AI 计费扣款/拒绝。
+
+#### C. Docker Compose 监控补全
+- 新增 `prometheus` 服务（`:9090`，30 天数据留存）和 `grafana` 服务（`:3000`，默认 admin/admin）。
+- 新增 `prometheus.yml` 抓取配置，每 15s 从 FastAPI `/metrics` 端点采集。
+
+#### D. Elasticsearch 启动初始化
+- 修改 `main.py` 的 `lifespan`，启动时自动调用 `es_manager.ensure_index()` 确保 ES 索引存在并应用最新 Mapping。
+- 健康检查端点 `/health` 现已同时包含 DB 和 ES 的状态报告。
+
+#### E. 项目架构文档化
+- **新增 `ARCHITECTURE.md`**：涵盖系统全局架构（Mermaid 拓扑图）、技术栈矩阵、后端分层设计（16 Controller / 9 Service / 7 Core）、29 个数据模型 ER 图、数据采集流水线、前端 15 个页面模块清单、弹性高可用架构图、部署端口分配、JWT 认证与 AI 计费流程。

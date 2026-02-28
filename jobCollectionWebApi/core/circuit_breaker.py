@@ -147,6 +147,12 @@ class CircuitBreaker:
                     f"CircuitBreaker[{self.name}] CLOSED → OPEN "
                     f"(failures={self._failure_count}, last: {exc!r})"
                 )
+                # Prometheus: record trip event
+                try:
+                    from core.metrics import circuit_breaker_trips
+                    circuit_breaker_trips.labels(breaker_name=self.name).inc()
+                except Exception:
+                    pass
 
     def __repr__(self):
         return (

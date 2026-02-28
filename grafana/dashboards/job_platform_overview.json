@@ -1,0 +1,248 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "🚦 服务概览",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "title": "HTTP 请求速率 (QPS)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m]))",
+          "legendFormat": "Total QPS"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m]))",
+          "legendFormat": "5xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "title": "HTTP 请求延迟 (P50 / P95 / P99)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "title": "基础设施健康状态",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "targets": [
+        {
+          "expr": "infra_component_healthy{component=\"database\"}",
+          "legendFormat": "PostgreSQL"
+        },
+        {
+          "expr": "infra_component_healthy{component=\"elasticsearch\"}",
+          "legendFormat": "Elasticsearch"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "❌ DOWN", "color": "red" },
+                "1": { "text": "✅ UP", "color": "green" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "title": "🤖 AI / LLM 监控",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "collapsed": false
+    },
+    {
+      "title": "熔断器状态",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 10 },
+      "targets": [
+        {
+          "expr": "circuit_breaker_state{breaker_name=\"ai_llm\"}",
+          "legendFormat": "AI Breaker"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "🟢 CLOSED", "color": "green" },
+                "1": { "text": "🟡 HALF_OPEN", "color": "yellow" },
+                "2": { "text": "🔴 OPEN", "color": "red" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "title": "熔断器连续失败数",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 10 },
+      "targets": [
+        {
+          "expr": "circuit_breaker_failure_count{breaker_name=\"ai_llm\"}",
+          "legendFormat": "Failures"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 5,
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 3, "color": "yellow" },
+              { "value": 5, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "熔断触发次数 (累计)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 10 },
+      "targets": [
+        {
+          "expr": "circuit_breaker_trips_total{breaker_name=\"ai_llm\"}",
+          "legendFormat": "Total Trips"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 3, "color": "orange" },
+              { "value": 10, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "AI 缓存命中",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 10 },
+      "targets": [
+        {
+          "expr": "sum(increase(ai_cache_hits_total[1h]))",
+          "legendFormat": "Hits (1h)"
+        }
+      ]
+    },
+    {
+      "title": "📊 业务指标",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "title": "Celery 任务提交趋势",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        {
+          "expr": "sum(rate(celery_tasks_submitted_total[5m])) by (task_name)",
+          "legendFormat": "{{ task_name }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "title": "热门 API 端点 TOP10 (QPS)",
+      "type": "bargauge",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(http_requests_total[5m])) by (handler))",
+          "legendFormat": "{{ handler }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "title": "AI 计费扣款 (每小时)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "targets": [
+        {
+          "expr": "sum(increase(ai_billing_charges_total[1h])) by (feature)",
+          "legendFormat": "{{ feature }}"
+        }
+      ]
+    },
+    {
+      "title": "AI 计费拒绝 (余额不足/限流)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "targets": [
+        {
+          "expr": "sum(increase(ai_billing_rejections_total[1h])) by (feature, reason)",
+          "legendFormat": "{{ feature }} - {{ reason }}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["job-platform", "fastapi", "ai"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Job Platform 全景监控",
+  "uid": "job-platform-overview",
+  "version": 1
+}

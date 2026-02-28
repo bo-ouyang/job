@@ -40,6 +40,7 @@
 - **🧱 企业级高可用缓存防御体系**：集成自动化 Hash 对象生成 `@cache` 装饰器与底层深度的分布式 Redis 强互斥锁，兼具开发敏捷度与生产级的高并发防御（穿透/雪崩免疫）。
 - **🛡️ AI 弹性基础设施**：Circuit Breaker 熔断器（5 次失败→60s 自动熔断恢复）+ AI 结果级 Redis 缓存（career_advice 24h / career_compass 12h）+ Celery 双队列物理隔离（realtime / batch），确保用户请求永远不被后台批量任务阻塞。
 - **⚡ 全异步 AI 端点**：3 大 AI 接口（职业建议 / 罗盘报告 / AI 搜索）全链路 Celery 异步化，前端通过 WebSocket 实时推送或 HTTP 轮询获取结果，不再阻塞。
+- **📈 Prometheus + Grafana 全景监控**：自动暴露 `/metrics` 端点（HTTP RED + 12 项自定义业务指标），预置 Grafana 看板（熔断器状态/AI 缓存/计费/Celery 趋势），Docker 一键启动零配置。
 
 ## 🛠️ 技术栈清单
 
@@ -50,6 +51,7 @@
 - **持久层**: `PostgreSQL` (基于 asyncpg & SQLAlchemy 2.0) · `Elasticsearch`
 - **大模型解析**: `LangChain Core` · `Pydantic`
 - **弹性架构**: Circuit Breaker · Redis 结果缓存 · uvicorn 多 Worker
+- **可观测性**: Prometheus · Grafana (预置看板)
 
 ## 🚀 快速启动
 
@@ -67,10 +69,16 @@ cd jobCollectionWebApi
 
 # 4. 生产部署 (多 Worker)
 .\run_api_prod.bat           # 4 个 uvicorn Worker
+
+# 5. 启动监控 (Docker)
+docker-compose up -d prometheus grafana
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3000 (admin/admin)
 ```
 
 ## 📖 详细文档
-如需查看系统的迭代大纲、设计变更与架构剖析全记录，请参见随附的  [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md)
+- 系统架构蓝图与功能模块全景：[`ARCHITECTURE.md`](ARCHITECTURE.md)
+- 迭代大纲与设计变更全记录：[`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md)
 
 
 ---

@@ -135,8 +135,47 @@ services:
     networks:
       - job_net
 
+  # ── Monitoring ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: job_prometheus
+    restart: always
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    networks:
+      - job_net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: job_grafana
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - job_net
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   job_net:
