@@ -111,6 +111,19 @@ service.interceptors.response.use(
       });
     }
 
+    if (response && response.status === 402) {
+      const detail =
+        response?.data?.detail ||
+        "余额不足，请先充值后继续使用该 AI 功能";
+      window.dispatchEvent(
+        new CustomEvent("billing-required", { detail: { message: detail } }),
+      );
+      if (window.location.pathname !== "/my/wallet") {
+        alert(`${detail}\n将为你跳转到钱包页面。`);
+        window.location.href = "/my/wallet";
+      }
+    }
+
     return Promise.reject(error);
   },
 );

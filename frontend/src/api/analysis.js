@@ -27,7 +27,7 @@ export const analysisAPI = {
     });
   },
 
-  // 获取专业-职业罗盘分析报告 (AI)
+  // 获取专业-职业罗盘分析报告（AI）
   getCareerCompass(
     majorName,
     targetIndustry1 = null,
@@ -52,12 +52,12 @@ export const analysisAPI = {
     return api.get("/analysis/major/presets");
   },
 
-  // 获取专业技能与市场分析 (供 MajorAnalysis 组件使用)
+  // 获取专业技能与市场分析（供 MajorAnalysis 组件使用）
   analyzeMajor(payload) {
     return api.post("/analysis/major/analyze", payload);
   },
 
-  // 获取专业绑定的父级行业树 (供职业罗盘使用)
+  // 获取专业绑定的父级行业树（供职业罗盘使用）
   getMajorIndustries(majorName) {
     return api.get("/analysis/major/industries", {
       params: { major_name: majorName },

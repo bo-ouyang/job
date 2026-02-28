@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import BasicLayout from "@/layout/BasicLayout.vue";
-import HomeView from "@/views/HomeView.vue";
-import JobAnalysis from "@/views/JobAnalysis.vue";
+import InsightsHub from "@/views/InsightsHub.vue";
 import JobMarket from "@/views/JobMarket.vue";
 import CompanyList from "@/views/CompanyList.vue";
 import JobDetail from "@/views/JobDetail.vue";
@@ -17,12 +16,7 @@ const router = createRouter({
         {
           path: "",
           name: "home",
-          component: HomeView,
-        },
-        {
-          path: "analysis",
-          name: "analysis",
-          component: JobAnalysis,
+          component: InsightsHub,
         },
         {
           path: "jobs",
@@ -79,6 +73,10 @@ const router = createRouter({
           meta: { requiresAuth: true },
         },
       ],
+    },
+    {
+      path: "/analysis",
+      redirect: { name: "home", hash: "#analysis-panel" },
     },
     {
       // Optional: If Login shouldn't have the header

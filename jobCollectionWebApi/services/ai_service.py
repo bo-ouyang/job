@@ -1,15 +1,375 @@
+import hashlib
+
 from config import settings
 from core.logger import sys_logger as logger
+from core.circuit_breaker import ai_circuit_breaker, CircuitBreakerOpen
+from common.databases.RedisManager import redis_manager
 import json
+from typing import Any, Dict, List, TypedDict
+
+
+class CareerAdviceGraphState(TypedDict, total=False):
+    major: str
+    skills: List[str]
+    market_evidence: Dict[str, Any]
+    evidence_summary: str
+    profile_summary: str
+    gap_analysis: str
+    advice_markdown: str
 
 
 class AIService:
-    async def generate_career_advice(self, major: str, skills: list) -> str:
-        """根据专业和技能生成职业建议"""
+    _career_advice_graph = None
+
+    @staticmethod
+    def _ai_cache_key(prefix: str, payload: dict) -> str:
+        """Generate a stable cache key for AI results."""
+        serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return f"ai:{prefix}:{hashlib.md5(serialized.encode()).hexdigest()}"
+
+    async def generate_career_advice(
+        self,
+        major: str,
+        skills: list,
+        engine: str = "auto",
+        market_context: Dict[str, Any] = None,
+    ) -> str:
+        """Generate career advice with engine routing + result cache."""
+        # ── Result-level cache ──
+        cache_key = self._ai_cache_key("career_advice", {
+            "major": major, "skills": sorted(skills or []), "engine": engine,
+        })
+        cached = await redis_manager.get_cache(cache_key)
+        if cached is not None:
+            logger.debug(f"AI career_advice cache HIT: {cache_key}")
+            return cached
+
+        selected_engine = (engine or "auto").lower()
+        if selected_engine not in {"auto", "classic", "langgraph"}:
+            selected_engine = "auto"
+
+        use_langgraph = (
+            selected_engine == "langgraph"
+            or (selected_engine == "auto" and settings.AI_LANGGRAPH_ENABLED)
+        )
+        if use_langgraph:
+            graph_result = await self.generate_career_advice_langgraph(
+                major,
+                skills,
+                market_context=market_context,
+            )
+            if graph_result:
+                await redis_manager.set_cache(cache_key, graph_result, expire=86400)
+                return graph_result
+            logger.warning("LangGraph advice returned empty output, fallback to classic.")
+
         if settings.AI_PROVIDER == "mock":
             return self._mock_advice(major, skills)
-        
-        return await self._call_llm(major, skills)
+
+        result = await self._call_llm(major, skills)
+        # Only cache successful (non-error) responses
+        if isinstance(result, str) and not result.strip().startswith("❌"):
+            await redis_manager.set_cache(cache_key, result, expire=86400)
+        return result
+
+    async def generate_career_advice_langgraph(
+        self,
+        major: str,
+        skills: list,
+        market_context: Dict[str, Any] = None,
+    ) -> str:
+        """Generate advice through a LangGraph multi-step workflow."""
+        try:
+            workflow = self._get_career_advice_graph()
+        except Exception as exc:
+            logger.warning(f"LangGraph unavailable, fallback to classic: {exc}")
+            return ""
+
+        initial_state: CareerAdviceGraphState = {
+            "major": major,
+            "skills": list(skills or [])[:12],
+        }
+        if market_context:
+            initial_state["market_evidence"] = self._normalize_market_evidence(market_context)
+        try:
+            result = await workflow.ainvoke(initial_state)
+            advice = result.get("advice_markdown", "")
+            if isinstance(advice, str):
+                return advice.strip()
+            return str(advice)
+        except Exception as exc:
+            logger.error(f"LangGraph advice flow failed: {exc}")
+            return ""
+
+    def _get_career_advice_graph(self):
+        if self._career_advice_graph is not None:
+            return self._career_advice_graph
+        self._career_advice_graph = self._build_career_advice_graph()
+        return self._career_advice_graph
+
+    def _build_career_advice_graph(self):
+        from langgraph.graph import END, StateGraph
+
+        graph = StateGraph(CareerAdviceGraphState)
+        graph.add_node("retrieve_market_evidence", self._graph_retrieve_market_evidence)
+        graph.add_node("summarize_profile", self._graph_summarize_profile)
+        graph.add_node("analyze_gap", self._graph_analyze_gap)
+        graph.add_node("compose_advice", self._graph_compose_advice)
+        graph.set_entry_point("retrieve_market_evidence")
+        graph.add_edge("retrieve_market_evidence", "summarize_profile")
+        graph.add_edge("summarize_profile", "analyze_gap")
+        graph.add_edge("analyze_gap", "compose_advice")
+        graph.add_edge("compose_advice", END)
+        return graph.compile()
+
+    def _normalize_market_evidence(self, market_context: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(market_context, dict):
+            return {}
+
+        stats = market_context.get("stats")
+        if not isinstance(stats, dict):
+            stats = {}
+        skills = market_context.get("skills")
+        if not isinstance(skills, list):
+            skills = []
+
+        top_skills = []
+        for item in skills[:10]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            try:
+                value = int(item.get("value", 0))
+            except Exception:
+                value = 0
+            top_skills.append({"name": name, "value": value})
+
+        salary_ranges = []
+        for item in stats.get("salary", [])[:6]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            try:
+                value = int(item.get("value", 0))
+            except Exception:
+                value = 0
+            salary_ranges.append({"name": name, "value": value})
+
+        top_industries = []
+        for item in stats.get("industries", [])[:6]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            try:
+                value = int(item.get("value", 0))
+            except Exception:
+                value = 0
+            top_industries.append({"name": name, "value": value})
+
+        try:
+            total_jobs = int(stats.get("total_jobs", 0))
+        except Exception:
+            total_jobs = 0
+
+        query = str(market_context.get("query", "")).strip()
+        return {
+            "query": query,
+            "total_jobs": total_jobs,
+            "salary_ranges": salary_ranges,
+            "top_industries": top_industries,
+            "top_skills": top_skills,
+        }
+
+    async def _build_market_evidence_for_advice(
+        self,
+        major: str,
+        skills: List[str],
+    ) -> Dict[str, Any]:
+        query = (major or "").strip()
+        if not query:
+            query = str((skills or [""])[0]).strip()
+        if not query:
+            return {}
+
+        try:
+            from services.analysis_service import analysis_service
+
+            stats = await analysis_service.get_job_stats(keyword=query)
+            cloud = await analysis_service.get_skill_cloud_stats(keyword=query, limit=10)
+            return self._normalize_market_evidence(
+                {
+                    "query": query,
+                    "stats": stats,
+                    "skills": cloud,
+                }
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to build market evidence for advice: {exc}")
+            return {}
+
+    async def _graph_retrieve_market_evidence(
+        self,
+        state: CareerAdviceGraphState,
+    ) -> CareerAdviceGraphState:
+        evidence = state.get("market_evidence") or {}
+        if not evidence:
+            evidence = await self._build_market_evidence_for_advice(
+                major=state.get("major", ""),
+                skills=state.get("skills", []),
+            )
+        evidence = self._normalize_market_evidence(evidence)
+
+        if not evidence:
+            return {
+                "market_evidence": {},
+                "evidence_summary": "No reliable market evidence available.",
+            }
+
+        evidence_summary = json.dumps(evidence, ensure_ascii=False)
+        if len(evidence_summary) > 1600:
+            evidence_summary = evidence_summary[:1600] + "..."
+
+        return {
+            "market_evidence": evidence,
+            "evidence_summary": evidence_summary,
+        }
+
+    async def _graph_summarize_profile(
+        self,
+        state: CareerAdviceGraphState,
+    ) -> CareerAdviceGraphState:
+        major = state.get("major", "")
+        skills = state.get("skills", [])
+        evidence_summary = state.get("evidence_summary", "")
+        skill_text = ", ".join(skills[:8]) if skills else "No explicit skills provided."
+
+        system_prompt = (
+            "You are a career analyst. Summarize the candidate profile in 4-6 concise sentences."
+        )
+        user_prompt = (
+            f"Major: {major}\n"
+            f"Skills: {skill_text}\n"
+            f"Market evidence: {evidence_summary}\n"
+            "Output a concise profile summary that can be used for downstream gap analysis."
+        )
+        profile_summary = await self._call_llm_with_langchain(system_prompt, user_prompt)
+        return {"profile_summary": profile_summary}
+
+    async def _graph_analyze_gap(
+        self,
+        state: CareerAdviceGraphState,
+    ) -> CareerAdviceGraphState:
+        major = state.get("major", "")
+        skills = state.get("skills", [])
+        profile_summary = state.get("profile_summary", "")
+        evidence_summary = state.get("evidence_summary", "")
+        skill_text = ", ".join(skills[:12]) if skills else "No explicit skills provided."
+
+        system_prompt = (
+            "You are a senior recruiter. Output a practical skills gap analysis for entry-level hiring."
+        )
+        user_prompt = (
+            f"Major: {major}\n"
+            f"Known skills: {skill_text}\n"
+            f"Profile summary: {profile_summary}\n"
+            f"Market evidence: {evidence_summary}\n"
+            "Return 5 bullet points with: current strength, likely gap, and high-impact action."
+        )
+        gap_analysis = await self._call_llm_with_langchain(system_prompt, user_prompt)
+        return {"gap_analysis": gap_analysis}
+
+    async def _graph_compose_advice(
+        self,
+        state: CareerAdviceGraphState,
+    ) -> CareerAdviceGraphState:
+        major = state.get("major", "")
+        skills = state.get("skills", [])
+        profile_summary = state.get("profile_summary", "")
+        gap_analysis = state.get("gap_analysis", "")
+        evidence_summary = state.get("evidence_summary", "")
+        skill_text = ", ".join(skills[:12]) if skills else "No explicit skills provided."
+
+        system_prompt = (
+            "You are an expert career coach. Produce actionable, realistic advice in Markdown."
+        )
+        user_prompt = (
+            f"Major: {major}\n"
+            f"Skills: {skill_text}\n"
+            f"Profile summary: {profile_summary}\n"
+            f"Gap analysis: {gap_analysis}\n\n"
+            f"Market evidence JSON: {evidence_summary}\n\n"
+            "Structure your response with sections:\n"
+            "1) Recommended job tracks\n"
+            "2) 90-day learning plan\n"
+            "3) Resume optimization checklist\n"
+            "4) Interview preparation priorities\n"
+        )
+        advice_markdown = await self._call_llm_with_langchain(system_prompt, user_prompt)
+        return {"advice_markdown": advice_markdown}
+
+    async def _call_llm_with_langchain(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = None,
+    ) -> str:
+        async def _inner():
+            from langchain_core.messages import HumanMessage, SystemMessage
+            from langchain_openai import ChatOpenAI
+
+            if temperature is None:
+                temp = settings.AI_LANGCHAIN_TEMPERATURE
+            else:
+                temp = temperature
+
+            base_url = settings.AI_BASE_URL.rstrip("/")
+            timeout = settings.AI_LANGCHAIN_TIMEOUT_SECONDS
+            llm_kwargs: Dict[str, Any] = {
+                "model": settings.AI_MODEL,
+                "api_key": settings.AI_API_KEY,
+                "temperature": temp,
+                "timeout": timeout,
+            }
+
+            # Keep compatibility across langchain-openai versions.
+            try:
+                llm = ChatOpenAI(**llm_kwargs, base_url=base_url)
+            except TypeError:
+                llm = ChatOpenAI(**llm_kwargs, openai_api_base=base_url)
+
+            response = await llm.ainvoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+            content = response.content
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                chunks = []
+                for item in content:
+                    if isinstance(item, str):
+                        chunks.append(item)
+                    elif isinstance(item, dict) and "text" in item:
+                        chunks.append(str(item["text"]))
+                    else:
+                        chunks.append(str(item))
+                return "\n".join(chunks)
+            return str(content)
+
+        # Wrap with circuit breaker
+        try:
+            return await ai_circuit_breaker.call(_inner)
+        except CircuitBreakerOpen as e:
+            logger.warning(f"Circuit breaker open for LangChain call: {e}")
+            return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
         
     def _mock_advice(self, major, skills):
         skills_str = ", ".join(skills[:5]) if skills else "相关专业技能"
@@ -35,8 +395,17 @@ class AIService:
 *(💡 提示: 在配置文件中设置真实 AI API Key，可解锁针对您个人情况的实时深度分析)*"""
 
     async def get_career_navigation_report(self, major_name: str, es_stats: dict) -> str:
-        """根据 ES 的真实岗位数据和特定专业生成职业病理诊断与规划报告"""
-        
+        """根据 ES 的真实岗位数据和特定专业生成职业病理诊断与规划报告 (with cache)"""
+        # ── Result-level cache (12h) ──
+        cache_key = self._ai_cache_key("career_compass", {
+            "major": major_name,
+            "stats_hash": hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest(),
+        })
+        cached = await redis_manager.get_cache(cache_key)
+        if cached is not None:
+            logger.debug(f"AI career_compass cache HIT: {cache_key}")
+            return cached
+
         system_prompt = """
 你是一名面向大学生的“专家级职业规划导师”。
 你的任务是根据系统提供的一份【真实的招聘市场宏观数据】以及【学生的就读专业】，为学生出具一份详尽、一针见血的《职业罗盘诊断报告》。
@@ -58,11 +427,14 @@ class AIService:
 
 请严格基于上述客观数据（不能瞎编数据，要引用上述的行业分布和技能需求频率），为该专业的学生撰写完整的《职业罗盘诊断报告》。重点做 Gap Analysis，也就是学校教的理论同企业真实要的硬技能的差距。
 """
-        return await self._call_llm_generic_text(system_prompt, user_prompt)
+        result = await self._call_llm_generic_text(system_prompt, user_prompt)
+        if isinstance(result, str) and not result.strip().startswith("❌"):
+            await redis_manager.set_cache(cache_key, result, expire=43200)  # 12h
+        return result
         
     async def _call_llm_generic_text(self, system_prompt: str, user_prompt: str) -> str:
-        """通用 LLM 纯文本调用"""
-        try:
+        """通用 LLM 纯文本调用 (circuit breaker protected)"""
+        async def _inner():
             import aiohttp
             headers = {
                 "Authorization": f"Bearer {settings.AI_API_KEY}",
@@ -83,15 +455,21 @@ class AIService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        return f"❌ AI 分析引擎维护中 (HTTP {resp.status})"
+                        raise Exception(f"AI API HTTP {resp.status}")
                     data = await resp.json()
                     return data['choices'][0]['message']['content']
+
+        try:
+            return await ai_circuit_breaker.call(_inner)
+        except CircuitBreakerOpen as e:
+            logger.warning(f"Circuit breaker open for generic_text: {e}")
+            return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
         except Exception as e:
             logger.error(f"Generate report error: {e}")
             return "❌ AI 职业分析暂时不可用，请稍后再试。"
 
     async def _call_llm(self, major, skills):
-        """调用大模型 API (OpenAI 兼容格式)"""
+        """调用大模型 API (OpenAI 兼容格式, circuit breaker protected)"""
         try:
             import aiohttp
         except ImportError:
@@ -114,33 +492,32 @@ class AIService:
             "temperature": 0.7,
             "stream": False
         }
-        try:
-            import aiohttp
-            import traceback
-            
+
+        async def _inner():
+            import aiohttp as _aiohttp
             url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
             logger.info(f"AI Request URL: {url}")
+            timeout = _aiohttp.ClientTimeout(total=60)
             
-            # 使用更长的超时时间
-            timeout = aiohttp.ClientTimeout(total=60)
-            
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with _aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, headers=headers, json=payload) as resp:
                     if resp.status != 200:
                         err = await resp.text()
-                        logger.error(f"AI API Error: {resp.status} - {err}")
-                        return f"❌ AI 服务响应错误 (HTTP {resp.status}): {err[:100]}"
+                        raise Exception(f"AI API HTTP {resp.status}: {err[:100]}")
                     
                     data = await resp.json()
                     if 'choices' not in data or not data['choices']:
-                         return f"❌ AI 返回格式异常: {json.dumps(data)}"
+                        raise Exception(f"AI 返回格式异常: {json.dumps(data)}")
                          
-                    content = data['choices'][0]['message']['content']
-                    return content
-                    
+                    return data['choices'][0]['message']['content']
+
+        try:
+            return await ai_circuit_breaker.call(_inner)
+        except CircuitBreakerOpen as e:
+            logger.warning(f"Circuit breaker open for _call_llm: {e}")
+            return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
         except Exception as e:
             logger.error(f"AI Call Failed: {str(e)}")
-            traceback.print_exc() # 打印完整堆栈到控制台
             return f"❌ 调用 AI 发生异常: {str(e)}"
 
     async def parse_resume_text(self, text: str) -> dict:
@@ -187,8 +564,8 @@ class AIService:
         return await self._call_llm_generic(system_prompt, user_prompt)
 
     async def _call_llm_generic(self, system_prompt, user_prompt):
-        """Generic LLM call returning JSON if possible or string"""
-        try:
+        """Generic LLM call returning JSON if possible or string (circuit breaker protected)"""
+        async def _inner():
             import aiohttp
             headers = {
                 "Authorization": f"Bearer {settings.AI_API_KEY}",
@@ -210,7 +587,7 @@ class AIService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        return {"error": f"HTTP {resp.status}"}
+                        raise Exception(f"AI API HTTP {resp.status}")
                     
                     data = await resp.json()
                     content = data['choices'][0]['message']['content']
@@ -223,7 +600,13 @@ class AIService:
                     try:
                         return json.loads(content)
                     except:
-                        return {"summary": content} 
+                        return {"summary": content}
+
+        try:
+            return await ai_circuit_breaker.call(_inner)
+        except CircuitBreakerOpen as e:
+            logger.warning(f"Circuit breaker open for _call_llm_generic: {e}")
+            return {"error": "AI 服务暂时不可用（熔断保护中）"}
         except Exception as e:
             logger.error(f"AI Error: {e}")
             return {}

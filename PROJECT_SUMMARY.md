@@ -207,3 +207,60 @@
 #### C. 服务端装饰器级的高阶缓存重构 (Decorator-driven Cache Architecture)
 - **智能装饰器替换**：梳理界定了 `Service` 层“强防击穿缓存”与 `Controller` 层“防并发缓存”的边界界限。面向具备高频低负担的查询端点（如 获取行业树、获取级联类目），全面移除了繁冗的 Redis 编程式手搓代码。
 - **切面注入**：以 `core.cache.py` 内部提供的泛型 `@cache` 装饰器一键接管了 Controller 层级的序列化 Hash 锁，精简了大量核心代码量的同时赋予了 API 本征态长效期与短期弹性的自控能力。保留底层核心 ES 查询的强阻断缓存锁机制，构成内外双层的完美缓存生态壁垒。
+
+## 12. 最近更新 (2026-02-28)
+
+### AI 服务弹性架构与全链路异步化改造 (AI Service Resilience & Full-Stack Async Transformation)
+
+本次迭代实现了后台 AI 调用链的**全面弹性化改造**：从底层熔断器到上层接口异步化，覆盖后端基础设施、Celery 任务编排、前端轮询适配及生产部署四大维度。
+
+#### A. Circuit Breaker 熔断器 (AI API Fault Isolation)
+- **新增 `core/circuit_breaker.py`**：实现了完整的异步熔断器状态机，支持 `CLOSED → OPEN → HALF_OPEN` 三态流转。
+  - **失败阈值**：连续 5 次 LLM 调用失败后自动熔断，60 秒冷却期后探测恢复。
+  - **全覆盖集成**：将熔断器包裹至 `ai_service.py` 的全部 4 条 LLM 调用路径（`_call_llm_with_langchain`、`_call_llm`、`_call_llm_generic_text`、`_call_llm_generic`），杜绝 AI API 故障时的雪崩效应。
+  - **用户友好降级**：熔断器 OPEN 状态下直接返回 `❌` 前缀的友善提示，而非让请求无限挂起。
+
+#### B. AI 结果级 Redis 缓存 (Result-Level Caching)
+- **`generate_career_advice`**：基于 `major + skills + engine` 的 MD5 摘要生成缓存键，命中后跳过 LLM 调用，缓存有效期 **24 小时**。
+- **`get_career_navigation_report`**：基于 `major_name + es_stats` 的 Hash 摘要进行缓存，有效期 **12 小时**。
+- **脏数据隔离**：仅缓存成功结果（不以 `❌` 开头的响应），错误响应不会被错误缓存。
+
+#### C. Celery 队列分离与多 Worker 部署 (Queue Segmentation & Multi-Worker)
+- **双队列路由**：修改 `celery_app.py`，引入 `realtime` 与 `batch` 双队列架构：
+  - **Realtime 队列**：承载用户实时请求的 AI 任务（简历解析、职业建议、罗盘报告、AI 搜索）。
+  - **Batch 队列**：承载后台定时批量任务（岗位解析 `job_parser`、ES 同步 `es_sync`、代理维护 `proxy_tasks`）。
+- **独立 Worker 进程**：
+  - `run_worker.bat` → 仅消费 `batch` 队列。
+  - `run_worker_realtime.bat` (新增) → 仅消费 `realtime` 队列。
+- **效果**：用户实时请求不再被后台数千条岗位批量解析任务阻塞，首次实现了用户体验与后台吞吐的物理隔离。
+
+#### D. 批量 LLM 调用受控并发 (Batch Parsing Concurrency Control)
+- **`job_parser.py` 改造**：将原先的串行逐条 LLM 解析重构为 `asyncio.Semaphore(3)` 控制的并发解析。
+  - **预锁定**：批量将待处理岗位标记为 `ai_parsed=1`，防止多 Worker 重复领取。
+  - **聚合执行**：`asyncio.gather` 并发调度，信号量限制最大 3 路同时调用，平衡吞吐与 API 限流。
+  - **预期提升**：批量解析吞吐量提升约 **~3 倍**。
+
+#### E. AI 接口全面异步化 (Full Async AI Endpoints via Celery)
+- **新增 `tasks/ai_tasks.py`**：封装了 3 个 Celery 任务：
+  - `career_advice_task`：职业建议生成。
+  - `career_compass_task`：职业罗盘 AI 报告。
+  - `ai_search_task`：AI 意图搜索 + ES 检索。
+- **Controller 改造**：
+  - `analysis_controller.py`：`POST /ai/advice` 与 `POST /career-compass` 改为提交 Celery 任务后立即返回 `{task_id, status: "pending"}`。
+  - `job_controller.py`：`GET /ai_search` 同理改造，缓存命中时仍同步返回 `JobList`。
+- **结果获取双通道**：
+  - **轮询**：新增 `GET /analysis/ai/task/{task_id}` 和 `GET /jobs/ai_search/task/{task_id}`，前端定时拉取直至 `status === "completed"`。
+  - **WebSocket 推送**：任务完成后通过 Redis Pub/Sub 向 WebSocket 频道推送，前端可实时接收（`career_advice_result`、`career_compass_result`、`ai_search_result`）。
+- **计费策略**：权限校验和余额检查在 Controller 层同步完成（快速拦截），实际 AI 扣费在 Celery Worker 内使用独立 DB Session 延时执行。
+
+#### F. uvicorn 多 Worker 生产部署 (Production Multi-Worker Deployment)
+- **新增 `run_api_dev.bat`**：开发环境，单 Worker + 热重载（`uvicorn --reload`）。
+- **新增 `run_api_prod.bat`**：生产环境，4 Worker 并行处理请求（`uvicorn --workers 4 --host 0.0.0.0`），大幅提升 HTTP 请求并发承载能力。
+
+#### G. 前端异步适配 (Frontend Async Adaptation)
+- **新增 `utils/pollTask.js`**：通用 Celery 任务轮询工具，封装超时控制、状态回调和错误处理。
+- **`MajorAnalysis.vue`**：`fetchAIAdvice` 改为提交任务 → 轮询获取结果，新增缓冲态展示。
+- **`CareerCompass.vue`**：`handleAnalyze` 中的 AI 报告环节改为异步轮询，缓存命中时秒级返回，未命中时优雅等待。
+- **`JobMarket.vue`**：`executeAiSearch` 改为任务提交 → 轮询/缓存直返双通道。
+- **向下兼容**：所有前端改造均保留了对旧版同步响应格式的兼容逻辑（`if (!taskId) ...`）。
+

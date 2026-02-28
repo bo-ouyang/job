@@ -11,7 +11,8 @@ celery_app = Celery(
         "jobCollectionWebApi.tasks.resume_parser", 
         "jobCollectionWebApi.tasks.proxy_tasks",
         "jobCollectionWebApi.tasks.job_parser",
-        "jobCollectionWebApi.tasks.es_sync"
+        "jobCollectionWebApi.tasks.es_sync",
+        "jobCollectionWebApi.tasks.ai_tasks",
     ],
 )
 
@@ -21,6 +22,22 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Asia/Shanghai",
     enable_utc=True,
+
+    # ── Queue routing ──────────────────────────────────
+    task_default_queue="batch",  # Fallback queue for unrouted tasks
+    task_routes={
+        # Realtime queue — user-facing, latency-sensitive
+        "parse_resume_task": {"queue": "realtime"},
+        "tasks.ai_tasks.*": {"queue": "realtime"},
+
+        # Batch queue — background, can tolerate delay
+        "jobCollectionWebApi.tasks.job_parser.*": {"queue": "batch"},
+        "jobCollectionWebApi.tasks.es_sync.*": {"queue": "batch"},
+        "tasks.check_proxies": {"queue": "batch"},
+        "tasks.fetch_proxies": {"queue": "batch"},
+        "tasks.sync_proxies": {"queue": "batch"},
+    },
+
     # Schedule configuration (will adhere to Celery Beat)
     beat_schedule={
         'check-proxies-every-2-hours': {

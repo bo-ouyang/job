@@ -339,7 +339,7 @@ class SearchService:
                     "requirements": job.requirements,
                     "salary_min": job.salary_min,
                     "salary_max": job.salary_max,
-                    "location": str(job.city) if job.city else "",
+                    "location": job.location or "",
                     "experience": job.experience,
                     "education": job.education,
                     "publish_date": job.publish_date.isoformat() if job.publish_date else None,

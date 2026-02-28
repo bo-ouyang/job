@@ -1,4 +1,4 @@
-from core.logger import sys_logger as logger
+﻿from core.logger import sys_logger as logger
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -21,6 +21,7 @@ from schemas.payment import (
     PaymentNotifyResponse,
     PaymentOrderSchema
 )
+from alipay import AliPay
 
 router = APIRouter()
 
@@ -68,11 +69,11 @@ if settings.WECHAT_APP_ID:
 # --- Helpers ---
 
 def generate_order_no() -> str:
-    """生成唯一订单号: PAY + YYYYMMDDHHMMSS + Random"""
+    """鐢熸垚鍞竴璁㈠崟鍙? PAY + YYYYMMDDHHMMSS + Random"""
     return f"PAY{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
 
 async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transaction_id: str):
-    """处理支付成功逻辑 (带分布式锁)"""
+    """澶勭悊鏀粯鎴愬姛閫昏緫 (甯﹀垎甯冨紡閿?"""
     # 1. First Check
     if order.status == PaymentStatus.PAID:
         logger.info(f"Order {order.order_no} already paid. Skipping.")
@@ -81,11 +82,11 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
     # 2. Acquire Lock
     lock_key = f"lock:payment_callback:{order.order_no}"
     try:
-        # 使用 redis-py 的 Lock 对象
+        # 浣跨敤 redis-py 鐨?Lock 瀵硅薄
         async with redis_manager.redis_client.lock(
             redis_manager.make_key(lock_key), 
-            timeout=30, # 锁持有时间
-            blocking_timeout=5 # 等待锁时间
+            timeout=30, # 閿佹寔鏈夋椂闂?
+            blocking_timeout=5 # 绛夊緟閿佹椂闂?
         ):
             # 3. Double Check (Refresh from DB inside lock)
             await db.refresh(order)
@@ -98,16 +99,16 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
             order.paid_at = datetime.now()
             order.transaction_id = transaction_id
             
-            # --- 自动发货逻辑 ---
-            # 检查是否是余额充值
+            # --- 鑷姩鍙戣揣閫昏緫 ---
+            # 妫€鏌ユ槸鍚︽槸浣欓鍏呭€?
             should_commit = True 
             try:
-                # 尝试从快照获取商品信息，如果没有快照则查询数据库(可选)
+                # 灏濊瘯浠庡揩鐓ц幏鍙栧晢鍝佷俊鎭紝濡傛灉娌℃湁蹇収鍒欐煡璇㈡暟鎹簱(鍙€?
                 product_code = ""
                 if order.product_snapshot:
                     product_code = order.product_snapshot.get("code", "")
                 
-                # 简单判断: code 以 wallet_topup 开头，或者 product_type 是 wallet_topup
+                # 绠€鍗曞垽鏂? code 浠?wallet_topup 寮€澶达紝鎴栬€?product_type 鏄?wallet_topup
                 is_topup = False
                 if product_code and product_code.startswith("wallet_topup"):
                     is_topup = True
@@ -123,11 +124,11 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
                         source=f"Top-up: {order.order_no}",
                         order_no=order.order_no
                     )
-                # 其他产品类型的发货逻辑可以在这里扩展
+                # 鍏朵粬浜у搧绫诲瀷鐨勫彂璐ч€昏緫鍙互鍦ㄨ繖閲屾墿灞?
             except Exception as e:
                 logger.error(f"Failed to deliver product for order {order.order_no}: {e}")
-                # 如果发货失败，是否回滚状态？或者标记为 'paid_but_delivery_failed'？
-                # 这里暂且抛出异常回滚整个事务，依靠回调重试
+                # 濡傛灉鍙戣揣澶辫触锛屾槸鍚﹀洖婊氱姸鎬侊紵鎴栬€呮爣璁颁负 'paid_but_delivery_failed'锛?
+                # 杩欓噷鏆備笖鎶涘嚭寮傚父鍥炴粴鏁翠釜浜嬪姟锛屼緷闈犲洖璋冮噸璇?
                 should_commit = False
                 raise e
             
@@ -140,7 +141,7 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
             
     except Exception as e:
         logger.error(f"Error handling payment success for {order.order_no}: {e}")
-        # 如果获取锁失败或执行出错，抛出异常以便上层决定是否重试（对于回调，通常返回错误让第三方重试）
+        # 濡傛灉鑾峰彇閿佸け璐ユ垨鎵ц鍑洪敊锛屾姏鍑哄紓甯镐互渚夸笂灞傚喅瀹氭槸鍚﹂噸璇曪紙瀵逛簬鍥炶皟锛岄€氬父杩斿洖閿欒璁╃涓夋柟閲嶈瘯锛?
         raise e
 
 from dependencies import get_current_admin_user
@@ -153,8 +154,8 @@ async def refund_order(
     admin_user: dict = Depends(get_current_admin_user)
 ):
     """
-    退款接口 (仅管理员)
-    支持自动退款: Wallet, Alipay, Wechat
+    閫€娆炬帴鍙?(浠呯鐞嗗憳)
+    鏀寔鑷姩閫€娆? Wallet, Alipay, Wechat
     """
     order = await crud_payment.payment_order.get_by_order_no(db, order_no)
     if not order:
@@ -163,10 +164,10 @@ async def refund_order(
     if order.status != PaymentStatus.PAID:
         raise HTTPException(status_code=400, detail=f"Order status is {order.status}, cannot refund")
         
-    # 1. 钱包退款
+    # 1. 閽卞寘閫€娆?
     if order.payment_method == "wallet": # PaymentMethod.WALLET
         try:
-            # 原路退回余额
+            # 鍘熻矾閫€鍥炰綑棰?
             await crud_wallet.wallet.add_balance(
                 db, 
                 user_id=order.user_id, 
@@ -183,17 +184,17 @@ async def refund_order(
             logger.error(f"Wallet refund failed: {e}")
             raise HTTPException(status_code=500, detail="Wallet refund failed")
 
-    # 2. 支付宝退款
+    # 2. 鏀粯瀹濋€€娆?
     elif order.payment_method == PaymentMethod.ALIPAY:
         if not alipay_client:
              raise HTTPException(status_code=500, detail="Alipay not configured")
         
         try:
-            # 调用退款接口
+            # 璋冪敤閫€娆炬帴鍙?
             result = alipay_client.api_alipay_trade_refund(
                 out_trade_no=order_no,
                 refund_amount=order.amount,
-                out_request_no=f"REF_{order_no}" # 部分退款需要，全额退款其实可选
+                out_request_no=f"REF_{order_no}" # 閮ㄥ垎閫€娆鹃渶瑕侊紝鍏ㄩ閫€娆惧叾瀹炲彲閫?
             )
             if result.get("code") == "10000":
                 order.status = PaymentStatus.REFUNDED
@@ -207,13 +208,13 @@ async def refund_order(
             logger.error(f"Alipay refund exception: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    # 3. 微信退款
+    # 3. 寰俊閫€娆?
     elif order.payment_method == PaymentMethod.WECHAT:
         if not wechat_client:
              raise HTTPException(status_code=500, detail="WeChat Pay not configured")
         
         try:
-            # 微信退款需要证书
+            # 寰俊閫€娆鹃渶瑕佽瘉涔?
             # SDK helper might need raw request for refund if not wrapped
             # wechatpayv3 legacy/native might differ. Assuming standard usage:
             result = wechat_client.refund(
@@ -249,23 +250,20 @@ async def create_payment(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """创建支付订单"""
-    # 0. 防抖检查: 防止3秒内重复点击 (Redis Lock)
-    # 锁键: lock:create_order:{user_id}:{product_id_or_type}:{amount}
+    """鍒涘缓鏀粯璁㈠崟"""
+    # 0. 闃叉姈妫€鏌? 闃叉3绉掑唴閲嶅鐐瑰嚮 (Redis Lock)
+    # 閿侀敭: lock:create_order:{user_id}:{product_id_or_type}:{amount}
     lock_key = f"lock:create_order:{current_user.id}:{order_in.product_id or order_in.product_type}:{order_in.amount}"
     
-    # 尝试获取非阻塞锁，如果获取失败说明请求过快
-    lock = redis_manager.redis_client.lock(
-        redis_manager.make_key(lock_key),
-        timeout=3, # 锁自动过期时间 3秒
-        blocking_timeout=0 # 非阻塞模式
-    )
-    
-    if not lock.acquire(blocking=False):
+    # 灏濊瘯鑾峰彇闈為樆濉為攣锛屽鏋滆幏鍙栧け璐ヨ鏄庤姹傝繃蹇?
+    lock_redis_key = redis_manager.make_key(lock_key)
+    lock_token = uuid.uuid4().hex
+    acquired = await redis_manager.redis_client.set(lock_redis_key, lock_token, nx=True, ex=3)
+    if not acquired:
         raise HTTPException(status_code=429, detail="Too many requests, please try again later")
         
     try:
-        # 0.1 验证参数与获取价格
+        # 0.1 楠岃瘉鍙傛暟涓庤幏鍙栦环鏍?
         final_amount = order_in.amount
         product_snapshot = None
         
@@ -274,7 +272,7 @@ async def create_payment(
             if not product or not product.is_active:
                  raise HTTPException(status_code=400, detail="Invalid or inactive product")
             final_amount = product.price
-            # 记录快照
+            # 璁板綍蹇収
             product_snapshot = {
                 "name": product.name,
                 "code": product.code,
@@ -282,19 +280,19 @@ async def create_payment(
                 "original_price": product.original_price
             }
     
-        # 强制金额校验: 如果是简历分析等固定价格服务，必须通过 product_id 获取价格
+        # 寮哄埗閲戦鏍￠獙: 濡傛灉鏄畝鍘嗗垎鏋愮瓑鍥哄畾浠锋牸鏈嶅姟锛屽繀椤婚€氳繃 product_id 鑾峰彇浠锋牸
         elif order_in.product_type == "resume_analysis":
              raise HTTPException(status_code=400, detail="Product ID required for resume analysis")
              
         elif not final_amount or final_amount <= 0:
              raise HTTPException(status_code=400, detail="Amount must be greater than 0")
              
-        # 1. 生成订单
+        # 1. 鐢熸垚璁㈠崟
         order_no = generate_order_no()
         
-        # 手动构造 PaymentOrder 对象以支持 product_id (如果 crud_payment 未更新支持 obj_in 包含 product_id)
-        # 或者更新 crud_payment.create_order
-        # 这里我们直接使用 DB 操作比较灵活
+        # 鎵嬪姩鏋勯€?PaymentOrder 瀵硅薄浠ユ敮鎸?product_id (濡傛灉 crud_payment 鏈洿鏂版敮鎸?obj_in 鍖呭惈 product_id)
+        # 鎴栬€呮洿鏂?crud_payment.create_order
+        # 杩欓噷鎴戜滑鐩存帴浣跨敤 DB 鎿嶄綔姣旇緝鐏垫椿
         db_order = PaymentOrder(
             order_no=order_no,
             user_id=current_user.id,
@@ -316,20 +314,20 @@ async def create_payment(
             status=PaymentStatus.PENDING
         )
         
-        # 2. 调用支付接口
+        # 2. 璋冪敤鏀粯鎺ュ彛
         if order_in.payment_method == PaymentMethod.ALIPAY:
             if not alipay_client:
                 raise HTTPException(status_code=500, detail="Alipay not configured")
             
-            # 电脑网站支付
+            # 鐢佃剳缃戠珯鏀粯
             order_string = alipay_client.api_alipay_trade_page_pay(
                 out_trade_no=order_no,
                 total_amount=float(order_in.amount),
                 subject=f"Job Analysis - {order_in.product_type}",
-                return_url="http://localhost:3000/payment/success", # 前端回调页面
+                return_url="http://localhost:3000/payment/success", # 鍓嶇鍥炶皟椤甸潰
                 notify_url=f"{settings.PAYMENT_NOTIFY_BASE_URL}/alipay"
             )
-            # 拼接网关地址
+            # 鎷兼帴缃戝叧鍦板潃
             gateway = "https://openapi-sandbox.dl.alipaydev.com/gateway.do" if settings.ALIPAY_DEBUG else "https://openapi.alipay.com/gateway.do"
             response.pay_url = f"{gateway}?{order_string}"
             
@@ -340,7 +338,7 @@ async def create_payment(
             code, message = wechat_client.pay(
                 description=f"Job Analysis - {order_in.product_type}",
                 out_trade_no=order_no,
-                amount={'total': int(order_in.amount * 100)}, # 分
+                amount={'total': int(order_in.amount * 100)}, # 鍒?
                 payer={'openid': current_user.wechat_info.openid} if current_user.wechat_info else None
             )
             
@@ -352,12 +350,12 @@ async def create_payment(
                  raise HTTPException(status_code=500, detail="WeChat Pay failed")
     
         elif order_in.payment_method == "wallet": # PaymentMethod.WALLET (use string to avoid import circle if any)
-            # 钱包支付逻辑
+            # 閽卞寘鏀粯閫昏緫
             wallet = await crud_wallet.wallet.get_by_user(db, current_user.id)
             if not wallet or wallet.balance < final_amount:
                 raise HTTPException(status_code=400, detail="Insufficient wallet balance")
                 
-            # 扣款
+            # 鎵ｆ
             success = await crud_wallet.wallet.consume_balance(
                 db, 
                 user_id=current_user.id, 
@@ -367,7 +365,7 @@ async def create_payment(
             )
             
             if success:
-                # 更新订单状态为已支付
+                # 鏇存柊璁㈠崟鐘舵€佷负宸叉敮浠?
                 order = await crud_payment.payment_order.get_by_order_no(db, order_no) # Re-fetch to be safe
                 if order:
                     await handle_payment_success(db, order, transaction_id=f"WALLET_{uuid.uuid4().hex}")
@@ -377,10 +375,16 @@ async def create_payment(
                  raise HTTPException(status_code=400, detail="Wallet payment failed")
 
     finally:
-        # 释放锁 (虽然有TTL，但最好主动释放如果未 crash)
+        # 閲婃斁閿?(铏界劧鏈塗TL锛屼絾鏈€濂戒富鍔ㄩ噴鏀惧鏋滄湭 crash)
         try:
-            if lock.locked():
-                 lock.release()
+            unlock_script = """
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+                return redis.call("del", KEYS[1])
+            else
+                return 0
+            end
+            """
+            await redis_manager.redis_client.eval(unlock_script, 1, lock_redis_key, lock_token)
         except Exception as e:
             logger.warning(f"Failed to release lock {lock_key}: {e}")
 
@@ -392,29 +396,29 @@ async def check_order_status(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """查询订单状态"""
+    """鏌ヨ璁㈠崟鐘舵€?"""
     order = await crud_payment.payment_order.get_by_order_no(db, order_no)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
-    # 权限检查
+    # 鏉冮檺妫€鏌?
     if order.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
         
-    # 如果还是 Pending，可以主动去第三方查一下 (Draft implementation)
+    # 濡傛灉杩樻槸 Pending锛屽彲浠ヤ富鍔ㄥ幓绗笁鏂规煡涓€涓?(Draft implementation)
     # ...
     
     return order
 
 @router.post("/notify/alipay")
 async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """支付宝异步通知"""
+    """鏀粯瀹濆紓姝ラ€氱煡"""
     data = await request.form()
     data_dict = dict(data)
     
     signature = data_dict.pop("sign")
     
-    # 验证签名
+    # 楠岃瘉绛惧悕
     if alipay_client and alipay_client.verify(data_dict, signature):
         trade_status = data_dict.get("trade_status")
         out_trade_no = data_dict.get("out_trade_no")
@@ -423,7 +427,7 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         if trade_status in ["TRADE_SUCCESS", "TRADE_FINISHED"]:
             order = await crud_payment.payment_order.get_by_order_no(db, out_trade_no)
             if order:
-                # 校验金额
+                # 鏍￠獙閲戦
                 total_amount = float(data_dict.get("total_amount", 0))
                 if abs(total_amount - order.amount) > 0.01:
                     logger.critical(f"Amount mismatch for order {out_trade_no}: expected {order.amount}, got {total_amount}")
@@ -437,7 +441,7 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/notify/wechat")
 async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """微信支付异步通知"""
+    """寰俊鏀粯寮傛閫氱煡"""
     headers = request.headers
     body = await request.body()
     
@@ -459,15 +463,15 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
                 transaction_id = decoded_data.get('transaction_id')
                 
                 amount_data = decoded_data.get('amount', {})
-                total_fee = amount_data.get('total', 0) # 分
+                total_fee = amount_data.get('total', 0) # 鍒?
 
                 order = await crud_payment.payment_order.get_by_order_no(db, out_trade_no)
                 if order:
-                     # 校验金额
+                     # 鏍￠獙閲戦
                     expected_fee = int(order.amount * 100)
                     if total_fee != expected_fee:
                         logger.critical(f"Amount mismatch for Wechat order {out_trade_no}: expected {expected_fee}, got {total_fee}")
-                        # 应该返回失败，让微信重试(或者人工处理)
+                        # 搴旇杩斿洖澶辫触锛岃寰俊閲嶈瘯(鎴栬€呬汉宸ュ鐞?
                         return {"code": "FAIL", "message": "Amount mismatch"}
 
                     await handle_payment_success(db, order, transaction_id)

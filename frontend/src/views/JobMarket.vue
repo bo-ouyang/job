@@ -115,6 +115,9 @@ const fetchJobs = async () => {
   }
 };
 
+import api from "@/utils/request";
+import { pollTaskResult } from "@/utils/pollTask";
+
 const executeAiSearch = async () => {
   loading.value = true;
   isAiLoading.value = true;
@@ -125,8 +128,21 @@ const executeAiSearch = async () => {
       page_size: pageSize.value,
     };
     const response = await api.get("/jobs/ai_search", { params });
-    jobs.value = response.data.items;
-    total.value = response.data.total;
+    const responseData = response.data;
+
+    if (responseData?.task_id) {
+      // Async path: poll for result
+      const result = await pollTaskResult("/jobs/ai_search/task", responseData.task_id, {
+        interval: 2000,
+        timeout: 120000,
+      });
+      jobs.value = result?.items || [];
+      total.value = result?.total || 0;
+    } else {
+      // Cache hit: immediate JobList response
+      jobs.value = responseData.items || [];
+      total.value = responseData.total || 0;
+    }
 
     if (jobs.value.length > 0) {
       selectedJob.value = jobs.value[0];

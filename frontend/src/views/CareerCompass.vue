@@ -215,6 +215,8 @@ const updateCharts = () => {
   }
 };
 
+import { pollTaskResult } from '@/utils/pollTask';
+
 const handleAnalyze = async () => {
   if (!majorName.value) {
     ElMessage.warning('请输入或选择您在读的具体专业');
@@ -250,11 +252,11 @@ const handleAnalyze = async () => {
   reportMarkdown.value = '';
 
   try {
-    // 1. Fetch Skill Cloud
+    // 1. Fetch Skill Cloud (fast, stays sync)
     const skillRes = await analysisAPI.getSkillCloud(majorName.value, industry1, industry2, industry1Name, industry2Name, 30);
     skillCloudData.value = skillRes.data || [];
 
-    // 2. Fetch Job Stats (Macro Dashboard)
+    // 2. Fetch Job Stats - Macro Dashboard (fast, stays sync)
     const statsRes = await analysisAPI.getJobStats({ 
       q: majorName.value, 
       industry: industry1,
@@ -264,16 +266,29 @@ const handleAnalyze = async () => {
     });
     statsData.value = statsRes.data || { salary: [], industries: [], skills: [] };
     
-    // 3. Fetch AI Diagnostic Report
+    // 3. Fetch AI Diagnostic Report (async via Celery)
     const reportRes = await analysisAPI.getCareerCompass(majorName.value, industry1, industry2, industry1Name, industry2Name);
-    const reportRaw = reportRes.data?.report || '未能生成报告。';
+    const responseData = reportRes.data;
+
+    let reportRaw;
+    if (responseData?.task_id) {
+      // Async path: poll for result
+      const result = await pollTaskResult('/analysis/ai/task', responseData.task_id, {
+        interval: 2000,
+        timeout: 120000,
+      });
+      reportRaw = result?.report || result || '未能生成报告。';
+    } else {
+      // Cache hit: immediate report
+      reportRaw = responseData?.report || '未能生成报告。';
+    }
     
     // Parse Markdown securely
     reportMarkdown.value = DOMPurify.sanitize(marked.parse(reportRaw));
 
   } catch (error) {
     console.error("Analyze error:", error);
-    ElMessage.error('生成罗盘报告时发生错误');
+    ElMessage.error(error.message || '生成罗盘报告时发生错误');
   } finally {
     loading.value = false;
     submitting.value = false;

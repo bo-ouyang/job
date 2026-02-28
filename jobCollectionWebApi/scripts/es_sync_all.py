@@ -79,7 +79,8 @@ def format_job_for_es(job: Job) -> dict:
             "tags": skills,
             "publish_date": job.publish_date.isoformat() if job.publish_date else None,
             "created_at": job.created_at.isoformat() if job.created_at else None,
-            "location": job.location
+            "location": job.location,
+            'major_name': job.major_name or "",
         }
     }
 

@@ -11,7 +11,12 @@ from schemas.resume import (
     EducationCreate, WorkExperienceCreate, ProjectExperienceCreate
 )
 from common.databases.models.resume import Education, WorkExperience, ProjectExperience
-
+from fastapi import UploadFile, File
+from jobCollectionWebApi.tasks.resume_parser import parse_resume_task
+import os
+import shutil
+from config import settings
+from services.ai_access_service import ai_access_service
 router = APIRouter()
 
 @router.get("/me", response_model=ResumeDetail)
@@ -145,15 +150,12 @@ async def delete_work(
     await db.commit()
     return await crud_resume.resume.get_by_user_id(db, user_id=user_id)
 
-from fastapi import UploadFile, File
-from jobCollectionWebApi.tasks.resume_parser import parse_resume_task
-import os
-import shutil
-from config import settings
+
 
 @router.post("/parse", status_code=202)
 async def parse_resume(
     file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """

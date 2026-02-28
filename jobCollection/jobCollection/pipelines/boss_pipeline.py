@@ -1,289 +1,278 @@
-import sys
-import os
-
-# Ensure the WebAPI directory is in path so Scrapy can import Celery tasks
-webapi_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.append(os.path.join(webapi_dir, 'jobCollectionWebApi'))
-
 import asyncio
-import logging
 import json
+import logging
+import os
 import re
-from collections import defaultdict
+import sys
 from datetime import datetime
-from sqlalchemy import select
+
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from common.databases.PostgresManager import db_manager
-from common.databases.models.job import Job
 from common.databases.models.company import Company
 from common.databases.models.industry import Industry
-from common.databases.models.spider_boss_crawl_url import SpiderBossCrawlUrl # If we want to update tasks here, but maybe not in batch?
+from common.databases.models.job import Job
+from jobCollection.items.boss_job_item import BossJobDetailItem
 
 logger = logging.getLogger(__name__)
 
-class WriteBuffer:
-    def __init__(self, max_rows=100, max_wait=3):
-        self.queue = asyncio.Queue()
-        self.buffer = []
-        self.max_rows = max_rows
-        self.max_wait = max_wait
-
-    async def push(self, item):
-        await self.queue.put(item)
-
-    async def run(self, writer_func):
-        while True:
-            try:
-                try:
-                    item = await asyncio.wait_for(self.queue.get(), timeout=self.max_wait)
-                    self.buffer.append(item)
-                except asyncio.TimeoutError:
-                    pass
-
-                # If buffer full or timeout occurred (and we have something)
-                # Check buffer size or if we just timed out.
-                # Logic: If we got an item, check size. If full, flush.
-                # If we timed out, flush if not empty.
-                
-                should_flush = len(self.buffer) >= self.max_rows or (not self.queue.empty() == False and len(self.buffer) > 0)
-                # Actually simpler: always flush if we hit timeout (implicit in flow above) OR if size >= max
-                
-                if len(self.buffer) >= self.max_rows or (self.buffer and self.queue.empty()):
-             	    # Verify queue empty check is robust? 
-             	    # Just flushing periodically is fine.
-             	    await self.flush(writer_func)
-
-            except Exception as e:
-                logger.error(f"Buffer run error: {e}")
-                # Don't break, continue
-                
-    async def flush(self, writer_func):
-        if not self.buffer:
-            return
-        batch = list(self.buffer)
-        self.buffer.clear()
-        try:
-            await writer_func(batch)
-        except Exception as e:
-            logger.error(f"Flush error: {e}")
 
 class BossJobPipeline:
-    def __init__(self):
-        self.buffer = WriteBuffer(max_rows=100, max_wait=2)
+    """
+    Pipeline 写入策略：asyncio.Queue 解耦 Spider 与 DB 写入。
 
-    async def open_spider(self):
+    - process_item: 仅 put 到队列，永不阻塞 Spider。
+    - _consumer:    后台任务，每次取出队列里所有可用 item（最多 BATCH_SIZE 条）
+                    作为一个事务批量写入，兼顾实时性和效率。
+    """
+
+    _BATCH_SIZE = int(os.getenv("BOSS_PIPELINE_BATCH_SIZE", "15"))
+    _DB_RETRIES = int(os.getenv("BOSS_PIPELINE_DB_RETRIES", "3"))
+    _DB_RETRY_DELAY = float(os.getenv("BOSS_PIPELINE_DB_RETRY_DELAY", "1.0"))
+    _IDLE_FLUSH_INTERVAL = float(os.getenv("BOSS_PIPELINE_IDLE_FLUSH", "2.0"))
+
+    async def open_spider(self, spider):
         await db_manager.initialize()
-        self.writer_task = asyncio.create_task(self.buffer.run(self._db_write))
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._consumer_task = asyncio.create_task(self._consumer())
 
-    async def close_spider(self):
-        await self.buffer.flush(self._db_write)
-        self.writer_task.cancel()
+    async def close_spider(self, spider):
+        # 等待队列里所有 item 处理完再关闭
+        await self._queue.join()
+        self._consumer_task.cancel()
         try:
-            await self.writer_task
+            await self._consumer_task
         except asyncio.CancelledError:
             pass
-        # await db_manager.close() # Shared DB manager, maybe don't close if handled globally or other spiders
 
-    async def process_item(self, item):
-        await self.buffer.push(item)
+    async def process_item(self, item, spider):
+        """立即返回，不阻塞 Spider；由后台消费者负责写 DB。"""
+        if item is not None:
+            await self._queue.put(item)
         return item
 
-    async def _db_write(self, batch):
-        """Batch write logic"""
-        if not batch: return
-        
-        from jobCollection.items.boss_job_item import BossJobDetailItem
-        
-        # Filter None items
-        batch = [i for i in batch if i is not None]
-        if not batch: return
+    async def _consumer(self):
+        """
+        后台消费者：
+        1. 等待第一条 item（有就拿，最多等 _IDLE_FLUSH_INTERVAL 秒）
+        2. 继续 drain 队列里已有的 item（非阻塞），凑到 _BATCH_SIZE 为止
+        3. 写入 DB，task_done
+        4. 循环
+        """
+        while True:
+            batch = []
+            # 1. 等待第一条 item
+            try:
+                first = await asyncio.wait_for(
+                    self._queue.get(), timeout=self._IDLE_FLUSH_INTERVAL
+                )
+                batch.append(first)
+            except asyncio.TimeoutError:
+                continue  # 队列空，继续等待
 
-        # Separate Detail Updates from New Inserts
+            # 2. Drain 剩余可用 item（非阻塞）
+            while len(batch) < self._BATCH_SIZE:
+                try:
+                    item = self._queue.get_nowait()
+                    batch.append(item)
+                except asyncio.QueueEmpty:
+                    break
+
+            # 3. 写入 DB（带重试）
+            for attempt in range(1, self._DB_RETRIES + 1):
+                try:
+                    await self._db_write(batch)
+                    break
+                except Exception as e:
+                    if attempt < self._DB_RETRIES:
+                        logger.warning(f"DB 写入失败（第 {attempt} 次），{self._DB_RETRY_DELAY}s 后重试: {e}")
+                        await asyncio.sleep(self._DB_RETRY_DELAY)
+                    else:
+                        logger.error(f"DB 写入放弃（已重试 {self._DB_RETRIES} 次）: {e}")
+
+            # 4. 通知队列这批已处理
+            for _ in batch:
+                self._queue.task_done()
+
+    # ------------------------------------------------------------------ #
+    #  DB 写入
+    # ------------------------------------------------------------------ #
+
+    async def _db_write(self, batch: list):
+        if not batch:
+            return
+
+        # 过滤掉 None（去重 pipeline drop 后可能传入 None）
+        batch = [i for i in batch if i is not None]
+        if not batch:
+            return
+
         detail_updates = [i for i in batch if isinstance(i, BossJobDetailItem)]
         regular_inserts = [i for i in batch if not isinstance(i, BossJobDetailItem)]
-        
+
         async with (await db_manager.get_session()) as session:
-            async with session.begin(): # Start transaction
-                
-                # --- Handle Detail Updates ---
+            async with session.begin():
                 if detail_updates:
-                    for update_item in detail_updates:
-                        if not update_item.get('job_desc'): continue
-                        
-                        update_values = {
-                        'description': update_item['job_desc'], 
-                        'updated_at': datetime.now(),
-                        'is_crawl': 1
-                    }
-                        
-                        if update_item.get('longitude'):
-                            update_values['longitude'] = update_item['longitude']
-                        if update_item.get('latitude'):
-                            update_values['latitude'] = update_item['latitude']
-                            
-                         # Note: Updating skills might require more complex logic if it's a relation.
-                         # For now, we updated 'job_desc' and 'location'.
-                         # If 'tags' (skills) need update, we need to serialize them?
-                         # The Job model has 'tags' as Text(JSON).
-                        if update_item.get('skills'):
-                             update_values['tags'] = json.dumps(update_item['skills'], ensure_ascii=False)
-
-                        stmt = update(Job).where(Job.encrypt_job_id == update_item['encrypt_job_id']).values(**update_values).returning(Job.id)
-                        res = await session.execute(stmt)
-                        updated_id = res.scalar()
-                        if updated_id:
-                            # 触发 ES 同步
-                            try:
-                                from tasks.es_sync import sync_job_to_es
-                                sync_job_to_es.delay(updated_id)
-                            except Exception as e:
-                                logger.warning(f"Failed to dispatch Celery sync task for updated job {updated_id}: {e}")
-                                
-                    logger.info(f"Batch updated {len(detail_updates)} job details.")
-
-                # --- Handle Regular Inserts (Previous Logic) ---
+                    await self._write_detail_updates(session, detail_updates)
                 if regular_inserts:
-                    # 1. Resolve Industries
-                    industry_codes = set(i.get('industry_code') for i in regular_inserts if i.get('industry_code'))
-                    industry_map_code_id = {} # code -> id
-                    if industry_codes:
-                        stmt = select(Industry).where(Industry.code.in_(industry_codes))
-                        res = await session.execute(stmt)
-                        for ind in res.scalars():
-                            industry_map_code_id[ind.code] = ind.id
-                    
-                    # 2. Resolve Companies
-                    # Collect brand IDs and Names
-                    brand_map_source_id = {} # source_id -> id
-                    items_with_brand_id = [i for i in regular_inserts if i.get('encrypt_brand_id')]
-                    
-                    if items_with_brand_id:
-                        sids = set(i['encrypt_brand_id'] for i in items_with_brand_id)
-                        stmt = select(Company).where(Company.source_id.in_(sids))
-                        res = await session.execute(stmt)
-                        for com in res.scalars():
-                            brand_map_source_id[com.source_id] = com.id
+                    await self._write_jobs(session, regular_inserts)
 
-                    # Identify missing Companies
-                    missing_companies = {} # source_id -> item
-                    for i in regular_inserts:
-                        bid = i.get('encrypt_brand_id')
-                        if bid and bid not in brand_map_source_id:
-                            missing_companies[bid] = i
-                    
-                    if missing_companies:
-                        new_companies = []
-                        for bid, item in missing_companies.items():
-                            new_companies.append({
-                                'source_id': bid,
-                                'name': item.get('brand_name'),
-                                'logo': item.get('brand_logo'),
-                                'scale': item.get('brand_scale_name'),
-                                'stage': item.get('brand_stage_name'),
-                                'industry': item.get('brand_industry'),
-                                'created_at': datetime.now(),
-                                'updated_at': datetime.now()
-                            })
-                        
-                        if new_companies:
-                            # Upsert based on source_id (encryptBrandId)
-                            # Postgres requires constraint name or index elements
-                            # Company.source_id is unique
-                            stmt_ins = insert(Company).values(new_companies)
-                            stmt_ins = stmt_ins.on_conflict_do_update(
-                                index_elements=['source_id'],
-                                set_={
-                                    'name': stmt_ins.excluded.name,
-                                    'updated_at': datetime.now()
-                                }
-                            )
-                            await session.execute(stmt_ins)
-                            
-                            # Re-fetch ids
-                            stmt = select(Company).where(Company.source_id.in_(missing_companies.keys()))
-                            res = await session.execute(stmt)
-                            for com in res.scalars():
-                                brand_map_source_id[com.source_id] = com.id
+    async def _write_detail_updates(self, session, items):
+        for item in items:
+            if not item.get("job_desc"):
+                continue
+            values = {
+                "description": item["job_desc"],
+                "updated_at": datetime.now(),
+                "is_crawl": 1,
+            }
+            if item.get("longitude"):
+                values["longitude"] = item["longitude"]
+            if item.get("latitude"):
+                values["latitude"] = item["latitude"]
+            if item.get("skills"):
+                values["tags"] = item["skills"]
 
-                    # 3. Prepare Jobs
-                    job_rows = []
-                    for item in regular_inserts:
-                        # Logic to parse salary
-                        salary_desc = item.get('salary_desc', '')
-                        salary_min = 0
-                        salary_max = 0
-                        match = re.search(r'(\d+)-(\d+)K', salary_desc, re.IGNORECASE)
-                        if match:
-                            salary_min = int(match.group(1)) * 1000
-                            salary_max = int(match.group(2)) * 1000
-                        
-                        source_url = f"https://www.zhipin.com/job_detail/{item.get('encrypt_job_id', '')}.html"
-                        
-                        # IDs
-                        ind_id = industry_map_code_id.get(item.get('industry_code'))
-                        com_id = brand_map_source_id.get(item.get('encrypt_brand_id'))
-                        
-                        job_rows.append({
-                            'title': item.get('job_name'),
-                            'salary_min': salary_min,
-                            'salary_max': salary_max,
-                            'salary_desc': salary_desc,
-                            'location': (item.get('city_name') or '') + (item.get('area_district') or '') + (item.get('business_district') or ''),
-                            'experience': item.get('job_experience'),
-                            'education': item.get('job_degree'),
-                            'tags': json.dumps(item.get('skills', []), ensure_ascii=False),
-                            'job_labels': json.dumps(item.get('job_labels', []), ensure_ascii=False),
-                            'welfare': json.dumps(item.get('welfare_list', []), ensure_ascii=False),
-                            'source_site': 'BossZhipin',
-                            'source_url': source_url,
-                            'encrypt_job_id': item.get('encrypt_job_id'),
-                            'company_id': com_id,
-                            'industry_id': ind_id,
-                            'industry_code': item.get('industry_code'),
-                            'city_code': item.get('city_code'),
-                            'longitude': float(item.get('longitude') or 0),
-                            'latitude': float(item.get('latitude') or 0),
-                            'boss_name': item.get('boss_name'),
-                            'boss_title': item.get('boss_title'),
-                            'boss_avatar': item.get('boss_avatar'),
-                            'publish_date': datetime.now(),
-                            'updated_at': datetime.now(),
-                            'created_at': datetime.now(),
-                            'is_crawl': 0
-                        })
+            stmt = (
+                update(Job)
+                .where(Job.encrypt_job_id == item["encrypt_job_id"])
+                .values(**values)
+                .returning(Job.id)
+            )
+            res = await session.execute(stmt)
+            job_id = res.scalar()
+            if job_id:
+                self._dispatch_es_sync(job_id)
 
-                    if job_rows:
-                        # 4. Bulk Upsert Jobs
-                        stmt = insert(Job).values(job_rows)
-                        
-                        # Update Map excluding primary key and created_at
-                        # Use unique constraint on `encrypt_job_id` or `source_url`?
-                        # Job model: encrypt_job_id is UNIQUE, source_url is UNIQUE.
-                        # We use encrypt_job_id as the primary deduplication key usually.
-                        
-                        update_cols = {
-                            'title': stmt.excluded.title,
-                            'salary_min': stmt.excluded.salary_min,
-                            'salary_max': stmt.excluded.salary_max,
-                            'updated_at': datetime.now()
-                            # Do NOT update is_crawl on duplicate key for new list items, 
-                            # as we don't want to reset it if we already crawled detail.
-                        }
-                        
-                        stmt = stmt.on_conflict_do_update(
-                            index_elements=['encrypt_job_id'],
-                            set_=update_cols
-                        ).returning(Job.id)
-                        res = await session.execute(stmt)
-                        upserted_ids = res.scalars().all()
-                        
-                        logger.info(f"Batch wrote {len(job_rows)} jobs.")
-                        
-                        # 触发 ES 同步
-                        try:
-                            from tasks.es_sync import sync_job_to_es
-                            for jid in upserted_ids:
-                                sync_job_to_es.delay(jid)
-                        except Exception as e:
-                            logger.warning(f"Failed to dispatch Celery sync task for new batch jobs: {e}")
+        logger.info(f"更新 job 详情 {len(items)} 条")
+
+    async def _write_jobs(self, session, items):
+        items = [i for i in items if i is not None]
+        if not items:
+            return
+        # 1. 行业 code -> id 映射
+        industry_codes = {i.get("industry_code") for i in items if i.get("industry_code")}
+        industry_map: dict = {}
+        if industry_codes:
+            res = await session.execute(
+                select(Industry).where(Industry.code.in_(industry_codes))
+            )
+            industry_map = {ind.code: ind.id for ind in res.scalars()}
+
+        # 2. 公司 Upsert
+        brand_map: dict = {}
+        brand_ids = {i["encrypt_brand_id"] for i in items if i.get("encrypt_brand_id")}
+        if brand_ids:
+            res = await session.execute(
+                select(Company).where(Company.source_id.in_(brand_ids))
+            )
+            brand_map = {c.source_id: c.id for c in res.scalars()}
+
+            missing = {bid: next(i for i in items if i.get("encrypt_brand_id") == bid)
+                       for bid in brand_ids if bid not in brand_map}
+            if missing:
+                company_rows = [
+                    {
+                        "source_id": bid,
+                        "name": item.get("brand_name"),
+                        "logo": item.get("brand_logo"),
+                        "scale": item.get("brand_scale_name"),
+                        "stage": item.get("brand_stage_name"),
+                        "industry": item.get("brand_industry"),
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now(),
+                    }
+                    for bid, item in missing.items()
+                ]
+                stmt = insert(Company).values(company_rows)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source_id"],
+                    set_={"name": stmt.excluded.name, "updated_at": datetime.now()},
+                )
+                await session.execute(stmt)
+                res = await session.execute(
+                    select(Company).where(Company.source_id.in_(missing.keys()))
+                )
+                brand_map.update({c.source_id: c.id for c in res.scalars()})
+
+        # 3. 构造 Job 行
+        now = datetime.now()
+        job_rows = []
+        for item in items:
+            salary_desc = item.get("salary_desc", "")
+            salary_min, salary_max = 0, 0
+            m = re.search(r"(\d+)-(\d+)K", salary_desc, re.IGNORECASE)
+            if m:
+                salary_min = int(m.group(1)) * 1000
+                salary_max = int(m.group(2)) * 1000
+
+            job_rows.append({
+                "title": item.get("job_name"),
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "salary_desc": salary_desc,
+                "location": (
+                    (item.get("city_name") or "")
+                    + (item.get("area_district") or "")
+                    + (item.get("business_district") or "")
+                ),
+                "experience": item.get("job_experience"),
+                "education": item.get("job_degree"),
+                "tags": item.get("skills") or [],
+                "job_labels": item.get("job_labels") or [],
+                "welfare": item.get("welfare_list") or [],
+                "source_site": "BossZhipin",
+                "source_url": f"https://www.zhipin.com/job_detail/{item.get('encrypt_job_id', '')}.html",
+                "encrypt_job_id": item.get("encrypt_job_id"),
+                "company_id": brand_map.get(item.get("encrypt_brand_id")),
+                "industry_id": industry_map.get(item.get("industry_code")),
+                "industry_code": item.get("industry_code"),
+                "city_code": item.get("city_code"),
+                "major_name": item.get("major_name"),
+                "longitude": float(item.get("longitude") or 0),
+                "latitude": float(item.get("latitude") or 0),
+                "boss_name": item.get("boss_name"),
+                "boss_title": item.get("boss_title"),
+                "boss_avatar": item.get("boss_avatar"),
+                "publish_date": now,
+                "created_at": now,
+                "updated_at": now,
+                "is_crawl": 0,
+            })
+
+        if not job_rows:
+            return
+
+        # 4. Upsert
+        stmt = insert(Job).values(job_rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["encrypt_job_id"],
+            set_={
+                "title": stmt.excluded.title,
+                "salary_min": stmt.excluded.salary_min,
+                "salary_max": stmt.excluded.salary_max,
+                "major_name": stmt.excluded.major_name,
+                "updated_at": datetime.now(),
+            },
+        ).returning(Job.id)
+        res = await session.execute(stmt)
+        upserted_ids = res.scalars().all()
+        logger.info(f"写入 job {len(job_rows)} 条（upserted={len(upserted_ids)}）")
+
+        for jid in upserted_ids:
+            self._dispatch_es_sync(jid)
+
+    @staticmethod
+    def _dispatch_es_sync(job_id: int):
+        try:
+            webapi_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                "jobCollectionWebApi",
+            )
+            if webapi_dir not in sys.path:
+                sys.path.append(webapi_dir)
+            from tasks.es_sync import sync_job_to_es
+            sync_job_to_es.delay(job_id)
+        except Exception as e:
+            logger.warning(f"ES 同步任务分发失败 (job_id={job_id}): {e}")

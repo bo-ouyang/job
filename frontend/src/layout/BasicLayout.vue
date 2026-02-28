@@ -100,7 +100,6 @@ const handleLogout = () => {
           </div>
           <div class="links">
             <RouterLink to="/">首页</RouterLink>
-            <RouterLink to="/analysis">全站分析</RouterLink>
             <RouterLink to="/career-compass" class="nav-highlight">职业导航罗盘</RouterLink>
             <RouterLink to="/major-analysis">专业分析</RouterLink>
             <RouterLink to="/jobs">职位市场</RouterLink>

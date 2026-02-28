@@ -1,530 +1,567 @@
+import asyncio
 import json
 import os
+import random
+import sys
 import time
-import asyncio
 from datetime import datetime
+
 import scrapy
 from scrapy import Selector
-from sqlalchemy import select, update
-from urllib.parse import urlparse
+from scrapy import signals
+from scrapy.exceptions import DontCloseSpider
+from sqlalchemy import select
 
-# DrissionPage and Proxy Manager
-from DrissionPage import ChromiumPage, ChromiumOptions
-
-# DB Models
 from common.databases.PostgresManager import db_manager
 from common.databases.models.job import Job
+from DrissionPage import ChromiumPage, ChromiumOptions
 
-# To load proxy_manager correctly depending on execution context run_pipeline vs scrapy crawl
-import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
-simple_script_dir = os.path.join(os.path.dirname(current_dir), 'simple_script')
+simple_script_dir = os.path.join(os.path.dirname(current_dir), "simple_script")
 if simple_script_dir not in sys.path:
     sys.path.append(simple_script_dir)
 from proxy_manager import proxy_manager
 
+
 class BossDetailDrissionSpider(scrapy.Spider):
+    """
+    详情页抓取爬虫（无需登录）。
+    - 从 DB 拉取 is_crawl=0 的 job，访问详情页解析描述后写回 DB。
+    - 所有参数均可通过环境变量配置。
+    """
+
     name = "boss_detail_drission"
-    
-    # We do not use Scrapy's request engine for fetching. We use DP inside a loop.
-    # Therefore, we override start_requests with a dummy and handle the loop in a background task or in spider_opened.
+    allowed_domains = ["zhipin.com"]
+
     custom_settings = {
-        # Optional: You can route data through your Scrapy Pipelines
-        # "ITEM_PIPELINES": {
-        #     "jobCollection.pipelines.boss_pipeline.BossJobPipeline": 300,
-        # },
-        # We don't really need Scrapy's downloader, but we keep the structure
         "CONCURRENT_REQUESTS": 1,
+        "DOWNLOAD_TIMEOUT": 1800,
+        "ITEM_PIPELINES": {},               # 详情页不走 item pipeline，直接写 DB
+        "LOG_FILE": f"static/log/scrapy-boss_detail-{datetime.now().strftime('%Y-%m-%d')}.log",
     }
+
+    # ── 可配置参数 ────────────────────────────────────────────────────────
+    # 每次抓取完成后随机等待范围（秒）
+    REQ_DELAY_MIN       = float(os.getenv("BOSS_DETAIL_DELAY_MIN",         "2.0"))
+    REQ_DELAY_MAX       = float(os.getenv("BOSS_DETAIL_DELAY_MAX",         "5.0"))
+    # 等待目标元素加载超时（秒）
+    LOAD_WAIT_TIMEOUT   = float(os.getenv("BOSS_DETAIL_LOAD_WAIT",         "5.0"))
+    # 无任务时等待时间（秒）
+    IDLE_WAIT           = float(os.getenv("BOSS_DETAIL_IDLE_WAIT",         "10.0"))
+    # 人工解验证码等待周期数 & 每周期秒数
+    CAPTCHA_POLL_CYCLES = int(os.getenv("BOSS_DETAIL_CAPTCHA_CYCLES",      "10"))
+    CAPTCHA_POLL_SEC    = float(os.getenv("BOSS_DETAIL_CAPTCHA_POLL_SEC",  "6.0"))
+    # 代理：请求数触发轮换
+    PROXY_ROTATE_REQS   = int(os.getenv("BOSS_DETAIL_PROXY_ROTATE_REQS",  "200"))
+    # 代理：时间触发轮换（秒）
+    PROXY_ROTATE_SECS   = int(os.getenv("BOSS_DETAIL_PROXY_ROTATE_SECS",  "360"))
+    # 指纹：请求数触发轮换
+    FP_ROTATE_REQS      = int(os.getenv("BOSS_DETAIL_FP_ROTATE_REQS",     "250"))
+    # 每次请求前额外随机 jitter（秒），模拟人工停顿
+    JITTER_MIN          = float(os.getenv("BOSS_DETAIL_JITTER_MIN",        "0.5"))
+    JITTER_MAX          = float(os.getenv("BOSS_DETAIL_JITTER_MAX",        "2.0"))
+    # DB 每批拉取的 job 数
+    TASK_BATCH_SIZE     = int(os.getenv("BOSS_DETAIL_TASK_BATCH",          "1"))
+
+    # ── 浏览器分辨率 / 语言候选池 ─────────────────────────────────────────
+    _RESOLUTIONS = [(1920, 1080), (1366, 768), (1440, 900), (1536, 864), (1280, 800)]
+    _LANGUAGES   = ["zh-CN,zh;q=0.9,en;q=0.8", "zh-CN,zh;q=0.9",
+                    "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"]
+    _WEBGL_VENDORS = ["Google Inc. (NVIDIA)", "Google Inc. (AMD)"]
+    _WEBGL_RENDERERS = [
+        "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+        "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+        "ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    ]
+    CUSTOM_USER_AGENTS = [
+    # Windows Chrome
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    # Windows Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+    ]
+
+    # ─────────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider._spider_idle, signal=signals.spider_idle)
+        return spider
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.page = None
-        self.current_proxy = None
-        self.running = True
-        self.ip_request_count = 0
-        self.fp_request_count = 0
-        self.proxy_start_time = 0
+        self.page: ChromiumPage | None = None
+        self.current_proxy: str | None = None
+        self.proxy_start_time: float = 0.0
+        self.req_count: int = 0       # 当前代理请求计数
+        self.fp_count: int = 0        # 当前指纹请求计数
+        # 每抓取 N 页后自动保存一次 Cookie
+        self.cookie_save_every = int(float(os.getenv("BOSS_DETAIL_COOKIE_SAVE_EVERY", "100")))
+        self._pages_since_cookie_save: int = 0
 
-    def _get_random_fingerprint(self):
-        """Generate a dictionary with randomized browser parameters for advanced spoofing"""
-        from fake_useragent import UserAgent
-        import random
-        
+    # ------------------------------------------------------------------ #
+    #  Scrapy 入口
+    # ------------------------------------------------------------------ #
+
+    async def start(self):
+        await db_manager.initialize()
+        await self._init_browser()
+        yield scrapy.Request("data:,started", callback=self._parse_loop, dont_filter=True)
+
+    async def _parse_loop(self, response):
+        while True:
+            jobs = await self._fetch_tasks()
+            if not jobs:
+                self.logger.info(f"无待处理任务，等待 {self.IDLE_WAIT}s ...")
+                await asyncio.sleep(self.IDLE_WAIT)
+                continue
+
+            for job in jobs:
+                await self._process_job(job)
+
+            # 代理 / 指纹轮换检查
+            await self._maybe_rotate()
+
+    def _spider_idle(self, spider):
+        self.crawler.engine.crawl(
+            scrapy.Request("data:,idle", callback=self._parse_loop, dont_filter=True),
+            spider,
+        )
+        raise DontCloseSpider
+
+    def close(self, reason):
         try:
-            ua = UserAgent(os="windows", browsers=["chrome", "edge"]).random
+            if self.page:
+                self.page.quit()
         except Exception:
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            pass
+
+    # ------------------------------------------------------------------ #
+    #  单条 Job 处理
+    # ------------------------------------------------------------------ #
+
+    async def _process_job(self, job):
+        encrypt_job_id = job.encrypt_job_id
+        url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
+        self.logger.info(f"抓取详情: {encrypt_job_id} → {url}")
+
+        # 随机 jitter，模拟人工间隔
+        await asyncio.sleep(random.uniform(self.JITTER_MIN, self.JITTER_MAX))
+
+        success = await self._navigate(url)
+        if not success:
+            self.logger.warning(f"导航失败，回退任务: {encrypt_job_id}")
+            await self._revert_task(encrypt_job_id)
+            return
+
+        html = self.page.html if self.page else ""
+        job_desc = self._extract_job_desc(html)
+
+        if job_desc:
+            await self._update_job(encrypt_job_id, job_desc, success=True)
+            self.logger.info(f"详情写入成功: {encrypt_job_id}（{len(job_desc)} 字符）")
+        else:
+            self.logger.warning(f"描述解析失败: {encrypt_job_id}")
+            await self._update_job(encrypt_job_id, None, success=False)
+
+        self.req_count += 1
+        self.fp_count += 1
+
+        # 定期保存 Cookie
+        self._pages_since_cookie_save += 1
+        if self._pages_since_cookie_save >= self.cookie_save_every:
+            self._pages_since_cookie_save = 0
+            self._save_cookies_to_disk()
+
+        # 请求间随机等待
+        await asyncio.sleep(random.uniform(self.REQ_DELAY_MIN, self.REQ_DELAY_MAX))
+
+    # ------------------------------------------------------------------ #
+    #  浏览器导航 & 反爬处理
+    # ------------------------------------------------------------------ #
+
+    async def _navigate(self, url: str) -> bool:
+        if not self.page:
+            await self._init_browser()
+            if not self.page:
+                return False
+        try:
+            self.page.get(url)
+
+            # 等待目标元素，超时则继续（页面可能已加载）
+            try:
+                self.page.wait.ele_loaded(".job-detail-section", timeout=self.LOAD_WAIT_TIMEOUT)
+            except Exception:
+                pass
+
+            current_url = getattr(self.page, "url", "") or ""
+
+            # 检测安全拦截
+            if "user/safe" in current_url or "captcha" in current_url:
+                return await self._handle_captcha()
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"导航异常: {e}")
+            await self._rebuild_browser()
+            return False
+
+    async def _handle_captcha(self) -> bool:
+        """检测到验证码，等待人工处理"""
+        self.logger.warning("⚠️ 检测到安全拦截！请在浏览器中手动完成验证（等待中...）")
+        for i in range(self.CAPTCHA_POLL_CYCLES):
+            await asyncio.sleep(self.CAPTCHA_POLL_SEC)
+            current_url = getattr(self.page, "url", "") or ""
+            if "user/safe" not in current_url and "captcha" not in current_url:
+                self.logger.info(f"✅ 验证完成，已等待 {(i+1)*self.CAPTCHA_POLL_SEC:.0f}s")
+                return True
+            self.logger.info(f"等待验证... {(i+1)*self.CAPTCHA_POLL_SEC:.0f}s / {self.CAPTCHA_POLL_CYCLES*self.CAPTCHA_POLL_SEC:.0f}s")
+
+        self.logger.warning("验证超时，轮换代理并重建浏览器")
+        if self.current_proxy:
+            proxy_manager.remove_proxy(self.current_proxy)
+        await self._rebuild_browser()
+        return False
+
+    # ------------------------------------------------------------------ #
+    #  浏览器初始化 & 轮换
+    # ------------------------------------------------------------------ #
+
+    def _make_fingerprint(self) -> dict:
+        # try:
+        #     from fake_useragent import UserAgent
+        #     # 修改处：os 参数传入列表
+        #     ua = UserAgent(os=["windows"], browsers=["chrome", "edge"]).random
+        # except Exception:
+        #     ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        #           "AppleWebKit/537.36 (KHTML, like Gecko) "
+        #           "Chrome/122.0.0.0 Safari/537.36")
         
-        # Resolutions
-        resolutions = [(1920, 1080), (1366, 768), (1440, 900), (1536, 864)]
-        res = random.choice(resolutions)
-        
-        # Languages
-        langs = ["zh-CN,zh;q=0.9,en;q=0.8", "zh-CN,zh;q=0.9", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"]
-        lang = random.choice(langs)
+        # 确保从列表中随机选择
+        res = random.choice(self._RESOLUTIONS)
+        w, h = res[0], res[1]
         
         return {
-            "ua": ua,
-            "width": res[0],
-            "height": res[1],
-            "lang": lang,
+            "ua": random.choice(self.CUSTOM_USER_AGENTS),
+            "width": w,
+            "height": h,
+            "lang": random.choice(self._LANGUAGES),
             "hw_concurrency": random.choice([4, 8, 12, 16]),
             "device_memory": random.choice([4, 8, 16, 32]),
-            "webgl_vendor": random.choice(["Google Inc. (NVIDIA)", "Google Inc. (AMD)"]),
-            "webgl_renderer": random.choice([
-                "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-                "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-                "ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"
-            ])
+            "webgl_vendor": random.choice(self._WEBGL_VENDORS),
+            "webgl_renderer": random.choice(self._WEBGL_RENDERERS),
         }
 
-    def _get_browser(self, proxy_url=None):
-        """Configure and launch ChromiumPage"""
+    def _build_browser(self, proxy_url: str | None = None) -> ChromiumPage:
+        # 1. 生成指纹
+        fp = self._make_fingerprint()
+        ua = fp["ua"] # Use the UA generated as part of the fingerprint
+
         co = ChromiumOptions()
-        # 1. Randomize Fingerprint on browser restart
-        fp = self._get_random_fingerprint()
-        self.logger.info(f"Setting Fingerprint UA: {fp['ua']}, Res: {fp['width']}x{fp['height']}")
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            free_port = s.getsockname()[1]
+        co.set_address(f'127.0.0.1:{free_port}')
         
-        # Apply standard options
-        co.set_user_agent(fp['ua'])
+        co.set_user_agent(ua)
         co.set_argument(f"--lang={fp['lang']}")
-        
-        # Advanced spoofing via arguments
         co.set_argument(f"--window-size={fp['width']},{fp['height']}")
         co.set_argument("--disable-blink-features=AutomationControlled")
-        
-        # Pretend to be a normal browser
+        co.set_argument("--ignore-certificate-errors")
         co.set_argument("--disable-infobars")
         co.set_argument("--hide-scrollbars")
-        
-        # Suppress WebRTC IP leaks
         co.set_argument("--enforce-webrtc-ip-permission-check")
         co.set_argument("--force-webrtc-ip-handling-policy=disable-non-proxied-udp")
-        
-        if proxy_url:
-            if '@' in proxy_url:
-                self.logger.info(f"Setting browser Auth proxy via extension: {proxy_url.split('@')[-1]}")
-                plugin_path = self._create_proxy_extension(proxy_url)
-                co.add_extension(plugin_path)
-            else:
-                self.logger.info(f"Setting browser proxy: {proxy_url}")
-                co.set_proxy(proxy_url)
-        else:
-            self.logger.warning("No proxy provided, running with direct connection.")
-        
-        # Isolate user data to prevent proxy bypass due to existing chrome instances
-        user_data_dir = os.path.join(simple_script_dir, "chrome_isolated_data_drission_spider")
-        co.set_user_data_path(user_data_dir)
-        
-        # Efficiency Settings
-        #co.set_argument("--blink-settings=imagesEnabled=false") # Disable images
-        #co.set_argument("--disable-javascript") # Do NOT disable JS, Boss needs it for anti-bot
-        co.set_argument("--ignore-certificate-errors")
-        
-        # Block annoying trackers/CSS to speed up loading
         co.set_argument("--disable-features=IsolateOrigins,site-per-process")
-        
-        co.mute(True) # Mute audio
-        
+        co.mute(True)
+
+        # 3. 代理设置
+        if proxy_url:
+            try:
+                if "@" in proxy_url:
+                    # 认证代理 (使用专用目录隔离)
+                    co.add_extension(self._create_proxy_extension(proxy_url))
+                    self.logger.info(f"使用认证代理: {proxy_url.split('@')[-1]}")
+                else:
+                    # 普通代理
+                    co.set_proxy(proxy_url)
+                    self.logger.info(f"使用代理: {proxy_url}")
+            except Exception as e:
+                self.logger.error(f"设置代理失败: {e}")
+        else:
+            self.logger.warning("代理池为空，使用直连")
+
+        # 4. 隔离数据目录
+        user_data_dir = os.path.join(simple_script_dir, "chrome_detail_data")
+        co.set_user_data_path(user_data_dir)
+
+        # 5. 创建页面
         page = ChromiumPage(co)
-        # Set page load strategy to 'none' - don't wait for all resources to finish
         page.set.load_mode.none()
-        
-        # Inject JavaScript to override navigator properties and WebGL
+
+        # 6. 注入反检测 JS
         stealth_js = f"""
         Object.defineProperty(navigator, 'webdriver', {{get: () => undefined}});
         window.navigator.chrome = {{runtime: {{}}}};
-        
-        const getParameter = WebGLRenderingContext.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {{
-            if (parameter === 37445) return '{fp["webgl_vendor"]}';
-            if (parameter === 37446) return '{fp["webgl_renderer"]}';
-            return getParameter(parameter);
+        const _getP = WebGLRenderingContext.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(p) {{
+            if (p === 37445) return '{fp["webgl_vendor"]}';
+            if (p === 37446) return '{fp["webgl_renderer"]}';
+            return _getP(p);
         }};
-        
         Object.defineProperty(navigator, 'hardwareConcurrency', {{get: () => {fp["hw_concurrency"]}}});
         Object.defineProperty(navigator, 'deviceMemory', {{get: () => {fp["device_memory"]}}});
         """
-        page.run_cdp('Page.addScriptToEvaluateOnNewDocument', source=stealth_js)
-        
+        page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source=stealth_js)
+        self.logger.info(f"浏览器已创建 UA={ua[:40]}... 分辨率={fp['width']}x{fp['height']}")
         return page
 
-    async def start(self):
-        """
-        Since we are doing full DrissionPage takeover, we yield one dummy request
-        and start our custom DP loop in the parse method. 
-        Alternatively, we could use signals.spider_opened to start an async loop.
-        Using a dummy request is the simplest way to inject into the Scrapy engine.
-        """
-        # We start the browser
+
+    async def _init_browser(self):
         self.current_proxy = proxy_manager.get_proxy()
         self.proxy_start_time = time.time()
         try:
-            self.page = self._get_browser(self.current_proxy)
-            self.logger.info("Browser initialized successfully.")
+            self.page = self._build_browser(self.current_proxy)
+            # 尝试从磁盘加载并注入已保存的 Cookie
+            self._load_and_inject_cookies()
         except Exception as e:
-            self.logger.error(f"Failed to initialize browser: {e}")
-            return
-            
-        yield scrapy.Request('data:,', callback=self.parse_loop, dont_filter=True)
+            import traceback
+            self.logger.error(f"浏览器初始化失败: {traceback.format_exc()}")
+            self.page = None
 
-    async def parse_loop(self, response):
-        """The main loop that controls DrissionPage, fetches tasks from DB, and extracts data"""
-        self.logger.info("Starting DrissionPage polling loop...")
-        
-        while self.running:
-            # 1. Fetch a batch of Tasks from DB to reduce query overhead
-            jobs = await self._fetch_task_batch(batch_size=1)
-            
-            if not jobs:
-                self.logger.info("No pending tasks. Waiting 5 seconds...")
-                await asyncio.sleep(5)
-                continue
-
-            # `jobs` is practically a list from SQLAlchemy's .all(), but Pyre2 might struggle
-            
-            #for job in jobs:
-            job = jobs[0]
-            encrypt_job_id = job.encrypt_job_id
-            url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
-            self.logger.info(f"Processing Task: {encrypt_job_id} -> {url}")
-    
-            # 2. Navigate and Anti-Bot Check
-            success = await self._navigate_with_anti_bot(url)
-                
-            if not success:
-                   self.logger.warning(f"Failed to navigate properly for {encrypt_job_id}, retrying later.")
-                   # Revert task state to pending
-                   await self._revert_task(encrypt_job_id)
-                   continue
-                   
-                # 3. Extract Data
-            html_content = self.page.html if self.page else ""
-            job_desc = self._extract_job_desc(html_content)
-                
-            if job_desc:
-                # 4. Save to DB
-                await self._update_job_in_db(encrypt_job_id, job_desc)
-                self.logger.info(f"Successfully processed and updated {encrypt_job_id}")
-                self.ip_request_count += 1
-                self.fp_request_count += 1
-            else:
-                self.logger.warning(f"Could not extract description for {encrypt_job_id}. Layout change?")
-                await self._update_job_in_db(encrypt_job_id, "解析失败: 未找到描述")
-
-            # 5. Very short sleep to let DP breathe and prevent instant IP blocks
-            await asyncio.sleep(3)
-            
-            # 6. Automatic IP Rotation after X successful requests
-            if self.ip_request_count >= 500:
-                self.logger.info(f"[Rotation Strategy] Reached {self.ip_request_count} requests on current IP. Forcing Proxy Rotation...")
-                await self._force_rotate_proxy()
-                self.ip_request_count = 0
-                
-            # 6.5 Time-based IP Rotation (KDL proxy valid for 5-10 mins, rotate every 4.5 mins)
-            elif time.time() - self.proxy_start_time > 360:
-                self.logger.info(f"[Rotation Strategy] Proxy lifetime exceeded 6 minutes. Forcing Proxy Rotation...")
-                await self._force_rotate_proxy()
-                self.ip_request_count = 0
-                
-            # 7. Automatic Fingerprint Rotation after Y successful requests
-            if self.fp_request_count >= 500:
-                self.logger.info(f"[Rotation Strategy] Reached {self.fp_request_count} requests. Forcing full Fingerprint & Browser Swap...")
-                await self._force_rotate_fingerprint()
-                self.fp_request_count = 0
-                self.ip_request_count = 0 # FP rotation also rotates IP inherently if we want, or just restarts browser
-                   
-    async def _force_rotate_proxy(self):
-        """Intentionally discard current proxy and restart browser with a new one"""
-        if self.current_proxy:
-           proxy_manager.remove_proxy(self.current_proxy)
-        self.current_proxy = proxy_manager.get_proxy()
-        self.proxy_start_time = time.time()
-        
+    async def _rebuild_browser(self):
         try:
-            if getattr(self, 'page', None):
+            if self.page:
                 self.page.quit()
-        except: pass
+        except Exception:
+            pass
         await asyncio.sleep(2)
-        self.page = self._get_browser(self.current_proxy)
-        
-    async def _force_rotate_fingerprint(self):
-        """Intentionally restart browser to generate a completely new fingerprint AND take a new proxy"""
-        if self.current_proxy:
-           proxy_manager.remove_proxy(self.current_proxy)
-        self.current_proxy = proxy_manager.get_proxy()
-        self.proxy_start_time = time.time()
-        
-        try:
-            if getattr(self, 'page', None):
-                try:
-                    self.page.cookies.clear()
-                except: pass
-                self.page.quit()
-        except: pass
-        await asyncio.sleep(3)
-        self.page = self._get_browser(self.current_proxy)
+        await self._init_browser()
 
-    async def _navigate_with_anti_bot(self, url):
-        """Navigate to URL, handle anti-spider blocks, rotate proxy if necessary"""
-        try:
-            if not self.page:
-                self.logger.warning("Browser page is None. Attempting to initialize.")
-                self.page = self._get_browser(self.current_proxy)
-                if not self.page:
-                    return False
-                    
-            self.page.get(url)
-            
-            # Dynamic Wait: Instead of fixed sleep, wait up to 3 seconds for the target element or captcha to appear
-            # This is the biggest speedup! If it loads in 0.5s, we save 2.5s.
-            if getattr(self, 'page', None):
-                try:
-                    # 'ele_loaded' checks if it's in DOM. Or 'ele_displayed'
-                    self.page.wait.ele_loaded('.job-detail-section', timeout=3)
-                except Exception:
-                    pass # Timeout means it might be blocked or very slow, we check html anyway
-            
-            html = self.page.html if getattr(self, 'page', None) else ""
-            
-            # Check for Anti-Bot patterns
-            #is_blocked = ("安全拦截" in html or "验证码" in html or "系统检测到您" in html)
-            
-            # self.page.url might be a property, but it's safe to check
-            current_url = self.page.url if getattr(self.page, 'url', None) else ""
-            security_urls = ['user/safe']
-            is_security_url = all(security_url in current_url for security_url in security_urls)
-            #is_blocked or
-            if is_security_url:
-                
-                self.logger.warning("[Anti-Bot] Security block detected! Please solve the Captcha manually.")
-                self.logger.warning("[Anti-Bot] You have 60 seconds. Waiting...")
-                
-                # Pause and poll for user manual solving
-                for i in range(5):
-                    await asyncio.sleep(3)
-                    current_url = self.page.url if getattr(self, 'page', None) else ""
-                    if current_url and all(url in current_url for url in security_urls):
-                         self.logger.info("[Anti-Bot] Captcha manually solved! Resuming task.")
-                         return True
-                         
-                self.logger.warning("[Anti-Bot] Captcha timeout. Rotating IP and Fingerprint...")
-                
-                # Report bad proxy
+    async def _maybe_rotate(self):
+        """按请求数或时间，自动轮换代理/指纹"""
+        time_elapsed = time.time() - self.proxy_start_time
+        need_proxy_rotate = (
+            self.req_count >= self.PROXY_ROTATE_REQS
+            or time_elapsed >= self.PROXY_ROTATE_SECS
+        )
+        need_fp_rotate = self.fp_count >= self.FP_ROTATE_REQS
+
+        if need_fp_rotate or need_proxy_rotate:
+            reason = "指纹" if need_fp_rotate else "代理"
+            self.logger.info(f"[轮换] {reason}触发，重建浏览器（reqs={self.req_count}, elapsed={time_elapsed:.0f}s）")
+            if self.current_proxy:
                 proxy_manager.remove_proxy(self.current_proxy)
-                
-                # Get new proxy
-                self.current_proxy = proxy_manager.get_proxy()
-                self.logger.warning("[Anti-Bot] Restarting browser with new Proxy and Fingerprint...")
-                
-                # Restart browser & Try clear cookies for deep reset
-                try:
-                    if getattr(self, 'page', None):
-                        try:
-                            self.page.cookies.clear()
-                        except: pass
-                        self.page.quit()
-                except Exception:
-                    pass
-                
-                # Small cooldown before restart
-            
-                # Update page object
-                new_page = self._get_browser(self.current_proxy)
-                if new_page:
-                    self.page = new_page
-                else:
-                    self.logger.error("Failed to re-initialize browser.")
-                    
-                return False # Failed this iteration, needs retry
-                
-            return True # Success
-            
-        except Exception as e:
-            self.logger.error(f"Browser navigation error: {e}")
-            
-            # Attempt recovery
-            proxy_manager.remove_proxy(self.current_proxy)
-            self.current_proxy = proxy_manager.get_proxy()
-            try:
-                if getattr(self, 'page', None):
-                    try:
-                        self.page.cookies.clear()
-                    except: pass
-                    self.page.quit()
-            except Exception:
-                pass
-            
-            await asyncio.sleep(2)
-            
-            new_page = self._get_browser(self.current_proxy)
-            if new_page:
-                self.page = new_page
-            return False
+            await self._rebuild_browser()
+            self.req_count = 0
+            self.fp_count = 0
 
-    def _extract_job_desc(self, html_content):
-        """Parse HTML to get the job description"""
+    # ------------------------------------------------------------------ #
+    #  数据解析
+    # ------------------------------------------------------------------ #
+
+    def _extract_job_desc(self, html: str) -> str | None:
         try:
-            sel = Selector(text=html_content)
-            # Exact CSS selector from original spider
-            job_desc = sel.css('.job-detail-section > .job-sec-text::text').getall()
-            if not job_desc:
-                # Fallback or alternative selector if Boss changed layout
-                 job_desc = sel.css('.job-detail-section .job-sec-text *::text').getall()
-                 
-            job_desc = "\n".join([x.strip() for x in job_desc if x.strip()])
-            return job_desc
+            sel = Selector(text=html)
+            parts = sel.css(".job-detail-section > .job-sec-text::text").getall()
+            if not parts:
+                parts = sel.css(".job-detail-section .job-sec-text *::text").getall()
+            text = "\n".join(x.strip() for x in parts if x.strip())
+            return text or None
         except Exception as e:
-            self.logger.error(f"Extraction error: {e}")
+            self.logger.error(f"解析异常: {e}")
             return None
 
-    def _create_proxy_extension(self, proxy_url):
-        """Generate a Chrome extension to handle proxy with authentication"""
-        import os
-        proxy_url = proxy_url.replace('http://', '').replace('https://', '')
-        auth, ip_port = proxy_url.split('@')
-        username, password = auth.split(':')
-        ip, port = ip_port.split(':')
+    # ------------------------------------------------------------------ #
+    #  数据库操作
+    # ------------------------------------------------------------------ #
 
-        plugin_path = os.path.join(simple_script_dir, "proxy_auth_plugin")
-        os.makedirs(plugin_path, exist_ok=True)
-
-        manifest_json = """
-        {
-            "version": "1.0.0",
-            "manifest_version": 2,
-            "name": "Chrome Proxy",
-            "permissions": [
-                "proxy",
-                "tabs",
-                "unlimitedStorage",
-                "storage",
-                "<all_urls>",
-                "webRequest",
-                "webRequestBlocking"
-            ],
-            "background": {
-                "scripts": ["background.js"]
-            },
-            "minimum_chrome_version":"22.0.0"
-        }
-        """
-
-        background_js = """
-        var config = {
-                mode: "fixed_servers",
-                rules: {
-                  singleProxy: {
-                    scheme: "http",
-                    host: "%s",
-                    port: parseInt(%s)
-                  },
-                  bypassList: ["localhost"]
-                }
-              };
-
-        chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-
-        function callbackFn(details) {
-            return {
-                authCredentials: {
-                    username: "%s",
-                    password: "%s"
-                }
-            };
-        }
-
-        chrome.webRequest.onAuthRequired.addListener(
-                    callbackFn,
-                    {urls: ["<all_urls>"]},
-                    ['blocking']
-        );
-        """ % (ip, port, username, password)
-
-        with open(os.path.join(plugin_path, "manifest.json"), "w", encoding='utf-8') as f:
-            f.write(manifest_json.strip())
-        with open(os.path.join(plugin_path, "background.js"), "w", encoding='utf-8') as f:
-            f.write(background_js.strip())
-            
-        return plugin_path
-
-    async def _fetch_task_batch(self, batch_size=5):
-        """Fetch multiple pending jobs from DB to save query time"""
+    async def _fetch_tasks(self) -> list:
         try:
-            session = await db_manager.get_session()
-            async with session:
-                stmt = select(Job).where(
-                    (Job.is_crawl == 0) & 
-                    (Job.encrypt_job_id != None) & 
-                    (Job.encrypt_job_id != '')
-                ).limit(batch_size).order_by(Job.id.asc())
-                
+            async with (await db_manager.get_session()) as session:
+                stmt = (
+                    select(Job)
+                    .where(
+                        (Job.is_crawl == 0)
+                        & (Job.encrypt_job_id.isnot(None))
+                        & (Job.encrypt_job_id != "")
+                        & (Job.major_name.isnot(None))
+                        & (Job.major_name != "")
+                    )
+                    .order_by(Job.id.asc())
+                    .limit(self.TASK_BATCH_SIZE)
+                )
                 result = await session.execute(stmt)
                 jobs = result.scalars().all()
-                
                 if jobs:
-                    # Mark all as processing (2)
                     for job in jobs:
-                        job.is_crawl = 2 
+                        job.is_crawl = 2          # 处理中
                         job.updated_at = datetime.now()
                     await session.commit()
-                    return jobs
-                return []
+                return list(jobs)
         except Exception as e:
-            self.logger.error(f"Error fetching task batch: {e}")
+            self.logger.error(f"拉取任务失败: {e}")
             return []
 
-    async def _revert_task(self, encrypt_job_id):
-         """Revert task state back to pending (0) if navigation failed"""
-         try:
-            session = await db_manager.get_session()
-            async with session:
-                stmt = select(Job).where(Job.encrypt_job_id == encrypt_job_id)
-                result = await session.execute(stmt)
-                job = result.scalar_one_or_none()
-                if job:
-                     job.is_crawl = 0
-                     await session.commit()
-         except Exception as e:
-             self.logger.error(f"Error reverting task: {e}")
-
-    async def _update_job_in_db(self, encrypt_job_id, job_desc):
-        """Update job with the crawled description"""
+    async def _revert_task(self, encrypt_job_id: str):
         try:
-            session = await db_manager.get_session()
-            async with session:
-                stmt = select(Job).where(Job.encrypt_job_id == encrypt_job_id)
-                result = await session.execute(stmt)
+            async with (await db_manager.get_session()) as session:
+                result = await session.execute(
+                    select(Job).where(Job.encrypt_job_id == encrypt_job_id)
+                )
                 job = result.scalar_one_or_none()
-                
                 if job:
-                    if job_desc != '解析失败: 未找到描述':
+                    job.is_crawl = 0
+                    await session.commit()
+        except Exception as e:
+            self.logger.error(f"回退任务失败: {e}")
 
-                        job.description = job_desc
-                        job.is_crawl = 1 # Finished
-                        job.updated_at = datetime.now()
-                        await session.commit()
-                        return True
-                    else:
-                        job.is_crawl = 0 # Failed
-                        job.updated_at = datetime.now()
-                        await session.commit()
-                        return False
+    async def _update_job(self, encrypt_job_id: str, job_desc: str | None, success: bool):
+        try:
+            async with (await db_manager.get_session()) as session:
+                result = await session.execute(
+                    select(Job).where(Job.encrypt_job_id == encrypt_job_id)
+                )
+                job = result.scalar_one_or_none()
+                if not job:
+                    self.logger.warning(f"Job {encrypt_job_id} 不存在于 DB")
+                    return
+                if success and job_desc:
+                    job.description = job_desc
+                    job.is_crawl = 1
                 else:
-                    self.logger.warning(f"Job {encrypt_job_id} not found in DB during update")
-                    return False
+                    job.is_crawl = 0       # 解析失败，允许重试
+                job.updated_at = datetime.now()
+                await session.commit()
         except Exception as e:
-            self.logger.error(f"DB Update Error: {e}")
-            return False
+            self.logger.error(f"DB 更新失败: {e}")
 
-    def close(self, reason):
-        """Cleanup browser on spider close"""
-        self.running = False
+    # ------------------------------------------------------------------ #
+    #  Cookie 持久化
+    # ------------------------------------------------------------------ #
+
+    def _cookie_file_path(self) -> str:
+        return os.path.join(simple_script_dir, "cookies_detail.json")
+
+    def _save_cookies_to_disk(self):
+        """将当前浏览器 Cookie 保存到磁盘。"""
+        if not self.page:
+            return
         try:
-            if getattr(self, 'page', None):
-                self.page.quit()
-                self.logger.info("Browser closed successfully.")
+            cookies = self.page.cookies()
+            if not cookies:
+                return
+            path = self._cookie_file_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cookies, f, ensure_ascii=False, indent=2)
+            self.logger.info(f"Cookie 已保存（{len(cookies)} 条）→ {path}")
         except Exception as e:
-             self.logger.error(f"Error closing browser: {e}")
-        super().close(self, reason)
+            self.logger.warning(f"保存 Cookie 失败: {e}")
+
+    def _load_and_inject_cookies(self):
+        """从磁盘加载 Cookie 并注入浏览器。"""
+        if not self.page:
+            return
+        path = self._cookie_file_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cookies = json.load(f)
+            if not isinstance(cookies, list) or not cookies:
+                return
+            # 先访问一次目标域名，确保 Cookie 能写入
+            self.page.set.load_mode.normal()
+            self.page.get("https://www.zhipin.com/")
+            self.page.set.cookies(cookies)
+            self.page.set.load_mode.none()
+            self.logger.info(f"已从磁盘注入 Cookie（{len(cookies)} 条）← {path}")
+        except Exception as e:
+            self.logger.warning(f"加载 Cookie 失败: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  代理扩展工具
+    # ------------------------------------------------------------------ #
+
+    def _create_proxy_extension(self, proxy_url: str) -> str:
+        """为带认证的代理创建 Chrome 扩展插件。"""
+        # 去掉协议
+        url_clean = proxy_url.replace("http://", "").replace("https://", "")
+        
+        # 1. 拆分 auth 和 addr
+        if "@" in url_clean:
+            auth_part, addr_part = url_clean.split("@", 1)
+        else:
+            auth_part, addr_part = "", url_clean
+
+        # 2. 拆分 user:pass
+        if ":" in auth_part:
+            username, password = auth_part.split(":", 1)
+        else:
+            username, password = auth_part, ""
+
+        # 3. 拆分 ip:port
+        if ":" in addr_part:
+            ip, port = addr_part.split(":", 1)
+        else:
+            ip, port = addr_part, "80"
+
+        # 使用专用的插件目录，避免与 list 爬虫冲突
+        plugin_path = os.path.join(simple_script_dir, "proxy_auth_plugin_detail")
+        os.makedirs(plugin_path, exist_ok=True)
+
+        manifest_json = """{
+    "version": "1.0.0",
+    "manifest_version": 2,
+    "name": "Chrome Proxy Detail",
+    "permissions": ["proxy","tabs","unlimitedStorage","storage","<all_urls>","webRequest","webRequestBlocking"],
+    "background": {"scripts": ["background.js"]},
+    "minimum_chrome_version": "22.0.0"
+}"""
+        background_js = """var config = {
+    mode: "fixed_servers",
+    rules: { singleProxy: { scheme: "http", host: "%s", port: parseInt(%s) }, bypassList: ["localhost"] }
+};
+chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+function callbackFn(details) {
+    return { authCredentials: { username: "%s", password: "%s" } };
+}
+chrome.webRequest.onAuthRequired.addListener(callbackFn, {urls: ["<all_urls>"]}, ["blocking"]);
+""" % (ip, port, username, password)
+
+        with open(os.path.join(plugin_path, "manifest.json"), "w", encoding="utf-8") as f:
+            f.write(manifest_json)
+        with open(os.path.join(plugin_path, "background.js"), "w", encoding="utf-8") as f:
+            f.write(background_js)
+
+        return plugin_path
+
+
+    def _format_proxy(self, proxy_url: str) -> str | None:
+        """格式化代理地址为正确格式"""
+        if not proxy_url:
+            return None
+        
+        # 如果已经是完整格式
+        if proxy_url.startswith(('http://', 'https://', 'socks5://')):
+            return proxy_url
+        
+        # 如果是 ip:port 格式
+        if ':' in proxy_url and proxy_url.count(':') == 1:
+            # 检查是否是有效的IP:端口
+            parts = proxy_url.split(':')
+            if parts[0].replace('.', '').isdigit() and parts[1].isdigit():
+                return f'http://{proxy_url}'
+        
+        # 如果只是端口号
+        if proxy_url.isdigit():
+            self.logger.warning(f"代理只有端口号: {proxy_url}，使用默认IP 127.0.0.1")
+            return f'http://127.0.0.1:{proxy_url}'
+        
+        # 其他格式，可能有问题
+        self.logger.warning(f"无法识别的代理格式: {proxy_url}")
+        return None

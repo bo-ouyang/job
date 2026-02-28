@@ -1,5 +1,7 @@
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+import hashlib
+import json
+from typing import Any, Dict, List
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud import analysis_result as crud_analysis, user_query as crud_user_query, job as crud_job
@@ -16,16 +18,33 @@ from schemas.analysis import (
 )
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
-from dependencies import get_db, JobQueryParams,get_current_user
+from dependencies import JobQueryParams, get_current_user, get_db
 from crud.major import major as crud_major
-from fastapi import BackgroundTasks
 from services.analysis_service import analysis_service
+from services.ai_access_service import ai_access_service
 from common.databases.RedisManager import redis_manager
 from services.ai_service import ai_service
 from crud import industry as crud_industry
-from sqlalchemy import select
-from common.databases.models.industry import Industry
+from config import settings
 router = APIRouter()
+
+
+def _stable_digest(payload: Dict[str, Any]) -> str:
+    serialized = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+        separators=(",", ":"),
+    )
+    return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+
+
+async def _safe_increment_counter(key: str, amount: int = 1) -> None:
+    try:
+        await redis_manager.increment_counter(key, amount=amount)
+    except Exception as exc:
+        logger.warning(f"Failed to increment counter {key}: {exc}")
 
 @router.get("/stats")
 async def get_job_statistics(
@@ -162,18 +181,13 @@ async def task_update_major_stats(major_name: str):
         return
 
     try:
-        # 1. 获取一个新的数据库会话 (Context Manager)
         async with await db_manager.get_session() as session:
             # 2. 增加数据库中的热度值
             await crud_major.increment_hot_index(session, major_name=major_name)
             
             # [优化策略]
-            # 方案 A: 彻底不删缓存，等待 naturally expire (推荐，性能最高)
             # 理由: 热门专业列表不需要实时性，1小时更新一次足够了。
-            # 如果这里执行 delete_cache，高并发下 Redis 会被击穿。
             
-            # 方案 B (可选): 仅更新 Redis 计数器，不操作 DB (如果需要极高性能)
-            # await redis_manager.incr(f"stats:major:{major_name}")
             
             logger.info(f"Background task: Incremented hot index for {major_name}")
 
@@ -193,54 +207,58 @@ async def analyze_major_skills(
     返回聚合分析结果(薪资, 技能, 行业)
     """
     try:
-        # 1. [性能优化] 优先检查分析结果缓存 (Redis)
-        # 缓存 Key 包含：专业名 + 城市 (Bumped to v2 to clear buggy empty cache)
-        cache_key = f"analysis:major:v2:{request.major_name}:{request.location or 'all'}"
+        cache_payload = {
+            "major_name": request.major_name,
+            "location": request.location,
+            "keywords": sorted(request.keywords) if request.keywords else [],
+        }
+        cache_key = f"analysis:major:v3:{_stable_digest(cache_payload)}"
         cached_result = await redis_manager.get_cache(cache_key)
         # 2. 如果有缓存，直接返回数据，但扔要异步更新热度
-        if cached_result:
+        if cached_result is not None:
+            await _safe_increment_counter("metrics:analysis:major:cache_hit")
             if request.major_name:
                 # 添加后台任务
                 background_tasks.add_task(task_update_major_stats, request.major_name)
             return cached_result
+        await _safe_increment_counter("metrics:analysis:major:cache_miss")
         industry_codes = []
         job_type_keywords = []
         if request.major_name:
-            # 1. Fetch Industry Codes for Major
+            # 1. ??????????????
             relation = await crud_major.get_relation_by_major_name(db, request.major_name)
-            print(f"Major: {request.major_name}, Relation: {relation}")
+            logger.debug(f"Major analysis relation resolved: major={request.major_name}, relation={relation}")
             if relation and relation.industry_codes:
-                # Classify codes: level 0/1 for industry filtering, level >= 2 for keyword filtering
+                # ???????????0/1 ??????2 ???????????
                 
                 _, job_type_names = await crud_industry.classify_codes_by_level(db, relation.industry_codes)
                 
 
-                # Rollup level 0/1 codes to match jobs table granularity
                 if relation.industry_codes:
-                    industry_codes = await crud_industry.get_rollup_codes(db, relation.industry_codes,level=0)
+                    industry_codes = await crud_industry.get_rollup_codes(db, relation.industry_codes,level=1,depth=2)
                 
-                # Add level >= 2 names to keywords
+                # ? 2 ??????????????
                 if job_type_names:
                     job_type_keywords.extend(job_type_names)
                     
-                print(f"Industry Codes (Level 0/1): {industry_codes}")
-                print(f"Job Type Keywords (Level >= 2): {job_type_keywords}")
+                logger.debug(f"Major analysis rollup industry codes: {industry_codes}")
+                logger.debug(f"Major analysis derived job-type keywords: {job_type_keywords}")
             
 
                 background_tasks.add_task(task_update_major_stats, request.major_name)
 
-        # Merge original keywords with dynamically extracted job type names
+        # ????????????????????
         combined_keywords = list(request.keywords) if request.keywords else []
         if job_type_keywords:
             combined_keywords.extend(job_type_keywords)
 
-        # 3. Analyze (ES First, DB Fallback)
         result = await analysis_service.analyze_by_keywords(
             keywords=combined_keywords,
             location=request.location,
             industry_codes=industry_codes
         )
         await redis_manager.set_cache(cache_key, result, expire=14400)
+        await _safe_increment_counter("metrics:analysis:major:cache_set")
         return result
 
     except Exception as e:
@@ -260,7 +278,6 @@ async def get_major_presets(
 ):
     """获取专业预设列表 (按分类分组)"""
     
-    # 2. 缓存未命中，查数据库 (确保这个方法使用了上面提到的 selectinload)
     categories = await crud_major.get_categories_with_children(db)
     
     # 3. 转换格式
@@ -268,9 +285,7 @@ async def get_major_presets(
     for cat in categories:
         majors_list = []
         
-        # 遍历子专业 (因为预加载了，这里绝对不会触发新的 SQL)
         for child in cat.children:
-            # 安全获取 relation：如果列表有数据则取第一个，否则为 None
             relation = child.industry_relations[0] if child.industry_relations else None
             
             # 使用更清晰的变量提取逻辑
@@ -304,21 +319,40 @@ async def get_major_industries(
     if not major_name:
         return []
 
-    # 1. 找到该专业的 industry_codes
     relation = await crud_major.get_relation_by_major_name(db, major_name)
-    print(f"Major: {major_name}, Relation: {relation}")
+    logger.debug(f"Major industries relation resolved: major={major_name}, relation={relation}")
     if not relation or not relation.industry_codes:
         return []
-    all_codes = await crud_industry.get_rollup_codes(db, relation.industry_codes,level=0)
-    print(f"All Codes: {all_codes}")
+    all_codes = await crud_industry.get_rollup_codes(db, relation.industry_codes,level=0,depth=2)
+    logger.debug(f"Major industries rollup codes: {all_codes}")
     industry_trees = await crud_industry.get_industry_trees_by_codes(db, all_codes)
 
     return industry_trees
 
 @router.post("/ai/advice")
-async def get_ai_advice(req: AIAdviceRequest):
-    """获取 AI 职业建议"""
-    return await ai_service.generate_career_advice(req.major_name, req.skills)
+async def get_ai_advice(
+    req: AIAdviceRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)"""
+    if not settings.AI_ENABLED:
+        raise HTTPException(status_code=503, detail="AI service is disabled")
+    charge_amount = await ai_access_service.ensure_access(
+        db=db,
+        user_id=current_user.id,
+        feature_key="career_advice",
+    )
+    from tasks.ai_tasks import career_advice_task
+    task = career_advice_task.delay(
+        user_id=current_user.id,
+        major=req.major_name,
+        skills=req.skills,
+        engine=req.engine or "auto",
+        charge_amount=charge_amount,
+    )
+    return {"task_id": task.id, "status": "pending"}
+
 
 @router.post("/career-compass")
 async def get_career_compass(
@@ -327,18 +361,32 @@ async def get_career_compass(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    【核心功能】BI职业数据大盘与 AI 职业罗盘分析
-    根据专业名称，聚合ES中的职位数据，并交由大模型生成诊断报告。
+    【核心功能】BI职业数据大盘与 AI 职业罗盘分析 (异步版)
+    ES 数据聚合仍在 controller 完成，AI 报告生成提交 Celery 任务。
     """
-    cache_key = f"analysis:career_compass:v1:{req.major_name}:{req.target_industry or 'all'}:{req.target_industry_2 or 'all'}"
+    if not settings.AI_ENABLED or not settings.AI_CAREER_COMPASS_ENABLED:
+        raise HTTPException(status_code=503, detail="Career compass is disabled")
+
+    cache_payload = {
+        "major_name": req.major_name,
+        "target_industry": req.target_industry,
+        "target_industry_2": req.target_industry_2,
+    }
+    cache_key = f"analysis:career_compass:v2:{_stable_digest(cache_payload)}"
     cached_report = await redis_manager.get_cache(cache_key)
-    if cached_report:
+    if cached_report is not None:
+        await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
         return {"report": cached_report}
+    await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
+    charge_amount = await ai_access_service.ensure_access(
+        db=db,
+        user_id=current_user.id,
+        feature_key="career_compass",
+    )
         
     try:
-        # 1. 确定搜索关键词与行业
+        # 1. 确定搜索关键词与行业 (fast, stays in controller)
         keywords = []
-        # 根据专业名获取预设关键词 (如果关联了专业，顺便把 level >= 2 的精准岗位也解析为关键词)
         relation = await crud_major.get_relation_by_major_name(db, req.major_name)
         
         job_type_keywords = []
@@ -356,30 +404,48 @@ async def get_career_compass(
             
         combined_keywords = keywords + job_type_keywords
                 
-        # 2. 从 ES 获取客观聚合数据
         main_keyword = combined_keywords[0] if combined_keywords else req.major_name
-        # To avoid passing complex lists to ES, we use the primary keyword
-        # and explicitly pass the target_industry (int code) to the ES filtering
         es_stats = await analysis_service.get_job_stats(
             keyword=main_keyword, 
             industry=req.target_industry,
             industry_name=req.target_industry_name,
             industry_2_name=req.target_industry_2_name,
-            #industry_2=req.target_industry_2
         )
         
-        # 3. 将客观数据交由大模型生成深度分析报告
-        ai_report = await ai_service.get_career_navigation_report(
-            major_name=req.major_name, 
-            es_stats=es_stats
+        # 2. 提交 AI 报告生成为 Celery 任务
+        from tasks.ai_tasks import career_compass_task
+        task = career_compass_task.delay(
+            user_id=current_user.id,
+            major_name=req.major_name,
+            es_stats=es_stats,
+            charge_amount=charge_amount,
         )
+        return {"task_id": task.id, "status": "pending", "es_stats": es_stats}
         
-        # 4. 写入缓存 (12小时)
-        if not ai_report.startswith("❌"):
-             await redis_manager.set_cache(cache_key, ai_report, expire=43200)
-             
-        return {"report": ai_report}
-        
+    except HTTPException:
+        raise
     except Exception as e:
+        await _safe_increment_counter("metrics:ai:career_compass:exceptions")
         logger.error(f"Career Compass Analysis Failed: {e}")
         raise HTTPException(status_code=500, detail="生成职业罗盘报告失败")
+
+
+@router.get("/ai/task/{task_id}")
+async def get_ai_task_result(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """轮询 AI 任务状态和结果 (适用于 career_advice, career_compass)"""
+    from core.celery_app import celery_app
+    result = celery_app.AsyncResult(task_id)
+    
+    if result.state == "PENDING":
+        return {"task_id": task_id, "status": "pending"}
+    elif result.state == "STARTED":
+        return {"task_id": task_id, "status": "processing"}
+    elif result.state == "SUCCESS":
+        return {"task_id": task_id, "status": "completed", "result": result.result}
+    elif result.state == "FAILURE":
+        return {"task_id": task_id, "status": "failed", "error": str(result.result)}
+    else:
+        return {"task_id": task_id, "status": result.state.lower()}

@@ -98,44 +98,57 @@ async def _process_batch_job_parsing(limit: int = 10):
             )
             chain = prompt | llm | parser
 
-            # 串行处理 (防止并发过高炸 API)
-            for job in jobs:
+            # ── Controlled concurrency (max 3 parallel LLM calls) ──
+            MAX_CONCURRENT = 3
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+
+            async def parse_single_job(job):
+                """Parse one job with semaphore-controlled concurrency."""
                 description = job.description
                 if not description:
                     logger.warning(f"Job ID {job.id} has no description to parse. Marking abandoned.")
-                    job.ai_parsed = 2 # Prevent looping
-                    continue
-                
+                    job.ai_parsed = 2  # Prevent looping
+                    await session.commit()
+                    return
+
                 logger.info(f"Invoking LLM for Job ID {job.id}...")
-                
-                # State: Pre-parsing Lock
-                job.ai_parsed = 1
-                await session.commit()
-                
-                try:
-                    parsed_result = await chain.ainvoke({
-                        "job_desc": description,
-                        "format_instructions": parser.get_format_instructions()
-                    })
-                    
-                    # JsonOutputParser returns a dict
-                    job.ai_parsed = 2
-                    job.ai_skills = parsed_result.get('skills', [])
-                    job.ai_benefits = parsed_result.get('benefits', [])
-                    job.ai_summary = parsed_result.get('summary', '')
-                    await session.commit()
-                    logger.info(f"Successfully updated Job ID {job.id} with AI insight.")
+
+                async with semaphore:
                     try:
-                        from tasks.es_sync import sync_job_to_es
-                        #sync_job_to_es.delay()
-                        sync_job_to_es.delay(job.id)
-                    except Exception as e:
-                        logger.warning(f"Failed to dispatch Celery sync task for new job {job.id}: {e}")
-                except Exception as llm_err:
-                    logger.error(f"Error parsing job {job.id}: {llm_err}")
-                    # 回滚状态使其参与下一次补漏
-                    job.ai_parsed = 0
-                    await session.commit()
+                        parsed_result = await chain.ainvoke({
+                            "job_desc": description,
+                            "format_instructions": parser.get_format_instructions()
+                        })
+
+                        # JsonOutputParser returns a dict
+                        job.ai_parsed = 2
+                        job.ai_skills = parsed_result.get('skills', [])
+                        job.ai_benefits = parsed_result.get('benefits', [])
+                        job.ai_summary = parsed_result.get('summary', '')
+                        await session.commit()
+                        logger.info(f"Successfully updated Job ID {job.id} with AI insight.")
+                        try:
+                            from tasks.es_sync import sync_job_to_es
+                            sync_job_to_es.delay(job.id)
+                        except Exception as e:
+                            logger.warning(f"Failed to dispatch Celery sync task for new job {job.id}: {e}")
+                    except Exception as llm_err:
+                        logger.error(f"Error parsing job {job.id}: {llm_err}")
+                        # 回滚状态使其参与下一次补漏
+                        job.ai_parsed = 0
+                        await session.commit()
+
+            # Pre-lock all jobs to ai_parsed=1 before concurrent processing
+            for job in jobs:
+                if job.description:
+                    job.ai_parsed = 1
+            await session.commit()
+
+            # Run all parsing concurrently (bounded by semaphore)
+            await asyncio.gather(
+                *(parse_single_job(job) for job in jobs),
+                return_exceptions=True,
+            )
                     
     except Exception as e:
         logger.error(f"Database/Batch error: {e}")

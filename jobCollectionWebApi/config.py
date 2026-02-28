@@ -204,7 +204,22 @@ class Settings(BaseSettings):
     #     )
     
     # AI 配置
-    AI_ENABLED: bool = True
+    AI_ENABLED: bool = os.getenv("AI_ENABLED", "true").lower() == "true"
+    AI_CAREER_COMPASS_ENABLED: bool = os.getenv("AI_CAREER_COMPASS_ENABLED", "true").lower() == "true"
+    AI_BILLING_ENABLED: bool = os.getenv("AI_BILLING_ENABLED", "false").lower() == "true"
+    AI_BILLING_REQUIRE_PRODUCT: bool = os.getenv("AI_BILLING_REQUIRE_PRODUCT", "false").lower() == "true"
+    AI_RATE_LIMIT_ENABLED: bool = os.getenv("AI_RATE_LIMIT_ENABLED", "true").lower() == "true"
+    AI_RATE_LIMIT_CAREER_ADVICE_PER_MINUTE: int = int(os.getenv("AI_RATE_LIMIT_CAREER_ADVICE_PER_MINUTE", 10))
+    AI_RATE_LIMIT_CAREER_COMPASS_PER_MINUTE: int = int(os.getenv("AI_RATE_LIMIT_CAREER_COMPASS_PER_MINUTE", 3))
+    AI_RATE_LIMIT_AI_SEARCH_PER_MINUTE: int = int(os.getenv("AI_RATE_LIMIT_AI_SEARCH_PER_MINUTE", 12))
+    AI_RATE_LIMIT_RESUME_PARSE_PER_MINUTE: int = int(os.getenv("AI_RATE_LIMIT_RESUME_PARSE_PER_MINUTE", 5))
+    AI_PRICE_CAREER_ADVICE: float = float(os.getenv("AI_PRICE_CAREER_ADVICE", 0.5))
+    AI_PRICE_CAREER_COMPASS: float = float(os.getenv("AI_PRICE_CAREER_COMPASS", 2.0))
+    AI_PRICE_AI_SEARCH: float = float(os.getenv("AI_PRICE_AI_SEARCH", 0.3))
+    AI_PRICE_RESUME_PARSE: float = float(os.getenv("AI_PRICE_RESUME_PARSE", 1.0))
+    AI_LANGGRAPH_ENABLED: bool = os.getenv("AI_LANGGRAPH_ENABLED", "false").lower() == "true"
+    AI_LANGCHAIN_TEMPERATURE: float = float(os.getenv("AI_LANGCHAIN_TEMPERATURE", 0.6))
+    AI_LANGCHAIN_TIMEOUT_SECONDS: int = int(os.getenv("AI_LANGCHAIN_TIMEOUT_SECONDS", 60))
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "deepseek") # mock, openai
     AI_API_KEY: str = os.getenv("AI_API_KEY", "")
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com")

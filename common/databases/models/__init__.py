@@ -23,6 +23,7 @@ from .product import Product
 from .spider_boss_crawl_url import SpiderBossCrawlUrl
 from .major import Major, MajorIndustryRelation
 from .boss_stu_crawl_url import BossStuCrawlUrl
+from .system_config import SystemConfig
 
 __all__ = [
     'Base',
@@ -63,5 +64,6 @@ __all__ = [
     'SpiderBossCrawlUrl',
     'Major',
     'MajorIndustryRelation',
-    'BossStuCrawlUrl'
+    'BossStuCrawlUrl',
+    'SystemConfig',
 ]

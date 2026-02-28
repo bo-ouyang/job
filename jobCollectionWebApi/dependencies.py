@@ -194,7 +194,7 @@ async def get_api_key(
     
     # 这里可以添加更复杂的认证逻辑
     # 例如验证 API Key 是否有效、检查权限等
-    valid_api_keys = settings.get("API_KEYS", [])
+    valid_api_keys = settings.API_KEYS
     if valid_api_keys and x_api_key not in valid_api_keys:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -212,7 +212,8 @@ async def get_admin_user(
     """
     管理员权限验证依赖
     """
-    if current_user.get("role") != "admin":
+    role = getattr(current_user, "role", None)
+    if role not in ["admin", "super_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions"

@@ -315,8 +315,10 @@ class IndustryCRUD:
                     job_type_names.append(ind.name)
         
         return industry_codes, job_type_names
+    '''
 
-    async def get_rollup_codes(self, db: AsyncSession, codes: List[int], level: int = 0) -> List[int]:
+    '''
+    async def get_rollup_codes(self, db: AsyncSession, codes: List[int], level: int = 0,depth: int = 1) -> List[int]:
         if not codes: return []
         
         # 使用 path 字段获取祖先 code (Level 0 和 Level 1)
@@ -329,7 +331,7 @@ class IndustryCRUD:
             if not ind.path: continue
             parts = [int(x) for x in ind.path.strip('/').split('/') if x]
             # 取 level 0 和 level 1 的 code (前两个节点)
-            rollup_codes.update(parts[:level+1])
+            rollup_codes.update(parts[-depth:]) # 根据 depth 参数调整保留的层级数量
             
         return list(rollup_codes)
     

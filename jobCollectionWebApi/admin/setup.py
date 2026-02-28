@@ -7,7 +7,7 @@ from .views import (
     FavoriteJobView, IndustryView, SkillsView, 
     AdminLogView, TaskLogView, 
     BossSpiderFilterView, BossCrawlTaskView,
-    ProxyView
+    ProxyView, ProductView, SystemConfigView
 )
 from common.databases.models.user import User
 from common.databases.models.job import Job
@@ -24,6 +24,8 @@ from common.databases.models.proxy import Proxy
 # Ensure related models are loaded for User relationships
 from common.databases.models.payment import PaymentOrder
 from common.databases.models.wallet import UserWallet
+from common.databases.models.product import Product
+from common.databases.models.system_config import SystemConfig
 
 def setup_admin(app, engine):
     # Locate templates directory
@@ -51,6 +53,9 @@ def setup_admin(app, engine):
     admin.add_view(IndustryView(Industry, label="行业分类"))
     admin.add_view(SkillsView(Skills, label="技能标签"))
     
+    admin.add_view(ProductView(Product, label="AI服务价格", icon="fa fa-tags"))
+    admin.add_view(SystemConfigView(SystemConfig, label="系统配置", icon="fa fa-sliders-h"))
+
     # Crawler Module
     admin.add_view(BossSpiderFilterView(BossSpiderFilter, icon="fa fa-filter"))
     admin.add_view(BossCrawlTaskView(BossCrawlTask, icon="fa fa-spider"))

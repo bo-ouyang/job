@@ -1,42 +1,37 @@
 <script setup>
-import { onMounted, ref, reactive, watch, nextTick } from "vue";
+import { onMounted, ref, reactive, watch } from "vue";
 import { useRoute } from "vue-router";
 import * as echarts from "echarts";
-import { analysisAPI } from '@/api/analysis';
-import { commonAPI } from '@/api/common';
+import { analysisAPI } from "@/api/analysis";
+import { commonAPI } from "@/api/common";
 
 const route = useRoute();
 const chartContainer = ref(null);
 const salaryChartContainer = ref(null);
 const loading = ref(false);
 
-const industryOptions = ref([]); // Level 1
-const subIndustryOptions = ref([]); // Level 2
+// 一级行业列表
+const industryOptions = ref([]);
+// 二级行业列表
+const subIndustryOptions = ref([]);
 const cityOptions = ref([]);
 
-const selectedParentIndustry = ref(""); // Level 1 ID/Name (we use ID for fetching children, but maybe keep object)
-// Actually we need to track local state for L1 selection
+// 当前选中的一级行业 code
+const selectedParentIndustry = ref("");
 
-// Filters
+// 查询筛选条件
 const filters = reactive({
-  location: "", // Stores City Code now
+  location: "",
   experience: "",
   education: "",
-  industry: "", // Stores Industry Code (Level 2)
+  industry: "",
   q: route.query.q || "",
 });
 
-const isInitializing = ref(true); // Flag to prevent redundant fetches during init
+// 初始化阶段避免重复触发查询
+const isInitializing = ref(true);
 
-// Options
-const experiences = [
-  "应届生",
-  "1年以内",
-  "1-3年",
-  "3-5年",
-  "5-10年",
-  "10年以上",
-];
+const experiences = ["应届生", "1年以内", "1-3年", "3-5年", "5-10年", "10年以上"];
 const educations = ["大专", "本科", "硕士", "博士", "不限"];
 
 let skillsChart = null;
@@ -47,14 +42,12 @@ const fetchIndustries = async () => {
     const res = await commonAPI.getIndustries(0);
     industryOptions.value = res.data || [];
 
-    // Default L1
     if (industryOptions.value.length > 0) {
       selectedParentIndustry.value = industryOptions.value[0].code;
-      // Fetch L2 based on this default
       await fetchSubIndustries(selectedParentIndustry.value);
     }
   } catch (e) {
-    console.error("Failed to fetch industries", e);
+    console.error("获取行业列表失败", e);
   }
 };
 
@@ -65,21 +58,22 @@ const fetchSubIndustries = async (parentCode) => {
     return;
   }
 
-  // Find ID from Code
-  const parent = industryOptions.value.find((i) => i.code === parentCode);
+  const parent = industryOptions.value.find(
+    (i) => String(i.code) === String(parentCode),
+  );
   const parentId = parent ? parent.code : null;
 
   if (!parentId) {
-    console.warn("Parent Industry ID not found for code:", parentCode);
+    console.warn("未找到对应的一级行业编码:", parentCode);
     return;
   }
 
   try {
     const res = await commonAPI.getIndustries(parentId);
     subIndustryOptions.value = res.data || [];
-    filters.industry = ""; // Default to All (Level 2)
+    filters.industry = "";
   } catch (e) {
-    console.error("Failed to fetch sub-industries", e);
+    console.error("获取二级行业失败", e);
   }
 };
 
@@ -87,23 +81,19 @@ const fetchCities = async () => {
   try {
     const res = await commonAPI.getCities(1);
     cityOptions.value = res.data || [];
-    // Set default if not set
     if (!filters.location && cityOptions.value.length > 0) {
-      filters.location = cityOptions.value[0].code.toString(); // Use Code
+      filters.location = cityOptions.value[0].code.toString();
     }
   } catch (e) {
-    console.error("Failed to fetch cities", e);
+    console.error("获取城市列表失败", e);
   }
 };
 
 const onParentIndustryChange = async () => {
-  // When user changes L1 manually
-  loading.value = true; // Show loading while fetching subs (optional, typically fast)
-  filters.industry = ""; // Reset L2 selection
+  loading.value = true;
+  filters.industry = "";
   await fetchSubIndustries(selectedParentIndustry.value);
-
-  // Explicitly trigger fetch because watch(filters) might not trigger if filters.industry remained ""
-  fetchData();
+  await fetchData();
   loading.value = false;
 };
 
@@ -113,27 +103,38 @@ const fetchData = async () => {
     const params = { q: filters.q };
 
     if (filters.location) params.location = filters.location;
-    if (filters.experience && filters.experience !== "不限")
+    if (filters.experience && filters.experience !== "不限") {
       params.experience = filters.experience;
-    if (filters.education && filters.education !== "不限")
+    }
+    if (filters.education && filters.education !== "不限") {
       params.education = filters.education;
+    }
 
-    // Industry Logic:
-    // industry = Parent Code
-    // industry_2 = Sub Code (if present)
-
+    // 参数约定：industry=一级行业，industry_2=二级行业
     if (selectedParentIndustry.value) {
-      params.industry = selectedParentIndustry.value.toString();
+      params.industry = Number(selectedParentIndustry.value);
+      const parentOption = industryOptions.value.find(
+        (i) => String(i.code) === String(selectedParentIndustry.value),
+      );
+      if (parentOption?.name) {
+        params.industry_name = parentOption.name;
+      }
     }
 
     if (filters.industry) {
-      params.industry_2 = filters.industry;
+      params.industry_2 = Number(filters.industry);
+      const subOption = subIndustryOptions.value.find(
+        (i) => String(i.code) === String(filters.industry),
+      );
+      if (subOption?.name) {
+        params.industry_2_name = subOption.name;
+      }
     }
 
     const res = await analysisAPI.getJobStats(params);
     updateCharts(res.data);
   } catch (e) {
-    console.error("Failed to fetch analysis stats", e);
+    console.error("获取分析统计失败", e);
   } finally {
     loading.value = false;
   }
@@ -142,7 +143,6 @@ const fetchData = async () => {
 const updateCharts = (data) => {
   if (!data) return;
 
-  // 1. Skills Chart
   if (skillsChart) {
     const skillsData = data.skills || [];
     const names = skillsData.map((i) => i.name);
@@ -154,7 +154,6 @@ const updateCharts = (data) => {
     });
   }
 
-  // 2. Salary Chart
   if (salaryChart) {
     salaryChart.setOption({
       series: [{ data: data.salary || [] }],
@@ -261,15 +260,12 @@ onMounted(async () => {
   initSkillsChart();
   initSalaryChart();
 
-  // Initialization Sequence
   try {
     await Promise.all([fetchCities(), fetchIndustries()]);
-
-    isInitializing.value = false; // Enable watcher
-    // Initial fetch
-    fetchData();
+    isInitializing.value = false;
+    await fetchData();
   } catch (e) {
-    console.error("Init failed", e);
+    console.error("初始化分析页面失败", e);
     isInitializing.value = false;
   }
 });
@@ -292,7 +288,7 @@ watch(
       <p>基于实时招聘数据生成的分析报告</p>
     </div>
 
-    <!-- Filters -->
+    <!-- 筛选条件 -->
     <div class="filters">
       <div class="filter-group">
         <select v-model="filters.location">
@@ -302,33 +298,25 @@ watch(
           </option>
         </select>
       </div>
+
       <div class="filter-group">
-        <select
-          v-model="selectedParentIndustry"
-          @change="onParentIndustryChange"
-        >
+        <select v-model="selectedParentIndustry" @change="onParentIndustryChange">
           <option value="">一级行业</option>
-          <option
-            v-for="ind in industryOptions"
-            :key="ind.id"
-            :value="ind.code"
-          >
+          <option v-for="ind in industryOptions" :key="ind.id" :value="ind.code">
             {{ ind.name }}
           </option>
         </select>
       </div>
+
       <div class="filter-group">
         <select v-model="filters.industry">
           <option value="">二级行业</option>
-          <option
-            v-for="ind in subIndustryOptions"
-            :key="ind.id"
-            :value="ind.code"
-          >
+          <option v-for="ind in subIndustryOptions" :key="ind.id" :value="ind.code">
             {{ ind.name }}
           </option>
         </select>
       </div>
+
       <div class="filter-group">
         <select v-model="filters.experience">
           <option value="">经验不限</option>
@@ -337,10 +325,11 @@ watch(
           </option>
         </select>
       </div>
+
       <div class="filter-group">
         <input
           v-model.lazy="filters.q"
-          placeholder="关键词搜索 (如 Java)"
+          placeholder="关键词搜索（如 Java）"
           class="search-input"
           @keyup.enter="fetchData"
         />
@@ -392,7 +381,7 @@ watch(
   font-size: 1.1rem;
 }
 
-/* 筛选项指挥舱控制台风格 */
+/* 筛选面板样式 */
 .filters {
   display: flex;
   justify-content: center;
@@ -447,7 +436,7 @@ watch(
   color: #f8fafc;
 }
 
-/* 玻璃仪表盘卡片 */
+/* 图表网格 */
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
@@ -470,7 +459,7 @@ watch(
   overflow: hidden;
 }
 
-/* 高级折射边缘内发光 */
+/* 卡片内边框高光 */
 .chart-card::before {
   content: "";
   position: absolute;

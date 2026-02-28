@@ -1,11 +1,11 @@
 from typing import List, Optional,Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, func, and_, desc
+from sqlalchemy import select, or_, func, and_, desc, String
 import json
 import asyncio
 from collections import Counter
 from common.databases.models.job import Job
-from common.databases.models.skills import Skills
+#from common.databases.models.skills import Skills
 from common.databases.models.company import Company
 from common.databases.models.industry import Industry
 from sqlalchemy.orm import selectinload, defer
@@ -30,7 +30,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             sync_job_to_es.delay(db_obj.id)
         except Exception as e:
             from core.logger import sys_logger as logger
-            logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for new job {db_obj.id}: {e}")
+            logger.warning(f"Failed to dispatch Celery sync task for new job {db_obj.id}: {e}")
         return db_obj
 
     async def update(
@@ -101,13 +101,15 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         self, db: AsyncSession, skill_names: List[str], *, skip: int = 0, limit: int = 50
     ) -> List[Job]:
         """根据技能名称获取职位"""
-        stmt = (
-            select(Job)
-            .join(Job.skills)
-            .where(Skills.name.in_(skill_names))
-            .offset(skip)
-            .limit(limit)
-        )
+        if not skill_names:
+            return []
+
+        skill_filters = []
+        for skill_name in skill_names:
+            skill_filters.append(Job.tags.cast(String).ilike(f"%{skill_name}%"))
+            skill_filters.append(Job.ai_skills.cast(String).ilike(f"%{skill_name}%"))
+
+        stmt = select(Job).where(or_(*skill_filters)).offset(skip).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
 
@@ -127,8 +129,16 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         limit: int = 20
     ) -> Tuple[List[Job], int]:
         """数据库备用搜索逻辑 (当 ES 宕机时使用)"""
-        stmt = select(Job).options(selectinload(Job.company), selectinload(Job.industry))
-        count_stmt = select(func.count()).select_from(Job)
+        stmt = (
+            select(Job)
+            .outerjoin(Company, Job.company_id == Company.id)
+            .options(selectinload(Job.company), selectinload(Job.industry))
+        )
+        count_stmt = (
+            select(func.count(Job.id))
+            .select_from(Job)
+            .outerjoin(Company, Job.company_id == Company.id)
+        )
 
         conditions = []
         if keyword:
@@ -228,7 +238,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         exclude_keywords = intent.get("exclude_keywords") or []
         for exc in exclude_keywords:
             conditions.append(~Job.title.ilike(f"%{exc}%"))
-            conditions.append(~Job.company_name.ilike(f"%{exc}%"))
+            conditions.append(~Company.name.ilike(f"%{exc}%"))
 
         # 6. Education & Experience
         education = intent.get("education")

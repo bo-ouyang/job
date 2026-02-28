@@ -214,6 +214,9 @@ const currentAnalysisData = ref(null);
 const aiAdvice = ref("");
 const loadingAI = ref(false);
 
+import api from "@/utils/request";
+import { pollTaskResult } from "@/utils/pollTask";
+
 const fetchAIAdvice = async () => {
   if (!currentAnalysisData.value || !customKeywords.value) return;
 
@@ -237,16 +240,28 @@ const fetchAIAdvice = async () => {
       skills: topSkills,
     };
 
-    console.log("AI Payload:", payload); // Debug log
+    console.log("AI Payload:", payload);
 
-    // AI response can be slow (up to 30-60s), so we override the default 5s timeout
+    // Step 1: Submit async task
     const res = await api.post("/analysis/ai/advice", payload, {
-      timeout: 60000,
+      timeout: 10000,
     });
-    aiAdvice.value = res.data;
+    const taskId = res.data?.task_id;
+    if (!taskId) {
+      // Fallback: old sync response (if backend hasn't updated)
+      aiAdvice.value = typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+      return;
+    }
+
+    // Step 2: Poll for result
+    const result = await pollTaskResult("/analysis/ai/task", taskId, {
+      interval: 2000,
+      timeout: 120000,
+    });
+    aiAdvice.value = result?.advice || result || "未能获取建议";
   } catch (e) {
     console.error("AI Advice failed", e);
-    aiAdvice.value = "无法获取建议，请稍后再试。";
+    aiAdvice.value = e.message || "无法获取建议，请稍后再试。";
   } finally {
     loadingAI.value = false;
   }

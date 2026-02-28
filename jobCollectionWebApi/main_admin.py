@@ -15,9 +15,59 @@ if sys.platform == 'win32':
 
 from config import settings
 from common.databases.PostgresManager import db_manager
+from common.databases.models.system_config import SystemConfig
+from services.ai_access_service import ai_access_service
+from sqlalchemy import select
 
 # Import all models to ensure they are registered for Admin
 from common.databases.models import user, job, company, resume, favorite
+
+
+async def _bootstrap_admin_configs() -> None:
+    seed_configs = {
+        "analysis_skill_noise_exact": {
+            "category": "analysis",
+            "description": "Exact skill tags to exclude in analysis charts",
+            "value": '["\\u5176\\u4ed6","\\u5176\\u5b83","\\u4e0d\\u9650","\\u65e0","\\u6682\\u65e0"]',
+        },
+        "analysis_skill_noise_contains": {
+            "category": "analysis",
+            "description": "Keyword contains rules to exclude noisy skill tags",
+            "value": (
+                '["\\u4e0d\\u63a5\\u53d7\\u5c45\\u5bb6\\u529e\\u516c","\\u5c45\\u5bb6\\u529e\\u516c",'
+                '"\\u8fdc\\u7a0b\\u529e\\u516c","\\u53cc\\u4f11","\\u4e94\\u9669","\\u793e\\u4fdd"]'
+            ),
+        },
+    }
+
+    async with db_manager.async_session() as session:
+        created_products = await ai_access_service.ensure_pricing_products(session)
+
+        stmt = select(SystemConfig.key).where(SystemConfig.key.in_(list(seed_configs.keys())))
+        existing_keys = set((await session.execute(stmt)).scalars().all())
+        created_configs = 0
+        for key, payload in seed_configs.items():
+            if key in existing_keys:
+                continue
+            session.add(
+                SystemConfig(
+                    key=key,
+                    value=payload["value"],
+                    category=payload["category"],
+                    description=payload["description"],
+                    is_active=True,
+                )
+            )
+            created_configs += 1
+
+        if created_configs > 0:
+            await session.commit()
+
+    if created_products or created_configs:
+        print(
+            f"Admin bootstrap complete: created_products={created_products}, "
+            f"created_configs={created_configs}"
+        )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,6 +76,8 @@ async def lifespan(app: FastAPI):
     
     if not await db_manager.health_check():
         raise RuntimeError("Database connection failed on startup")
+
+    await _bootstrap_admin_configs()
     
     print("Admin Service: Database connection established")
     yield

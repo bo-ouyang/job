@@ -85,9 +85,6 @@ class CRUDWallet(CRUDBase[UserWallet, WalletCreate, WalletUpdate]):
         db.add(wallet)
         db.add(tx)
         await db.flush()
-        db.add(wallet)
-        db.add(tx)
-        await db.flush()
         return True
 
     async def get_transactions(

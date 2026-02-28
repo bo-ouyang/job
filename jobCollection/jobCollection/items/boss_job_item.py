@@ -38,6 +38,7 @@ class BossJobItem(scrapy.Item):
     # Context (passed from spider)
     city_code = scrapy.Field()
     industry_code = scrapy.Field()
+    major_name = scrapy.Field()
     task_id = scrapy.Field()
 
 class BossJobDetailItem(scrapy.Item):

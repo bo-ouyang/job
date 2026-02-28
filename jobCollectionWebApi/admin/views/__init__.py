@@ -9,3 +9,5 @@ from .skills import SkillsView
 from .logs import AdminLogView, TaskLogView
 from .crawler import BossSpiderFilterView, BossCrawlTaskView
 from .proxy import ProxyView
+from .product import ProductView
+from .system_config import SystemConfigView

@@ -56,7 +56,7 @@ class Job(Base):
 
     industry_code = Column(Integer, nullable=True, index=True)
     city_code = Column(Integer, nullable=True, index=True)
-    
+    major_name = Column(String(100), nullable=True, index=True,default='')
     industry_id = Column(BigInteger, ForeignKey('industries.id'), nullable=True, index=True)
     # AI 大模型解析提取
     ai_parsed = Column(Integer, default=0, comment="0:未解析, 1:解析中, 2:已解析")

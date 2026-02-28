@@ -1,4 +1,7 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
+import hashlib
+import json
+import re
 from config import settings
 from common.databases.RedisManager import redis_manager
 from common.databases.PostgresManager import db_manager
@@ -10,54 +13,222 @@ from collections import Counter
 from sqlalchemy import select
 from common.databases.models.industry import Industry
 from common.databases.models.major import Major, MajorIndustryRelation
+from common.databases.models.system_config import SystemConfig
 class AnalysisService:
-    """数据分析服务 (ES Aggregations + PostgreSQL Fallback)"""
-    
+    """数据分析服务（ES 聚合 + PostgreSQL 降级）。"""
+
+    _CONFIG_KEY_SKILL_NOISE_EXACT = "analysis_skill_noise_exact"
+    _CONFIG_KEY_SKILL_NOISE_CONTAINS = "analysis_skill_noise_contains"
+    _SKILL_NOISE_CACHE_KEY = "analysis:config:skill_noise:v1"
+    _SKILL_NOISE_CACHE_EXPIRE_SECONDS = 300
+    _DEFAULT_SKILL_NOISE_EXACT = {
+        "\u5176\u4ed6",
+        "\u5176\u5b83",
+        "\u4e0d\u9650",
+        "\u65e0",
+        "\u6682\u65e0",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "unknown",
+        "others",
+        "other",
+    }
+    _DEFAULT_SKILL_NOISE_CONTAINS = (
+        "\u4e0d\u63a5\u53d7\u5c45\u5bb6\u529e\u516c",
+        "\u5c45\u5bb6\u529e\u516c",
+        "\u8fdc\u7a0b\u529e\u516c",
+        "\u53cc\u4f11",
+        "\u4e94\u9669",
+        "\u793e\u4fdd",
+        "\u516c\u79ef\u91d1",
+        "\u5305\u5403",
+        "\u5305\u4f4f",
+        "\u5e74\u7ec8\u5956",
+        "\u7ecf\u9a8c\u4e0d\u9650",
+        "\u5b66\u5386\u4e0d\u9650",
+        "\u63a5\u53d7\u5c0f\u767d",
+    )
+
     def __init__(self):
         pass
 
+    @staticmethod
+    def _stable_digest(payload: Dict[str, Any]) -> str:
+        """生成稳定的缓存摘要，避免进程重启后缓存键变化。"""
+        serialized = json.dumps(
+            payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+        return hashlib.md5(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_skill_tag(tag: Any) -> str:
+        text = str(tag or "").strip()
+        if not text:
+            return ""
+        return re.sub(r"\s+", " ", text)
+
+    @classmethod
+    def _parse_noise_tokens(cls, raw_value: Any) -> List[str]:
+        if raw_value is None:
+            return []
+
+        if isinstance(raw_value, list):
+            return [
+                cls._normalize_skill_tag(item)
+                for item in raw_value
+                if cls._normalize_skill_tag(item)
+            ]
+
+        raw_text = str(raw_value).strip()
+        if not raw_text:
+            return []
+
+        try:
+            parsed = json.loads(raw_text)
+            if isinstance(parsed, list):
+                return [
+                    cls._normalize_skill_tag(item)
+                    for item in parsed
+                    if cls._normalize_skill_tag(item)
+                ]
+        except json.JSONDecodeError:
+            pass
+
+        parts = re.split(r"[\r\n,;\uff0c\uff1b]+", raw_text)
+        return [cls._normalize_skill_tag(item) for item in parts if cls._normalize_skill_tag(item)]
+
+    async def _get_skill_noise_rules(self) -> Tuple[set[str], Tuple[str, ...]]:
+        default_exact = {token.lower() for token in self._DEFAULT_SKILL_NOISE_EXACT}
+        default_contains = tuple(self._DEFAULT_SKILL_NOISE_CONTAINS)
+
+        cached_rules = await redis_manager.get_cache(self._SKILL_NOISE_CACHE_KEY)
+        if isinstance(cached_rules, dict):
+            exact_values = cached_rules.get("exact", [])
+            contains_values = cached_rules.get("contains", [])
+            exact_set = {
+                self._normalize_skill_tag(v).lower()
+                for v in exact_values
+                if self._normalize_skill_tag(v)
+            }
+            contains_tuple = tuple(
+                self._normalize_skill_tag(v)
+                for v in contains_values
+                if self._normalize_skill_tag(v)
+            )
+            if exact_set or contains_tuple:
+                return exact_set or default_exact, contains_tuple or default_contains
+
+        try:
+            async with db_manager.async_session() as session:
+                stmt = select(SystemConfig.key, SystemConfig.value).where(
+                    SystemConfig.is_active == True,
+                    SystemConfig.key.in_(
+                        [self._CONFIG_KEY_SKILL_NOISE_EXACT, self._CONFIG_KEY_SKILL_NOISE_CONTAINS]
+                    ),
+                )
+                rows = await session.execute(stmt)
+                row_map = {row.key: row.value for row in rows}
+        except Exception as exc:
+            logger.warning(f"从数据库加载技能噪声配置失败: {exc}")
+            return default_exact, default_contains
+
+        exact_tokens = set(default_exact)
+        exact_tokens.update(self._parse_noise_tokens(row_map.get(self._CONFIG_KEY_SKILL_NOISE_EXACT)))
+
+        contains_tokens = list(default_contains)
+        contains_tokens.extend(self._parse_noise_tokens(row_map.get(self._CONFIG_KEY_SKILL_NOISE_CONTAINS)))
+
+        normalized_exact = {
+            self._normalize_skill_tag(token).lower()
+            for token in exact_tokens
+            if self._normalize_skill_tag(token)
+        }
+        normalized_contains = tuple(
+            self._normalize_skill_tag(token)
+            for token in contains_tokens
+            if self._normalize_skill_tag(token)
+        )
+
+        await redis_manager.set_cache(
+            self._SKILL_NOISE_CACHE_KEY,
+            {"exact": sorted(normalized_exact), "contains": list(normalized_contains)},
+            expire=self._SKILL_NOISE_CACHE_EXPIRE_SECONDS,
+            jitter=False,
+        )
+
+        return normalized_exact or default_exact, normalized_contains or default_contains
+
+    @classmethod
+    def _is_noise_skill_tag(
+        cls,
+        tag: str,
+        exact_rules: set[str],
+        contains_rules: Tuple[str, ...],
+    ) -> bool:
+        normalized = cls._normalize_skill_tag(tag)
+        if not normalized:
+            return True
+
+        lowered = normalized.lower()
+        if lowered in exact_rules:
+            return True
+
+        if any(token in normalized for token in contains_rules):
+            return True
+
+        # 过滤仅由数字/符号组成、无语义价值的标签。
+        if re.fullmatch(r"[0-9\W_]+", normalized):
+            return True
+
+        return False
+
     async def _get_es_stats(self, **filters) -> Dict[str, Any]:
-        """尝试从 ES 聚合统计"""
+        """优先使用 ES 聚合获取岗位统计。"""
         es = await get_es()
         bool_query = {}
         should_clauses = []
 
-        # 1. 纯净的文本大范围匹配条件组装 (SHOULD: 命中任何一个即可)
+        # 1. 关键词相关的文本匹配（命中任一条件即可）
         if filters.get("keyword"):
             should_clauses.append({"multi_match": {"query": filters.get("keyword"), "fields": ["title^2", "description"]}})
         if filters.get("industry_name"):
             should_clauses.append({"multi_match": {"query": filters.get("industry_name"), "fields": ["title^2", "description"]}})
         if filters.get("industry_2_name"):
             should_clauses.append({"multi_match": {"query": filters.get("industry_2_name"), "fields": ["title^2", "description"]}})
-            
+
         if should_clauses:
             bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
-            
-        # 2. 严格的分类/级联过滤条件组装 (FILTER: 必须满足)
+
+        # 2. 结构化过滤条件（必须满足）
         filter_clauses = []
-        
-        # 修复 location 匹配字段
         location = filters.get("location")
         if location:
-            filter_clauses.append({"prefix": {"location": location}})
-            
+            #filter_clauses.append({"prefix": {"location": location}})
+            filter_clauses.append({"term": {"city_code": location}})
         if filters.get("experience"):
             filter_clauses.append({"prefix": {"experience": filters["experience"]}})
         if filters.get("education"):
             filter_clauses.append({"prefix": {"education": filters["education"]}})
-            
-        # 修复行业逻辑: 必须严格在此行业范围内
-        if filters.get("industry"):
-            industry_codes = await self._fetch_industry_codes_with_cache(filters["industry"])
+
+        # 行业过滤：优先按二级行业过滤；未提供二级行业时，使用一级行业。
+        #target_industry_code = filters.get("industry_2") or filters.get("industry")
+        target_industry_code = filters.get("industry")
+        if target_industry_code:
+            industry_codes = await self._fetch_industry_codes_with_cache(target_industry_code)
             if industry_codes:
                 filter_clauses.append({"terms": {"industry_code": industry_codes}})
             else:
                 filter_clauses.append({"term": {"industry_code": -1}})
-                
+
         if filter_clauses:
             bool_query["filter"] = filter_clauses
 
-        # 3. 组装 query
         query_dsl = {
             "query": {"bool": bool_query} if bool_query else {"match_all": {}},
             "size": 0,
@@ -70,89 +241,88 @@ class AnalysisService:
                             {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
                             {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
                             {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
-                            {"from": 35000.0, "key": "35k以上"}
-                        ]
+                            {"from": 35000.0, "key": "35k以上"},
+                        ],
                     }
                 },
-                # 💡 优化 4：加上 .keyword 保平安 (如果你的映射已经定义死为 keyword 类型，可不加)
                 "top_industries": {"terms": {"field": "industry_code", "size": 10}},
                 "top_skills": {"terms": {"field": "skills", "size": 15}},
-                "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}}
-            }
+                "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
+            },
         }
-        
-        #logger.info(f"ES Query DSL: {query_dsl}")
 
-        # 3. 💡 优化 5：容错兜底
+
         try:
             resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
         except Exception as e:
-            logger.error(f"ES 聚合查询彻底失败: {e}", exc_info=True)
-            # 返回空结果兜底，防止前端页面崩溃
+            logger.error(f"ES 聚合查询失败: {e}", exc_info=True)
             return {"salary": [], "skills": [], "industries": [], "total_jobs": 0}
 
-        # 4. 数据解析与清洗
+        # 5. 解析聚合结果
         aggs = resp.get("aggregations", {})
-        
         salary_dist = [{"name": b["key"], "value": b["doc_count"]} for b in aggs.get("salary_ranges", {}).get("buckets", [])]
-        # Map industry codes to names using PG
+
+        # 行业编码映射为行业名称
         industry_buckets = aggs.get("top_industries", {}).get("buckets", [])
         industry_dist = []
         if industry_buckets:
             industry_codes_to_fetch = [int(b["key"]) for b in industry_buckets if str(b["key"]).isdigit()]
             if industry_codes_to_fetch:
-
                 async with db_manager.async_session() as session:
                     stmt = select(Industry.code, Industry.name).where(Industry.code.in_(industry_codes_to_fetch))
                     code_to_name = {row.code: row.name for row in await session.execute(stmt)}
-                    
+
                 for b in industry_buckets:
                     code = int(b["key"]) if str(b["key"]).isdigit() else -1
                     if code in code_to_name:
                         industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
-                        
-        # 💡 优化 3：使用 Counter 优雅合并与排序
+
+        exact_rules, contains_rules = await self._get_skill_noise_rules()
         skill_counter = Counter()
-        
-        # 直接累加
         for b in aggs.get("top_skills", {}).get("buckets", []):
-            skill_counter[b["key"]] += b["doc_count"]
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
         for b in aggs.get("top_ai_skills", {}).get("buckets", []):
-            skill_counter[b["key"]] += b["doc_count"]
-            
-        # Counter 内置的 most_common 直接输出排序后的 Top 10！
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
+
         skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(10)]
-        
         return {
             "salary": salary_dist,
             "skills": skill_dist,
             "industries": industry_dist,
-            "total_jobs": resp["hits"]["total"]["value"]
+            "total_jobs": resp["hits"]["total"]["value"],
         }
 
     async def get_job_stats(self, **filters) -> Dict[str, Any]:
-        """获取职位统计数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
-        cache_key = f"analysis:stats:v2:{hash(frozenset(filters.items()))}"
+        """获取职位统数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
+        cache_payload = {"filters": filters}
+        cache_key = f"analysis:stats:v3:{self._stable_digest(cache_payload)}"
         
-        # 1. 直接查询缓存
+        # 1. 直接查缓存
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None: 
+            logger.debug(f"Analysis stats cache hit: {cache_key}")
             return cached_result
+        logger.debug(f"Analysis stats cache miss: {cache_key}")
             
-        # 2. 缓存击穿防护：尝试获取分布式锁 (最多等待 5 秒，锁存活 15 秒)
+        # 2. 缓存击穿防护：尝试获取分布式?(多等?5 秒，锁存?15 ?
         lock_key = f"lock:{cache_key}"
         async with redis_manager.cache_lock(lock_key, expire=15, timeout=5.0) as locked:
             if not locked:
-                # 若没拿到锁，并且等待超时了，直接抛出或者返回空/降级数据，保护 DB
                 logger.warning(f"Failed to acquire cache lock for {cache_key}, returning empty set.")
                 return {"salary": [], "skills": [], "industries": [], "total_jobs": 0}
             
-            # 3. 拿到锁后，Double Check (DCL)
             cached_result = await redis_manager.get_cache(cache_key)
             if cached_result is not None:
+                logger.debug(f"Analysis stats cache hit after lock: {cache_key}")
                 return cached_result
 
-            # 4. 执行高耗时统计查表
+            # 4. 执高时统查表
             try:
                  result = await self._get_es_stats(**filters)
                  logger.info("Generated job stats using Elasticsearch Aggregations.")
@@ -171,17 +341,16 @@ class AnalysisService:
                          salary_max=filters.get("salary_max")
                      )
                      
-            # 5. 写入缓存 (启用防雪崩的 TTL 抖动机制)
             await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
+            logger.debug(f"Analysis stats cache set: {cache_key}")
             return result
 
     async def _get_es_analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None, **filters) -> Dict[str, Any]:
-        """尝试从 ES 聚合统计多关键词（专业分析核心）"""
+        """尝试?ES 聚合统多关锯（专业分析核心）"""
         es = await get_es()
         
         bool_query = {}
             
-        # (1) 处理专业核心条件：【行业属于这些】 OR 【标题/描述包含这些词】
         should_clauses = []
         
         if industry_codes:
@@ -192,13 +361,11 @@ class AnalysisService:
                 should_clauses.append({
                     "multi_match": {
                         "query": kw,
-                        # 建议提升 title 权重，符合前面我们讨论的最佳实践
                         "fields": ["title^2", "description"] 
                     }
                 })
                 
         if should_clauses:
-            # 将 OR 逻辑放入 bool.must 中
             major_bool = {
                 "bool": {
                     "should": should_clauses,
@@ -207,23 +374,19 @@ class AnalysisService:
             }
             bool_query["must"] = [major_bool]
             
-        # (2) 处理城市硬性条件 (AND)：对应 SQL 里的 ilike 'location%'
         location = filters.get("location")
         if location:
-            # 因为是 AND 关系，放到 filter 中性能最好（不参与打分，带缓存）
             if "filter" not in bool_query:
                 bool_query["filter"] = []
             
-            # 使用 prefix 匹配对应 SQL 的 location.ilike(f"{location}%")
             bool_query["filter"].append({
                 "prefix": {"location": location}
             })
             
         # ==========================
-        # 2. 构建聚合条件 (Aggregations)
         # ==========================
         aggs = {
-            # (1) 薪资分布 (分段聚合)
+            # (1) 薵分布 (分聚合)
             "salary_ranges": {
                 "range": {
                     "field": "salary_min",
@@ -243,7 +406,7 @@ class AnalysisService:
                     "size": 5
                 }
             },
-            # (3) 技能标签分布
+            # (3) 能标签分?
             "top_skills": {
                 "terms": {
                     "field": "tags", 
@@ -259,16 +422,15 @@ class AnalysisService:
         }
 
         # ==========================
-        # 3. 组装最终 DSL
         # ==========================
         dsl = {
             "query": {"bool": bool_query} if bool_query else {"match_all": {}},
             "size": 0, 
             "aggs": aggs
         }
-        #logger.info(f"ES Query DSL: {dsl}")
+        # ??????
         resp = await es.search(index=settings.ES_INDEX_JOB, body=dsl)
-        #logger.info(f"ES Query Response Aggs: {resp.get('aggregations')}")
+        # ??????
         aggs_result = resp.get("aggregations", {})
         
         salary_dist = [{"name": b["key"], "value": b["doc_count"]} for b in aggs_result.get("salary_ranges", {}).get("buckets", [])]
@@ -289,11 +451,18 @@ class AnalysisService:
                     if code in code_to_name:
                         industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
         
+        exact_rules, contains_rules = await self._get_skill_noise_rules()
         skill_counter = Counter()
         for b in aggs_result.get("top_skills", {}).get("buckets", []):
-            if b["key"]: skill_counter[b["key"]] += b["doc_count"]
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
         for b in aggs_result.get("top_ai_skills", {}).get("buckets", []):
-            if b["key"]: skill_counter[b["key"]] += b["doc_count"]
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
             
         skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(15)]
         
@@ -305,13 +474,20 @@ class AnalysisService:
         }
 
     async def analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None, **filters) -> Dict[str, Any]:
-        """多关键词对比分析"""
+        """多关锯对比分析"""
         if not keywords and not industry_codes: return {}
         
-        cache_key = f"analysis:keywords:v5:{'-'.join(sorted(keywords))}:{hash(str(industry_codes))}:{hash(frozenset(filters.items()))}"
+        cache_payload = {
+            "keywords": sorted(keywords) if keywords else [],
+            "industry_codes": sorted(industry_codes) if industry_codes else [],
+            "filters": filters,
+        }
+        cache_key = f"analysis:keywords:v6:{self._stable_digest(cache_payload)}"
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None: 
+            logger.debug(f"Analysis keywords cache hit: {cache_key}")
             return cached_result
+        logger.debug(f"Analysis keywords cache miss: {cache_key}")
 
         lock_key = f"lock:{cache_key}"
         async with redis_manager.cache_lock(lock_key, expire=15, timeout=5.0) as locked:
@@ -320,14 +496,13 @@ class AnalysisService:
                 
             cached_result = await redis_manager.get_cache(cache_key)
             if cached_result is not None:
+                logger.debug(f"Analysis keywords cache hit after lock: {cache_key}")
                 return cached_result
                 
             try:
-                # 优先尝试使用 ES (性能提升百倍)
                 result = await self._get_es_analyze_by_keywords(keywords, industry_codes, **filters)
                 logger.info("Generated keyword analysis via ES.")
             except Exception as e:
-                # 降级：如果 ES 挂了，走原始的 PostgreSQL + ILIKE 查询
                 logger.warning(f"ES Keyword Analysis failed: {e}. Falling back to PostgreSQL DB.")
                 async with db_manager.async_session() as session:
                     result = await crud_job.analyze_by_keywords(
@@ -338,10 +513,11 @@ class AnalysisService:
                     )
                 
             await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
+            logger.debug(f"Analysis keywords cache set: {cache_key}")
             return result
 
     async def _fetch_industry_codes_with_cache(self, industry_code: int) -> List[int]:
-        """根据行业 code 获取所有相关的子行业code列表 (利用 path 字段极速级联)"""
+        """根据行业 code 获取有相关的子业code列表 (利用 path 字极级?"""
         if not industry_code:
             return []
             
@@ -353,14 +529,12 @@ class AnalysisService:
         from sqlalchemy import text
         
         async with db_manager.async_session() as session:
-            # 1. 查找此行业 code 的 path
             path_stmt = text("SELECT path FROM industries WHERE code = :code LIMIT 1")
             path_result = await session.execute(path_stmt, {"code": industry_code})
             target_path = path_result.scalar_one_or_none()
             
             codes = []
             if target_path:
-                # 2. 查询该 path 下面的所有子节点的 code (前缀匹配，走索引极快)
                 stmt = text("SELECT code FROM industries WHERE path LIKE :path_prefix")
                 result = await session.execute(stmt, {"path_prefix": f"{target_path}%"})
                 codes = [row[0] for row in result.all()]
@@ -376,16 +550,17 @@ class AnalysisService:
         cache_key = f"analysis:skill_cloud:v3:{keyword}:{industry}:{industry_2}:{limit}"
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None:
+            logger.debug(f"Skill cloud cache hit: {cache_key}")
             return cached_result
+        logger.debug(f"Skill cloud cache miss: {cache_key}")
             
         try:
             es = await get_es()
             
-            # 组装过滤条件
+            # 组过滤条件
             bool_query = {}
             should_clauses = []
             
-            # 条件 1: 专业关键字 / 行业关键字 (SHOULD: 命中任何一个)
             if keyword:
                 should_clauses.append({"multi_match": {"query": keyword, "fields": ["title^3", "description"]}})
             if industry_name:
@@ -398,13 +573,6 @@ class AnalysisService:
                 
             filter_clauses = []
             
-            # 条件 2: 目标行业 (FILTER: 严格限制范围)
-            # if industry_2:
-            #     industry_codes = await self._fetch_industry_codes_with_cache(industry_2)
-            #     if industry_codes:
-            #         filter_clauses.append({"terms": {"industry_code": industry_codes}})
-            #     else:
-            #         filter_clauses.append({"term": {"industry_code": -1}})
             if industry:
                 industry_codes = await self._fetch_industry_codes_with_cache(industry)
                 if industry_codes:
@@ -412,7 +580,6 @@ class AnalysisService:
                 else:
                     filter_clauses.append({"term": {"industry_code": -1}}) # 无效行业阻断
             else:
-                # 若前端未传显式的 targetIndustry，尝试基于专业映射补全行业
                 stmt = select(MajorIndustryRelation).where(MajorIndustryRelation.major_name == keyword)
                 industry_data = None
                 async with db_manager.async_session() as session:
@@ -457,19 +624,25 @@ class AnalysisService:
             resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
             aggs = resp.get("aggregations", {})
             
+            exact_rules, contains_rules = await self._get_skill_noise_rules()
             skill_counter = Counter()
             
             for b in aggs.get("top_skills", {}).get("buckets", []):
-                if b["key"].strip():
-                    skill_counter[b["key"]] += b["doc_count"]
+                label = self._normalize_skill_tag(b.get("key"))
+                if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                    continue
+                skill_counter[label] += b["doc_count"]
                     
             for b in aggs.get("top_ai_skills", {}).get("buckets", []):
-                if b["key"].strip():
-                    skill_counter[b["key"]] += b["doc_count"]
+                label = self._normalize_skill_tag(b.get("key"))
+                if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                    continue
+                skill_counter[label] += b["doc_count"]
                     
             result = [{"name": k, "value": v} for k, v in skill_counter.most_common(limit)]
             
             await redis_manager.set_cache(cache_key, result, expire=3600, jitter=True) 
+            logger.debug(f"Skill cloud cache set: {cache_key}")
             return result
             
         except Exception as e:
@@ -477,3 +650,6 @@ class AnalysisService:
             return []
 
 analysis_service = AnalysisService()
+
+
+

@@ -60,7 +60,9 @@ async def _sync_job_logic(job_id: int):
             "skills": skills,
             "tags": skills,
             "publish_date": job.publish_date.isoformat() if job.publish_date else None,
-            "created_at": job.created_at.isoformat() if job.created_at else None
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "location": job.location or "",
+            'major_name': job.major_name or "",
             }
             
             es = await get_es()

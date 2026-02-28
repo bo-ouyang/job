@@ -82,6 +82,10 @@ class MajorCategory(BaseModel):
 class AIAdviceRequest(BaseModel):
     major_name: str
     skills: List[str]
+    engine: str = Field(
+        default="auto",
+        description="AI engine selection: auto | classic | langgraph"
+    )
 
 class CareerCompassRequest(BaseModel):
     major_name: str

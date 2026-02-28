@@ -89,7 +89,7 @@ class PostgresManager:
             from .models import (
                 user, job, company, industry, payment, product, spider_boss_crawl_url,
                 wallet, resume, application, message, favorite, admin_log, analysis,
-                city, fetch_failure, school, school_special, school_special_intro, skills,
+                city, fetch_failure, school, school_special, school_special_intro, skills, system_config,
                 boss_spider_filter, boss_crawl_task, proxy
             )
             
