@@ -1,71 +1,88 @@
-# 项目概览：招聘数据采集与分析平台
+# 项目概览：招聘数据采集与智能分析平台
 
 ## 1. 简介
 
-本项目是一个招聘数据采集与分析平台，旨在从招聘网站（目前主要针对 Boss 直聘）抓取职位信息，存储到数据库中，并提供 RESTful API 用于数据访问和潜在的分析功能。
+本项目是一个全栈架构的招聘数据采集与智能分析平台，主要针对 Boss 直聘进行职位与公司信息的定向爬取，通过大模型（LLM）对非结构化职位描述进行自动化特征重构与标签提炼，并提供 BI 级别的数据可视化与 AI 驱动的职业规划服务。
+
+系统涵盖 C 端求职者应用（Vue 3 SPA）、后端 API 服务（FastAPI）、运营管理中台（Starlette-Admin）、智能爬虫调度集群（DrissionPage + Scrapy）以及完整的可观测性基础设施（Prometheus + Grafana）。
 
 ## 2. 架构与组件
 
-该项目采用模块化架构，主要包含三个核心组件：
+该项目采用模块化微服务架构，包含五大核心组件：
 
 ### A. Web API (`jobCollectionWebApi`)
 
-- **框架**: FastAPI (Python)
-- **用途**: 为前端或其他服务提供 REST 接口。
+- **框架**: FastAPI (Python)，支持 uvicorn 多 Worker 生产部署。
+- **用途**: 为前端 SPA 提供完整的 RESTful API（16 个 Controller，9 个 Service）。
 - **核心特性**:
-  - **数据库集成**: 异步 MySQL 连接 (`db.MysqlManager`)。
-  - **路由**: API 版本控制 (`api.v1.api`)。
-  - **模型校验**: 使用 Pydantic 模型进行请求/响应校验 (`schemas`)。
-  - **依赖注入**: 支持依赖注入 (`dependencies.py`)。
+  - **数据库**: 异步 PostgreSQL 连接 (`PostgresManager`)，SQLAlchemy 2.0 + asyncpg。
+  - **搜索引擎**: Elasticsearch 集成，支持全文搜索与聚合分析。
+  - **AI 集成**: LangChain + DeepSeek/智谱 LLM，支持职业建议、罗盘报告、AI 语义搜索、简历解析。
+  - **异步任务**: Celery 双队列（realtime / batch），AI 接口全异步化。
+  - **弹性架构**: Circuit Breaker 熔断器、AI 结果级 Redis 缓存、分布式锁、`@cache` 装饰器。
+  - **认证体系**: JWT 双 Token（Access 2h + Refresh 90d）+ 无感刷新 + 黑名单拦截。
+  - **支付**: 支付宝 / 微信支付集成。
+  - **可观测性**: Prometheus 自定义指标（12 项）+ FastAPI Instrumentator + 后台健康探针。
+  - **日志**: Loguru 全链路接管（Uvicorn / Celery / App 分流按天落盘）。
 
-### B. 爬虫 (`jobCollection`)
-- **框架**: Scrapy 框架
-- **用途**: 从外部源抓取职位数据。
-- **核心组件**:
-  - **Spiders**: `boss_job.py` (目前处于开发初期/半成品状态)。
-  - **Pipelines**: `MySQLPipeline` 用于异步持久化数据到 MySQL。处理逻辑包括：
-    - 检查职位是否已存在。
-    - 保存公司和职位信息。
-    - 分类并关联技能。
-  - **Middleware**: 自定义中间件（可能用于代理或 Header 管理）。
+### B. 前端 SPA (`frontend`)
 
-### D. 后台管理系统 (`main_admin.py`)
+- **框架**: Vue 3 + Vite
+- **UI**: Element Plus + ECharts + echarts-wordcloud
+- **核心页面**: 职位集市、职业罗盘、专业分析、BI 数据洞察、AI 简历生成、钱包充值等 15 个页面。
+- **异步适配**: 通过 `pollTask.js` 通用轮询工具对接后端 Celery 异步 AI 端点。
+- **认证**: Axios 双拦截器实现 401 静默刷新 + 请求队列缓冲。
 
-- **框架**: Starlette-Admin (基于 FastAPI)
-- **部署**: 独立服务部署在端口 8001，与主 API (8000) 分离。
+### C. 智能爬虫调度 (`jobCollection`)
+
+- **框架**: DrissionPage (Chromium 自动化) + Scrapy
+- **列表爬虫** (`boss_list_drission_spider`): 浏览器驱动采集岗位列表，支持代理池 + Cookie 持久化。
+- **详情爬虫** (`boss_detail_drission_spider`): Redis 流同步 + mitmproxy 拦截，串行获取 → 立即锁定 → 60s 超时保护。
+- **批量解析** (`job_parser`): Celery 定时任务，Semaphore(3) 并发调用 LLM 提取结构化标签。
+- **进程管控**: Admin 后台实时启停，支持 Play / Pause / Stop 一连串进程级操控。
+
+### D. 运营调度中台 (`main_admin.py`)
+
+- **框架**: Starlette-Admin (独立端口 8001)
 - **功能**:
-  - **RBAC 权限控制**: 支持 Admin, SuperAdmin, Operations (运营) 角色。运营角色仅拥有查看权限，无法删除数据。
-  - **数据看板**: 首页 Dashboard 展示用户/职位/公司统计，以及实时的服务器状态 (CPU/Mem/Disk) 和数据库连接池监控。
-  - **操作审计**: 自动记录管理员的所有增删改操作 (`AdminLog`)，支持审计查询。
-  - **国际化**: 全面支持中文界面。
+  - **RBAC 权限控制**: Admin / SuperAdmin / Operations 三级角色。
+  - **数据看板**: 用户/职位/公司统计，实时服务器状态 (CPU/Mem/Disk)，数据库连接池监控。
+  - **爬虫调度面板**: 创建/启动/暂停/停止 爬虫任务，实时状态同步。
+  - **操作审计**: 自动记录管理员所有增删改操作 (`AdminLog`)。
+  - **任务监控**: 通过 Celery Event 信号量拦截器展示任务健康数据与耗时。
+
+### E. 可观测性 (`prometheus` + `grafana`)
+
+- **Prometheus**: 每 15s 抓取 FastAPI `/metrics`，自动采集 HTTP RED 指标 + 12 项自定义业务指标。
+- **Grafana**: 预置 12 面板看板（服务概览 / AI 监控 / 业务指标），Docker 启动零配置。
 
 ## 3. 技术栈
 
-- **语言**: Python
-- **Web 框架**: FastAPI
-- **爬虫框架**: Scrapy
-- **后台框架**: Starlette-Admin
-- **数据库**:
-  - **MySQL**: (已弃用) 代码保留但未激活。
-  - **PostgreSQL**: 当前主要关系型数据库 (`common.databases.PostgresManager`)。
-  - **Redis**: 用于分布式锁、缓存、Session 及 WebSocket 消息队列。
-- **ORM**: SQLAlchemy (Async) with `asyncpg`
-- **其他**:
-  - `uvicorn`: ASGI 服务器。
-  - `pydantic`: 数据校验。
-  - `uvicorn`: ASGI 服务器。
-  - `pydantic`: 数据校验。
-  - `psutil`: 服务器性能监控。
-  - **AI Integration**: Deepseek API 集成 (见 Config)。
-  - **Payment**: 支付宝/微信支付集成框架。
+| 层级 | 技术 |
+|------|------|
+| **后端** | Python · FastAPI · uvicorn (多 Worker) |
+| **前端** | Vue 3 · Vite · ECharts · Element Plus |
+| **管控中台** | Starlette-Admin |
+| **任务队列** | Celery (realtime / batch 双队列) · Redis |
+| **数据库** | PostgreSQL (asyncpg + SQLAlchemy 2.0) |
+| **搜索引擎** | Elasticsearch |
+| **缓存/锁** | Redis (缓存 / 分布式锁 / Pub-Sub / WebSocket) |
+| **AI/LLM** | LangChain Core · DeepSeek / 智谱 · Pydantic |
+| **爬虫** | DrissionPage (Chromium) · Scrapy · mitmproxy |
+| **弹性架构** | Circuit Breaker · `@cache` 装饰器 · TTL Jitter |
+| **可观测性** | Prometheus · Grafana (预置看板) · Loguru |
+| **支付** | 支付宝 / 微信支付 |
+| **部署** | Docker Compose · uvicorn 多 Worker |
 
-## 4. 现状与观察
+## 4. 项目现状
 
-- **Scrapy 爬虫 (`boss_job.py`)** 尚处于早期或未完成阶段。
-- **数据库模型** 结构良好，支持职位、公司、技能以及用户权限管理。
-- **基础设施** 已完成 API 与 Admin 的微服务化拆分，提升了安全性和可维护性。
+- **全栈就绪**: 前端 Vue 3 SPA + 后端 FastAPI + Admin 中台 + 爬虫集群全部具备生产部署能力。
+- **AI 全异步化**: 3 大 AI 接口（职业建议/罗盘报告/AI 搜索）通过 Celery 异步处理 + 前端轮询完成闭环。
+- **弹性基础设施**: 熔断器 + 多层缓存 + 队列隔离 + 多 Worker 部署，具备高并发防御能力。
+- **可观测性**: Prometheus + Grafana 全景监控，覆盖 HTTP/AI/计费/基础设施四大维度。
+- **数据模型**: 29 个 SQLAlchemy 模型，覆盖用户、岗位、简历、支付、爬虫任务、系统配置等完整业务域。
 
-## 5. 最近更新 (2026-01-26)
+## 5. 最近更新 (2025-12-26)
 
 本次迭代主要关注**简历智能化体验**、**后台监控增强**与**系统安全加固**：
 
@@ -91,7 +108,7 @@
     - Refresh Token 有效期延长至 **90天**。
 - **Admin 增强**：后台管理面板新增了 server 级别的监控信息。
 
-## 6. 最近更新 (2026-02-13)
+## 6. 最近更新 (2026-01-03)
 
 ### Crawler Management Enhancement (爬虫管理增强)
 
@@ -104,7 +121,7 @@
     - **启动**: 后台启动独立爬虫进程 (`scrapy crawl boss_monitor -a task_id=...`)。
     - **暂停/停止**: 爬虫在运行时会主动检测数据库状态变化，响应暂停等待或停止终止的指令。
 
-## 7. 最近更新 (2026-02-13 补充)
+## 7. 最近更新 (2026-01-09)
 
 ### 详情页爬虫重构与同步优化 (Detail Spider Refactoring & Sync Optimization)
 
@@ -127,7 +144,7 @@
   - **Controller**: 增加了 15s 强制跳过机制，防止浏览器端死锁。
 - **全链路汉化**: 将 Spider 和 Controller 的关键日志全部汉化，大幅降低了调试难度。
 
-## 8. 最近更新 (2026-02-22 ~ 2026-02-23)
+## 8. 最近更新 (2026-01-12 ~ 2026-01-22)
 
 本次迭代主要集中在 **全局配置规范化**、**全链路日志重构** 以及 **爬虫自动控制调度** 的完善。
 
@@ -155,7 +172,7 @@
 - 实现了 Web管理面板对正在疯狂爬取的 `scrapy` 进程的真实中断控制（当收到 `stopped` 信号抛出 `CloseSpider`）。
 - **指令携参预埋**：重写了 `crawler_service.py` 的 `subprocess` 激发方法，强制追加接收和投递 `-a task_url=...` 变长参数，以为接下来的“单机构职位页直抓”埋下功能拓展的种子。
 
-## 9. 最近更新 (2026-02-24)
+## 9. 最近更新 (2026-02-01)
 
 ### 核心基础设施弹性与前端 C 端联动闭环 (Core Infrastructure Resilience & C-Side Auth Loop)
 
@@ -175,7 +192,7 @@
 - 修正了 ES 同步脚本 (`es_sync_all.py` / `es_sync.py`) 的抽取规则：支持完整的 `city_code` 和 `industry_code` 整型建树并同步至 Elasticsearch。
 - 修复了 `analysis_service.py` 层级连投递 ID 参数（如 `industry`, `location`）导致的查询报错。消除了强制拦截抛出的 `ValueError`，在 ES 查询 DSL 构建时：若传 `location`，则直接匹配 `city_code`；若传 `industry` 大类，则利用映射的 PostgreSQL 关系回溯补查全系子行业 Code 并带入 ES 的 `terms` (In 查询) 中完美解决数据穿透过滤。
 
-## 10. 最近更新 (2026-02-25 ~ 2026-02-26)
+## 10. 最近更新 (2026-02-04)
 
 ### 职业罗盘功能精细化与后端级联查询优化 (Career Compass & Materialized Path Optimization)
 
@@ -191,7 +208,7 @@
 - **全链路 Code 穿透**：重写了整个 AI 罗盘与词云 (Skill Cloud) 获取链路，将前置由 Vue 发出的 `行业名称 (String)` 强制替换为精确的 **级联行业 Code (Int)**。
 - **两级下探精准画像**：修改了 `analysis_service.py` 中的 Elasticsearch 聚合统计逻辑，现在的 ES 请求支持同时接收并解析主行业与次级行业的 Code (例如 `industry` 和 `industry_2`)，使得生成的词云与 AI 职业规划报告极度贴合用户的最后一次精准鼠标落点。
 
-## 11. 最近更新 (2026-02-26 追加)
+## 11. 最近更新 (2026-02-15)
 
 ### 职业数据大盘深度修缮与缓存架构重构 (Dashboard Refinement & Cache Refactoring)
 
@@ -208,7 +225,7 @@
 - **智能装饰器替换**：梳理界定了 `Service` 层“强防击穿缓存”与 `Controller` 层“防并发缓存”的边界界限。面向具备高频低负担的查询端点（如 获取行业树、获取级联类目），全面移除了繁冗的 Redis 编程式手搓代码。
 - **切面注入**：以 `core.cache.py` 内部提供的泛型 `@cache` 装饰器一键接管了 Controller 层级的序列化 Hash 锁，精简了大量核心代码量的同时赋予了 API 本征态长效期与短期弹性的自控能力。保留底层核心 ES 查询的强阻断缓存锁机制，构成内外双层的完美缓存生态壁垒。
 
-## 12. 最近更新 (2026-02-28)
+## 12. 最近更新 (2026-02-25)
 
 ### AI 服务弹性架构与全链路异步化改造 (AI Service Resilience & Full-Stack Async Transformation)
 
@@ -264,7 +281,7 @@
 - **`JobMarket.vue`**：`executeAiSearch` 改为任务提交 → 轮询/缓存直返双通道。
 - **向下兼容**：所有前端改造均保留了对旧版同步响应格式的兼容逻辑（`if (!taskId) ...`）。
 
-## 13. 最近更新 (2026-02-28 追加)
+## 13. 最近更新 (2026-03-1)
 
 ### 可观测性体系与架构文档化 (Observability Stack & Architecture Documentation)
 
