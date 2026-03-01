@@ -68,9 +68,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_multi_with_company(
-        self, db: AsyncSession, *, skip: int = 0, limit: int = 100
-    ) -> List[Job]:
+    async def get_multi_with_company(self, db: AsyncSession, *, skip: int = 0, limit: int = 100) -> List[Job]:
         """获取职位列表（包含公司信息）"""
         stmt = (
             select(Job)
@@ -89,17 +87,11 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
     
     async def get_with_relations(self, db: AsyncSession, id: int) -> Optional[Job]:
         """获取职位详情（包含关联信息）"""
-        stmt = (
-            select(Job)
-            .options(selectinload(Job.company), selectinload(Job.industry))
-            .where(Job.id == id)
-        )
+        stmt = select(Job).options(selectinload(Job.company), selectinload(Job.industry)).where(Job.id == id)
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
     
-    async def get_by_skills(
-        self, db: AsyncSession, skill_names: List[str], *, skip: int = 0, limit: int = 50
-    ) -> List[Job]:
+    async def get_by_skills(self, db: AsyncSession, skill_names: List[str], *, skip: int = 0, limit: int = 50) -> List[Job]:
         """根据技能名称获取职位"""
         if not skill_names:
             return []
@@ -175,11 +167,9 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
                  )
              )
              conditions.append(Job.industry_code.in_(sub_industry_codes_stmt))
-
         if conditions:
             stmt = stmt.where(and_(*conditions))
             count_stmt = count_stmt.where(and_(*conditions))
-
         # 执行统计总数
         total_result = await db.execute(count_stmt)
         total = total_result.scalar_one()
@@ -188,7 +178,6 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         stmt = stmt.order_by(Job.publish_date.desc()).offset(skip).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all(), total
-
     async def search_by_ai_intent(
         self,
         db: AsyncSession,
@@ -422,8 +411,8 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         if keywords:
             keyword_filters = []
             for kw in keywords:
-                keyword_filters.append(Job.title.ilike(f"%{kw}%"))
-                keyword_filters.append(Job.description.ilike(f"%{kw}%"))
+                keyword_filters.append(Job.title.ilike(f"{kw}%"))
+                keyword_filters.append(Job.description.ilike(f"{kw}%"))
             major_criteria.append(or_(*keyword_filters))
             
         if industry_codes:

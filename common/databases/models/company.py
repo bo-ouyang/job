@@ -9,16 +9,16 @@ class Company(Base):
     __tablename__ = 'company'
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
-    source_id = Column(String(50), nullable=True, unique=True,comment="Boss直聘 encryptBrandId") 
+    source_id = Column(String(50), nullable=True, unique=True, default='', comment="Boss直聘 encryptBrandId") 
     name = Column(String(255), nullable=False, index=True)
-    industry = Column(String(100))
-    scale = Column(String(50))  # 公司规模
-    stage = Column(String(50)) # 融资阶段 e.g. "已上市"
-    location = Column(String(100))
-    logo = Column(String(255)) # 公司Logo
-    website = Column(String(255))
-    description = Column(Text)
-    introduction = Column(Text) # 公司介绍
+    industry = Column(String(100), default='')
+    scale = Column(String(50), default='')  # 公司规模
+    stage = Column(String(50), default='') # 融资阶段 e.g. "已上市"
+    location = Column(String(100), default='')
+    logo = Column(String(255), default='') # 公司Logo
+    website = Column(String(255), default='')
+    description = Column(Text, default='')
+    introduction = Column(Text, default='') # 公司介绍
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

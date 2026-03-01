@@ -9,6 +9,7 @@ from common.databases.RedisManager import redis_manager
 from common.databases.models.product import Product
 from config import settings
 from core.logger import sys_logger as logger
+from core.metrics import ai_billing_charges, ai_billing_amount, ai_billing_rejections
 from crud import product as crud_product
 from crud import wallet as crud_wallet
 
@@ -141,6 +142,7 @@ class AIAccessService:
         wallet = await crud_wallet.wallet.get_by_user(db, user_id=user_id)
         balance = float(wallet.balance) if wallet else 0.0
         if balance < price:
+            ai_billing_rejections.labels(feature=feature_key, reason="balance").inc()
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=(
@@ -173,11 +175,17 @@ class AIAccessService:
             description=description,
         )
         if not success:
+            ai_billing_rejections.labels(feature=feature_key, reason="wallet_error").inc()
             await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=f"Wallet charge failed for {policy.description}",
             )
+        
+        # Record metrics on success
+        ai_billing_charges.labels(feature=feature_key).inc()
+        ai_billing_amount.labels(feature=feature_key).inc(amount)
+        
         await db.commit()
 
 

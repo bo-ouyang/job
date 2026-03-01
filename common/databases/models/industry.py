@@ -25,27 +25,27 @@ class Industry(Base):
     name = Column(String(100), nullable=False, comment='行业名称')
     
     # 拼音和首字母
-    pinyin = Column(String(100), nullable=True, comment='拼音')
-    first_char = Column(String(1), nullable=True, comment='首字母')
+    pinyin = Column(String(100), nullable=True, default='', comment='拼音')
+    first_char = Column(String(1), nullable=True, default='', comment='首字母')
     
     # 层级关系
     parent_id = Column(Integer, ForeignKey('industries.code'), nullable=True, comment='父级ID')
     level = Column(Integer, nullable=False, default=0, comment='层级：0-一级行业，1-二级行业')
-    path = Column(String(255), nullable=True, index=True, comment='路径，如 0/1000/1001/')
+    path = Column(String(255), nullable=True, index=True, default='', comment='路径，如 0/1000/1001/')
     
     # 其他属性
-    tip = Column(Text, nullable=True, comment='提示信息')
+    tip = Column(Text, nullable=True, default='', comment='提示信息')
     rank = Column(Integer, nullable=True, default=0, comment='排序')
     mark = Column(Integer, nullable=True, default=0, comment='标记')
     position_type = Column(Integer, nullable=True, default=0, comment='职位类型')
-    city_type = Column(Integer, nullable=True, comment='城市类型')
+    city_type = Column(Integer, nullable=True, default=0, comment='城市类型')
     capital = Column(Integer, nullable=True, default=0, comment='是否省会')
-    color = Column(String(20), nullable=True, comment='颜色')
-    recruitment_type = Column(String(50), nullable=True, comment='招聘类型')
-    city_code = Column(String(20), nullable=True, comment='城市代码')
-    region_code = Column(Integer, nullable=True, comment='行政区划代码')
-    center_geo = Column(String(50), nullable=True, comment='中心点坐标')
-    value = Column(String(100), nullable=True, comment='值')
+    color = Column(String(20), nullable=True, default='', comment='颜色')
+    recruitment_type = Column(String(50), nullable=True, default='', comment='招聘类型')
+    city_code = Column(String(20), nullable=True, default='', comment='城市代码')
+    region_code = Column(Integer, nullable=True, default=0, comment='行政区划代码')
+    center_geo = Column(String(50), nullable=True, default='', comment='中心点坐标')
+    value = Column(String(100), nullable=True, default='', comment='值')
     
     # 时间戳
     created_at = Column(DateTime, nullable=True, comment='创建时间')

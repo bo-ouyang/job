@@ -15,13 +15,13 @@ class Major(Base):
     id = Column(BigInteger, primary_key=True, default=generate_id)
     
     name = Column(String(100), nullable=False, index=True, comment='专业名称')
-    code = Column(String(20), nullable=True, index=True, comment='专业代码')
+    code = Column(String(20), nullable=True, index=True, default='', comment='专业代码')
     
     # 层级关系
     parent_id = Column(BigInteger, ForeignKey('majors.id'), nullable=True, comment='父级ID')
     level = Column(Integer, default=0, comment='层级：0-专业大类，1-具体专业')
     
-    description = Column(Text, nullable=True, comment='描述')
+    description = Column(Text, nullable=True, default='', comment='描述')
     
     # 自关联关系
     parent = relationship('Major', remote_side=[id], back_populates='children')
@@ -43,13 +43,13 @@ class MajorIndustryRelation(Base):
     id = Column(BigInteger, primary_key=True, default=generate_id)
     
     major_id = Column(BigInteger, ForeignKey('majors.id'), nullable=True, index=True)
-    major_name = Column(String(100), nullable=True, index=True, comment='专业名称')
+    major_name = Column(String(100), nullable=True, index=True, default='', comment='专业名称')
     
     # 关联到 Industry 表的 code 字段列表
-    industry_codes = Column(JSONB, nullable=True, comment='行业编码列表 (JSON Array)')
+    industry_codes = Column(JSONB, nullable=True, default={}, comment='行业编码列表 (JSON Array)')
     
     # 额外属性
-    keywords = Column(String(500), nullable=True, comment='分析关键词 (逗号分隔)')
+    keywords = Column(String(500), nullable=True, default='', comment='分析关键词 (逗号分隔)')
     relevance_score = Column(Integer, default=0, comment='相关度/热度')
     
     # 关系

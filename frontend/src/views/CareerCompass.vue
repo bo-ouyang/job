@@ -256,19 +256,14 @@ const handleAnalyze = async () => {
     const skillRes = await analysisAPI.getSkillCloud(majorName.value, industry1, industry2, industry1Name, industry2Name, 30);
     skillCloudData.value = skillRes.data || [];
 
-    // 2. Fetch Job Stats - Macro Dashboard (fast, stays sync)
-    const statsRes = await analysisAPI.getJobStats({ 
-      q: majorName.value, 
-      industry: industry1,
-      industry_2: industry2,
-      industry_name: industry1Name,
-      industry_2_name: industry2Name
-    });
-    statsData.value = statsRes.data || { salary: [], industries: [], skills: [] };
-    
     // 3. Fetch AI Diagnostic Report (async via Celery)
     const reportRes = await analysisAPI.getCareerCompass(majorName.value, industry1, industry2, industry1Name, industry2Name);
     const responseData = reportRes.data;
+
+    // 💡 Performance Optimization: Use stats already returned by career-compass to avoid extra /stats call
+    if (responseData?.es_stats) {
+      statsData.value = responseData.es_stats;
+    }
 
     let reportRaw;
     if (responseData?.task_id) {

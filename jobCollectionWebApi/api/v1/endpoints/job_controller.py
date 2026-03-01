@@ -60,6 +60,77 @@ async def log_search_activity(
 
 from core.cache import cache
 
+
+
+
+@router.get("/", response_model=JobList)
+async def jobs(
+    request: Request,
+    q: str = Query(None, description="Natural language search describing what you want"),
+    location: Optional[int] = Query(None, description="City code"),
+    experience: Optional[str] = Query(None, description="Experience level"),
+    education: Optional[str] = Query(None, description="Education level"),
+    industry: Optional[int] = Query(None, description="Industry code"),
+    salary_min: Optional[float] = Query(None, description="Minimum salary"),
+    salary_max: Optional[float] = Query(None, description="Maximum salary"),
+    pagination: PaginationParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisManager = Depends(get_redis),   
+    current_user: dict = Depends(get_current_user),
+):
+    import hashlib
+    # 构造唯一缓存键
+    q_str = q or ""
+    hash_payload = f"{q_str}:{location}:{experience}:{education}:{industry}:{salary_min}:{salary_max}:{pagination.page}:{pagination.page_size}"
+    q_hash = hashlib.md5(hash_payload.encode('utf-8')).hexdigest()
+    cache_key = f"jobs:hash_{q_hash}"
+    
+    cache_data = await redis.get_cache(cache_key)
+    if cache_data is not None:
+        return JobList(**cache_data)
+    try:
+        jobs_data, total = await search_service.search_jobs(
+            keyword=q,
+            location=location,
+            experience=experience,
+            education=education,
+            industry=str(industry) if industry else None,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            skip=pagination.skip,
+            limit=pagination.page_size
+        )
+    except Exception as e:
+        from crud.job import job as crud_job
+        jobs_data, total = await crud_job.search(
+            db, 
+            keyword=q,
+            location=location,
+            experience=experience,
+            education=education,
+            industry=str(industry) if industry else None,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            skip=pagination.skip,
+            limit=pagination.page_size
+        )
+        logger.error(f"Failed to search jobs: {e}")
+        raise HTTPException(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search jobs: {str(e)}"
+        )
+    result = JobList(
+        items=jobs_data,
+        total=total,
+        page=pagination.page,
+        size=pagination.page_size,
+        pages=(total + pagination.page_size - 1) // pagination.page_size
+    )
+    
+    await redis.set_cache(cache_key, result.model_dump(mode='json'), expire=600)
+    return result
+
+
 @router.get("/ai_search", summary="AI Intent Search (Async)")
 async def ai_search_jobs(
     request: Request,
@@ -81,24 +152,11 @@ async def ai_search_jobs(
     # 构造唯一缓存键
     q_hash = hashlib.md5(q.encode('utf-8')).hexdigest()
     cache_key = f"ai_search:q_{q_hash}:page_{pagination.page}:size_{pagination.page_size}"
-    
     # Cache hit → return immediately
     cached = await redis.get_cache(cache_key)
+    #命中就不计费
     if cached is not None:
-        charge_amount = await ai_access_service.ensure_access(
-            db=db,
-            user_id=current_user.id,
-            feature_key="ai_search",
-        )
-        await ai_access_service.charge_usage(
-            db=db,
-            user_id=current_user.id,
-            feature_key="ai_search",
-            amount=charge_amount,
-            detail_suffix="cache_hit",
-        )
         return JobList(**cached)
-
     # Cache miss → billing check then submit Celery task
     charge_amount = await ai_access_service.ensure_access(
         db=db,
@@ -107,7 +165,8 @@ async def ai_search_jobs(
     )
     
     try:
-        from tasks.ai_tasks import ai_search_task
+        from core.metrics import celery_tasks_submitted
+        celery_tasks_submitted.labels(task_name="tasks.ai_tasks.ai_search_task", queue="realtime").inc()
         task = ai_search_task.delay(
             user_id=current_user.id,
             query=q,

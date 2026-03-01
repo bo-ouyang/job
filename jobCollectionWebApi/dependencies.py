@@ -336,7 +336,10 @@ class JobQueryParams:
         company_id: Optional[int] = Query(None, description="公司ID"),
         industry: Optional[int] = Query(None, description="行业"),
         industry_2: Optional[int] = Query(None, description="二级行业"),
-        common: CommonQueryParams = Depends()
+        major_name: Optional[str] = Query(None, description="专业名称"),
+        common: CommonQueryParams = Depends(),
+        industry_name: Optional[str] = Query(None, description="行业名称"),
+        industry_2_name: Optional[str] = Query(None, description="二级行业名称"),
     ):
         self.location = location
         self.experience = experience
@@ -348,6 +351,9 @@ class JobQueryParams:
         self.industry = industry
         self.industry_2 = industry_2
         self.common = common
+        self.industry_name = industry_name
+        self.industry_2_name = industry_2_name
+        self.major_name = major_name
 
 # 技能查询特定依赖
 class SkillQueryParams:

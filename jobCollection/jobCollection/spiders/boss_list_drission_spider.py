@@ -237,7 +237,7 @@ class BossListDrissionSpider(scrapy.Spider):
 
         max_pages = int(os.getenv("BOSS_MAX_PAGES_PER_TASK", "10"))
         total_count = 0
-
+        has_more = True
         try:
             listen_ready = hasattr(self.page, "listen") and hasattr(self.page.listen, "start")
             if listen_ready:
@@ -251,8 +251,9 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.logger.warning(f"检测到拦截页面: {current_url}，重建浏览器")
                 await self._rebuild_browser()
                 return 0, False
-
-            for page_num in range(1, max_pages + 1):
+            page_num = 0
+            while has_more:
+                page_num += 1
                 # 滚动触发懒加载
                 await self._scroll_to_load()
 

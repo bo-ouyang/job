@@ -26,10 +26,10 @@ class UserWechat(Base):
     user_id = Column(BigInteger, ForeignKey('users.id'), unique=True, nullable=False)
     
     openid = Column(String(100), unique=True, index=True, nullable=False)
-    unionid = Column(String(100), unique=True, index=True, nullable=True)
-    nickname = Column(String(100), nullable=True)
-    avatar = Column(String(255), nullable=True)
-    session_key = Column(String(255), nullable=True) # For mini-program
+    unionid = Column(String(100), unique=True, index=True, nullable=True, default='')
+    nickname = Column(String(100), nullable=True, default='')
+    avatar = Column(String(255), nullable=True, default='')
+    session_key = Column(String(255), nullable=True, default='') # For mini-program
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -59,10 +59,10 @@ class User(Base):
     salt = Column(String(50), nullable=True)
     
     # 用户资料
-    nickname = Column(String(50))
-    avatar = Column(String(255))
-    bio = Column(Text)
-    location = Column(String(100))
+    nickname = Column(String(50), default='')
+    avatar = Column(String(255), default='')
+    bio = Column(Text, default='')
+    location = Column(String(100), default='')
     
     # 状态和角色
     role = Column(Enum(UserRole), default=UserRole.USER)
@@ -130,9 +130,9 @@ class UserSession(Base):
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, index=True, nullable=True) # 移除 unique=True，类型改为 Integer
     session_token = Column(String(255), unique=True, index=True)
-    device_info = Column(JSON)  # 设备信息
-    ip_address = Column(String(45))
-    user_agent = Column(Text)
+    device_info = Column(JSON, default={})  # 设备信息
+    ip_address = Column(String(45), default='')
+    user_agent = Column(Text, default='')
     expires_at = Column(DateTime, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())

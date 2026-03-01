@@ -160,11 +160,11 @@ class BossDetailDrissionSpider(scrapy.Spider):
         job_desc = self._extract_job_desc(html)
 
         if job_desc:
-            await self._update_job(encrypt_job_id, job_desc, success=True)
+            await self._update_job(encrypt_job_id, job_desc, success=True, is_crawl=1)
             self.logger.info(f"详情写入成功: {encrypt_job_id}（{len(job_desc)} 字符）")
         else:
             self.logger.warning(f"描述解析失败: {encrypt_job_id}")
-            await self._update_job(encrypt_job_id, None, success=False)
+            await self._update_job(encrypt_job_id, None, success=False, is_crawl=2)
 
         self.req_count += 1
         self.fp_count += 1
@@ -420,7 +420,7 @@ class BossDetailDrissionSpider(scrapy.Spider):
         except Exception as e:
             self.logger.error(f"回退任务失败: {e}")
 
-    async def _update_job(self, encrypt_job_id: str, job_desc: str | None, success: bool):
+    async def _update_job(self, encrypt_job_id: str, job_desc: str | None, success: bool, is_crawl: int = 1):
         try:
             async with (await db_manager.get_session()) as session:
                 result = await session.execute(
@@ -432,9 +432,9 @@ class BossDetailDrissionSpider(scrapy.Spider):
                     return
                 if success and job_desc:
                     job.description = job_desc
-                    job.is_crawl = 1
+                    job.is_crawl = is_crawl
                 else:
-                    job.is_crawl = 0       # 解析失败，允许重试
+                    job.is_crawl = is_crawl       # 解析失败，允许重试
                 job.updated_at = datetime.now()
                 await session.commit()
         except Exception as e:
@@ -466,7 +466,7 @@ class BossDetailDrissionSpider(scrapy.Spider):
         """从磁盘加载 Cookie 并注入浏览器。"""
         if not self.page:
             return
-        path = self._cookie_file_path()
+        path = self._cookie_file_path('cookies_account_1.json')
         if not os.path.exists(path):
             return
         try:

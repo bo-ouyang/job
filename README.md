@@ -1,7 +1,10 @@
-<div align="center">
-  <h1>🚀 Job Collection Platform</h1>
-  <p><b>一个全栈架构的智能招聘数据采集、解析与后台管理平台</b></p>
-</div>
+# 招聘数据采集与智能分析平台
+
+## 🚀 Job Collection And Analysis Platform
+
+> 一个全栈架构的智能招聘数据采集、解析与后台管理平台
+
+---
 
 ## 📌 项目简介
 
@@ -77,9 +80,9 @@ docker-compose up -d prometheus grafana
 ```
 
 ## 📖 详细文档
+
 - 系统架构蓝图与功能模块全景：[`ARCHITECTURE.md`](ARCHITECTURE.md)
 - 迭代大纲与设计变更全记录：[`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md)
-
 
 ---
 *Developed with ❤️ and Python.*

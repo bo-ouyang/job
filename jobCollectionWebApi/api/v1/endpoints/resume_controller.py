@@ -176,6 +176,8 @@ async def parse_resume(
         buffer.write(content)
         
     # Trigger Celery Task
+    from core.metrics import celery_tasks_submitted
+    celery_tasks_submitted.labels(task_name="tasks.resume_parser.parse_resume_task", queue="realtime").inc()
     parse_resume_task.delay(current_user.id, file_path)
     
     return {"message": "简历正在解析中，请留意消息通知"}

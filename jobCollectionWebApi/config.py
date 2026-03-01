@@ -108,8 +108,8 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = os.getenv('POSTGRES_DB', 'job')
     
     # PostgreSQL 连接池配置
-    POSTGRES_POOL_MIN_SIZE: int = int(os.getenv('POSTGRES_POOL_MIN_SIZE', 5))
-    POSTGRES_POOL_MAX_SIZE: int = int(os.getenv('POSTGRES_POOL_MAX_SIZE', 50))
+    POSTGRES_POOL_MIN_SIZE: int = int(os.getenv('POSTGRES_POOL_MIN_SIZE', 10))
+    POSTGRES_POOL_MAX_SIZE: int = int(os.getenv('POSTGRES_POOL_MAX_SIZE', 100))
     
     @property
     def DATABASE_URL(self) -> str:

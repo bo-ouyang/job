@@ -25,7 +25,7 @@ class UserWallet(Base):
     frozen_balance = Column(Float, default=0.0, nullable=False, comment="冻结金额")
     
     status = Column(Enum(WalletStatus), default=WalletStatus.ACTIVE)
-    password_hash = Column(String(128), nullable=True, comment="支付密码")
+    password_hash = Column(String(128), nullable=True, default='', comment="支付密码")
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -44,8 +44,8 @@ class WalletTransaction(Base):
     balance_after = Column(Float, nullable=False, comment="变动后余额")
     
     transaction_type = Column(Enum(TransactionType), nullable=False)
-    related_order_no = Column(String(64), index=True, nullable=True, comment="关联订单号")
-    description = Column(String(255), nullable=True)
+    related_order_no = Column(String(64), index=True, nullable=True, default='', comment="关联订单号")
+    description = Column(String(255), nullable=True, default='')
     
     created_at = Column(DateTime, default=func.now())
 

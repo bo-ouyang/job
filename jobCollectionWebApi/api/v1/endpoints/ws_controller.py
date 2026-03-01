@@ -3,6 +3,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.auth_service import auth_service
 from common.databases.models.user import User
 from core.logger import sys_logger as logger
+from core.metrics import ws_connections_active
 import json
 
 router = APIRouter()
@@ -17,6 +18,7 @@ class ConnectionManager:
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         self.active_connections[user_id].append(websocket)
+        ws_connections_active.inc()
         logger.info(f"User {user_id} connected via WebSocket")
 
     def disconnect(self, websocket: WebSocket, user_id: int):
@@ -25,6 +27,7 @@ class ConnectionManager:
                 self.active_connections[user_id].remove(websocket)
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
+        ws_connections_active.dec()
         logger.info(f"User {user_id} disconnected")
 
     async def send_personal_message(self, message: str, user_id: int):

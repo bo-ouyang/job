@@ -20,36 +20,36 @@ class Job(Base):
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     title = Column(String(255), nullable=False, index=True)
-    description = Column(Text)
-    requirements = Column(Text)
-    salary_min = Column(Float)
-    salary_max = Column(Float)
+    description = Column(Text, default='')
+    requirements = Column(Text, default='')
+    salary_min = Column(Float, default=0.0)
+    salary_max = Column(Float, default=0.0)
 
     salary_unit = Column(String(20), default='月')  # 月/年/小时
-    salary_desc = Column(String(50)) # 原始薪资描述 e.g. "18-35K"
+    salary_desc = Column(String(50), default='') # 原始薪资描述 e.g. "18-35K"
     
     # HR/Boss信息
-    boss_name = Column(String(50))
-    boss_title = Column(String(50))
-    boss_avatar = Column(String(255))
+    boss_name = Column(String(50), default='')
+    boss_title = Column(String(50), default='')
+    boss_avatar = Column(String(255), default='')
     
-    experience = Column(String(50))  # 经验要求
-    education = Column(String(50))   # 学历要求
-    location = Column(String(100))
-    area_district = Column(String(100)) # 行政区
-    business_district = Column(String(100)) # 商圈
-    longitude = Column(Float)
-    latitude = Column(Float)
+    experience = Column(String(50), default='')  # 经验要求
+    education = Column(String(50), default='')   # 学历要求
+    location = Column(String(100), default='')
+    area_district = Column(String(100), default='') # 行政区
+    business_district = Column(String(100), default='') # 商圈
+    longitude = Column(Float, default=0.0)
+    latitude = Column(Float, default=0.0)
     
     # 标签与福利
-    tags = Column(JSONB) # JSON of job labels
-    welfare = Column(JSONB) # JSON of welfare list
-    work_type = Column(String(50))   # 全职/兼职/实习
-    source_site = Column(String(50)) # 来源网站
-    source_url = Column(String(255), unique=True)
+    tags = Column(JSONB, default={}) # JSON of job labels
+    welfare = Column(JSONB, default={}) # JSON of welfare list
+    work_type = Column(String(50), default='')   # 全职/兼职/实习
+    source_site = Column(String(50), default='') # 来源网站
+    source_url = Column(String(255), unique=True, default='')
     publish_date = Column(DateTime)
-    encrypt_job_id = Column(String(100), unique=True, index=True, comment="Boss直聘 encryptJobId")
-    job_labels = Column(JSONB) # JSON of jobLabels list e.g. ["1-3年", "本科", "Python"]
+    encrypt_job_id = Column(String(100), unique=True, index=True, default='', comment="Boss直聘 encryptJobId")
+    job_labels = Column(JSONB, default={}) # JSON of jobLabels list e.g. ["1-3年", "本科", "Python"]
     company_id = Column(BigInteger, ForeignKey('company.id'),nullable=True, index=True)
     
     # skill_id = Column(Integer, ForeignKey("skills.id"), nullable=True, index=True)
@@ -60,9 +60,9 @@ class Job(Base):
     industry_id = Column(BigInteger, ForeignKey('industries.id'), nullable=True, index=True)
     # AI 大模型解析提取
     ai_parsed = Column(Integer, default=0, comment="0:未解析, 1:解析中, 2:已解析")
-    ai_summary = Column(Text, comment="AI一句话职责总结")
-    ai_skills = Column(JSONB, comment="AI提取的技能标签数组")
-    ai_benefits = Column(JSONB, comment="AI提取的福利待遇数组")
+    ai_summary = Column(Text, default='', comment="AI一句话职责总结")
+    ai_skills = Column(JSONB, default={}, comment="AI提取的技能标签数组")
+    ai_benefits = Column(JSONB, default={}, comment="AI提取的福利待遇数组")
 
     # 元数据
     created_at = Column(DateTime, default=func.now())

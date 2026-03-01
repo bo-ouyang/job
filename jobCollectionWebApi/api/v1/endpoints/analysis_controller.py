@@ -29,7 +29,7 @@ from config import settings
 router = APIRouter()
 
 
-def _stable_digest(payload: Dict[str, Any]) -> str:
+async def _stable_digest(payload: Dict[str, Any]) -> str:
     serialized = json.dumps(
         payload,
         sort_keys=True,
@@ -46,41 +46,42 @@ async def _safe_increment_counter(key: str, amount: int = 1) -> None:
     except Exception as exc:
         logger.warning(f"Failed to increment counter {key}: {exc}")
 
-@router.get("/stats")
-async def get_job_statistics(
-    industry_name: str = None,
-    industry_2_name: str = None,
-    job_params: JobQueryParams = Depends(),
-    db: AsyncSession = Depends(get_db),
-):
-    """获取职位统计数据 (集成 ES 聚合与 Redis 缓存)"""
-    try:
-        return await analysis_service.get_job_stats(
-            keyword=job_params.common.search.q,
-            location=job_params.location,
-            experience=job_params.experience,
-            education=job_params.education,
-            industry=job_params.industry,
-            industry_2=job_params.industry_2,
-            industry_name=industry_name,
-            industry_2_name=industry_2_name,
-            salary_min=job_params.salary_min,
-            salary_max=job_params.salary_max,
-        )
-    except Exception as e:
-        logger.error(f"ES stats failed, falling back to DB: {e}")
-        # 降级：从数据库获取统计 (支持筛选)
-        return await crud_job.get_statistics_from_db(
-            db, 
-            keyword=job_params.common.search.q,
-            location=job_params.location,
-            experience=job_params.experience,
-            education=job_params.education,
-            industry=job_params.industry,
-            industry_2=job_params.industry_2,
-            salary_min=job_params.salary_min,
-            salary_max=job_params.salary_max
-        )
+# @router.get("/stats")
+# async def get_job_statistics(
+#     industry_name: str = None,
+#     industry_2_name: str = None,
+#     job_params: JobQueryParams = Depends(),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """获取职位统计数据 (集成 ES 聚合与 Redis 缓存)"""
+#     try:
+#         return await analysis_service.get_job_stats(
+#             keyword=job_params.common.search.q,
+#             location=job_params.location,
+#             experience=job_params.experience,
+#             education=job_params.education,
+#             industry=job_params.industry,
+#             industry_2=job_params.industry_2,
+#             industry_name=industry_name,
+#             industry_2_name=industry_2_name,
+#             salary_min=job_params.salary_min,
+#             salary_max=job_params.salary_max,
+#             major_name=job_params.major_name,
+#         )
+#     except Exception as e:
+#         logger.error(f"ES stats failed, falling back to DB: {e}")
+#         # 降级：从数据库获取统计 (支持筛选)
+#         return await crud_job.get_statistics_from_db(
+#             db, 
+#             keyword=job_params.common.search.q,
+#             location=job_params.location,
+#             experience=job_params.experience,
+#             education=job_params.education,
+#             industry=job_params.industry,
+#             industry_2=job_params.industry_2,
+#             salary_min=job_params.salary_min,
+#             salary_max=job_params.salary_max
+#         )
 
 @router.get("/skill-cloud")
 async def get_skill_cloud(
@@ -344,6 +345,8 @@ async def get_ai_advice(
         feature_key="career_advice",
     )
     from tasks.ai_tasks import career_advice_task
+    from core.metrics import celery_tasks_submitted
+    celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_advice_task", queue="realtime").inc()
     task = career_advice_task.delay(
         user_id=current_user.id,
         major=req.major_name,
@@ -367,23 +370,22 @@ async def get_career_compass(
     if not settings.AI_ENABLED or not settings.AI_CAREER_COMPASS_ENABLED:
         raise HTTPException(status_code=503, detail="Career compass is disabled")
 
-    cache_payload = {
-        "major_name": req.major_name,
-        "target_industry": req.target_industry,
-        "target_industry_2": req.target_industry_2,
-    }
-    cache_key = f"analysis:career_compass:v2:{_stable_digest(cache_payload)}"
-    cached_report = await redis_manager.get_cache(cache_key)
-    if cached_report is not None:
-        await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
-        return {"report": cached_report}
-    await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
+    # cache_payload = {
+    #     "major_name": req.major_name,
+    #     "target_industry": req.target_industry,
+    #     "target_industry_name": req.target_industry_name,
+    # }
+    # cache_key = f"analysis:career_compass:v2:{_stable_digest(cache_payload)}"
+    # cached_report = await redis_manager.get_cache(cache_key)
+    # if cached_report is not None:
+    #     await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
+    #     return {"report": cached_report}
+    # await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
     charge_amount = await ai_access_service.ensure_access(
         db=db,
         user_id=current_user.id,
         feature_key="career_compass",
-    )
-        
+    ) 
     try:
         # 1. 确定搜索关键词与行业 (fast, stays in controller)
         keywords = []
@@ -402,18 +404,38 @@ async def get_career_compass(
         if not keywords and not job_type_keywords:
             keywords = [req.major_name]
             
-        combined_keywords = keywords + job_type_keywords
-                
-        main_keyword = combined_keywords[0] if combined_keywords else req.major_name
-        es_stats = await analysis_service.get_job_stats(
-            keyword=main_keyword, 
+        combined_keywords = keywords + job_type_keywords + [req.major_name]
+        logger.info(f"combined_keywords: {combined_keywords}")        
+
+        # Calculate stats first
+        es_stats = await analysis_service.career_analysis(
+            keywords=combined_keywords, 
             industry=req.target_industry,
             industry_name=req.target_industry_name,
-            industry_2_name=req.target_industry_2_name,
+            major_name=req.major_name,
         )
+
+        # 2. Check unified cache key (consistent with ai_service)
+        stats_hash = hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest()
+        cache_key = ai_service.get_ai_cache_key("career_compass", {
+            "major": req.major_name,
+            "stats_hash": stats_hash,
+        })
         
-        # 2. 提交 AI 报告生成为 Celery 任务
+        cached_report = await redis_manager.get_cache(cache_key)
+        if cached_report is not None:
+            logger.info(f"Career Compass report CACHE HIT: {cache_key}")
+            await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
+            from core.metrics import ai_cache_hits
+            ai_cache_hits.labels(feature="career_compass").inc()
+            return {"report": cached_report, "es_stats": es_stats, "cached": True}
+
+        await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
+
+        # 3. 提交 AI 报告生成为 Celery 任务
         from tasks.ai_tasks import career_compass_task
+        from core.metrics import celery_tasks_submitted
+        celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_compass_task", queue="realtime").inc()
         task = career_compass_task.delay(
             user_id=current_user.id,
             major_name=req.major_name,

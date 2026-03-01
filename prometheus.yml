@@ -10,6 +10,7 @@ scrape_configs:
   - job_name: "fastapi"
     metrics_path: "/metrics"
     static_configs:
+      # If running Prometheus in Docker and the API is on host, use "host.docker.internal:8000"
       - targets: ["api:8000"]
         labels:
           service: "job-api"

@@ -1,11 +1,12 @@
 import hashlib
-
+from typing import TypedDict, List, Dict, Any
 from config import settings
 from core.logger import sys_logger as logger
 from core.circuit_breaker import ai_circuit_breaker, CircuitBreakerOpen
 from common.databases.RedisManager import redis_manager
+from core.metrics import ai_calls_total, ai_call_duration, ai_cache_hits
 import json
-from typing import Any, Dict, List, TypedDict
+import time
 
 
 class CareerAdviceGraphState(TypedDict, total=False):
@@ -22,7 +23,7 @@ class AIService:
     _career_advice_graph = None
 
     @staticmethod
-    def _ai_cache_key(prefix: str, payload: dict) -> str:
+    def get_ai_cache_key(prefix: str, payload: dict) -> str:
         """Generate a stable cache key for AI results."""
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
         return f"ai:{prefix}:{hashlib.md5(serialized.encode()).hexdigest()}"
@@ -36,12 +37,13 @@ class AIService:
     ) -> str:
         """Generate career advice with engine routing + result cache."""
         # ── Result-level cache ──
-        cache_key = self._ai_cache_key("career_advice", {
+        cache_key = self.get_ai_cache_key("career_advice", {
             "major": major, "skills": sorted(skills or []), "engine": engine,
         })
         cached = await redis_manager.get_cache(cache_key)
         if cached is not None:
             logger.debug(f"AI career_advice cache HIT: {cache_key}")
+            ai_cache_hits.labels(feature="career_advice").inc()
             return cached
 
         selected_engine = (engine or "auto").lower()
@@ -365,11 +367,21 @@ class AIService:
             return str(content)
 
         # Wrap with circuit breaker
+        start_time = time.time()
         try:
-            return await ai_circuit_breaker.call(_inner)
+            result = await ai_circuit_breaker.call(_inner)
+            duration = time.time() - start_time
+            ai_call_duration.labels(method="langchain").observe(duration)
+            ai_calls_total.labels(method="langchain", status="success").inc()
+            return result
         except CircuitBreakerOpen as e:
+            ai_calls_total.labels(method="langchain", status="circuit_open").inc()
             logger.warning(f"Circuit breaker open for LangChain call: {e}")
             return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
+        except Exception as e:
+            ai_calls_total.labels(method="langchain", status="failure").inc()
+            logger.error(f"LangChain call failed: {e}")
+            return "❌ AI 服务请求失败，请稍后再试。"
         
     def _mock_advice(self, major, skills):
         skills_str = ", ".join(skills[:5]) if skills else "相关专业技能"
@@ -397,13 +409,15 @@ class AIService:
     async def get_career_navigation_report(self, major_name: str, es_stats: dict) -> str:
         """根据 ES 的真实岗位数据和特定专业生成职业病理诊断与规划报告 (with cache)"""
         # ── Result-level cache (12h) ──
-        cache_key = self._ai_cache_key("career_compass", {
+        stats_hash = hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest()
+        cache_key = self.get_ai_cache_key("career_compass", {
             "major": major_name,
-            "stats_hash": hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest(),
+            "stats_hash": stats_hash,
         })
         cached = await redis_manager.get_cache(cache_key)
         if cached is not None:
-            logger.debug(f"AI career_compass cache HIT: {cache_key}")
+            logger.info(f"AI career_compass cache HIT: {cache_key}")
+            ai_cache_hits.labels(feature="career_compass").inc()
             return cached
 
         system_prompt = """
@@ -459,12 +473,19 @@ class AIService:
                     data = await resp.json()
                     return data['choices'][0]['message']['content']
 
+        start_time = time.time()
         try:
-            return await ai_circuit_breaker.call(_inner)
+            result = await ai_circuit_breaker.call(_inner)
+            duration = time.time() - start_time
+            ai_call_duration.labels(method="http_generic").observe(duration)
+            ai_calls_total.labels(method="http_generic", status="success").inc()
+            return result
         except CircuitBreakerOpen as e:
+            ai_calls_total.labels(method="http_generic", status="circuit_open").inc()
             logger.warning(f"Circuit breaker open for generic_text: {e}")
             return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
         except Exception as e:
+            ai_calls_total.labels(method="http_generic", status="failure").inc()
             logger.error(f"Generate report error: {e}")
             return "❌ AI 职业分析暂时不可用，请稍后再试。"
 
@@ -511,12 +532,19 @@ class AIService:
                          
                     return data['choices'][0]['message']['content']
 
+        start_time = time.time()
         try:
-            return await ai_circuit_breaker.call(_inner)
+            result = await ai_circuit_breaker.call(_inner)
+            duration = time.time() - start_time
+            ai_call_duration.labels(method="http_llm").observe(duration)
+            ai_calls_total.labels(method="http_llm", status="success").inc()
+            return result
         except CircuitBreakerOpen as e:
+            ai_calls_total.labels(method="http_llm", status="circuit_open").inc()
             logger.warning(f"Circuit breaker open for _call_llm: {e}")
             return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
         except Exception as e:
+            ai_calls_total.labels(method="http_llm", status="failure").inc()
             logger.error(f"AI Call Failed: {str(e)}")
             return f"❌ 调用 AI 发生异常: {str(e)}"
 

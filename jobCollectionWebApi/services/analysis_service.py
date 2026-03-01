@@ -188,37 +188,35 @@ class AnalysisService:
 
         return False
 
-    async def _get_es_stats(self, **filters) -> Dict[str, Any]:
+    async def _get_es_career_analysis(self, keywords: List[str],industry: int, industry_name: str, major_name: str) -> Dict[str, Any]:
         """优先使用 ES 聚合获取岗位统计。"""
         es = await get_es()
         bool_query = {}
         should_clauses = []
-
         # 1. 关键词相关的文本匹配（命中任一条件即可）
-        if filters.get("keyword"):
-            should_clauses.append({"multi_match": {"query": filters.get("keyword"), "fields": ["title^2", "description"]}})
-        if filters.get("industry_name"):
-            should_clauses.append({"multi_match": {"query": filters.get("industry_name"), "fields": ["title^2", "description"]}})
-        if filters.get("industry_2_name"):
-            should_clauses.append({"multi_match": {"query": filters.get("industry_2_name"), "fields": ["title^2", "description"]}})
+        if keywords:
+            for kw in keywords:
+                should_clauses.append({
+                    "multi_match": {
+                        "query": kw,
+                        "fields": ["title^2", "description",'major_name^2'] 
+                    }
+                })
+        if industry_name:
+            should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^2", "description",'major_name^2']}})
 
         if should_clauses:
             bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
 
         # 2. 结构化过滤条件（必须满足）
         filter_clauses = []
-        location = filters.get("location")
-        if location:
-            #filter_clauses.append({"prefix": {"location": location}})
-            filter_clauses.append({"term": {"city_code": location}})
-        if filters.get("experience"):
-            filter_clauses.append({"prefix": {"experience": filters["experience"]}})
-        if filters.get("education"):
-            filter_clauses.append({"prefix": {"education": filters["education"]}})
+        # if location:
+        #     #filter_clauses.append({"prefix": {"location": location}})
+        #     filter_clauses.append({"term": {"city_code": location}})
 
         # 行业过滤：优先按二级行业过滤；未提供二级行业时，使用一级行业。
         #target_industry_code = filters.get("industry_2") or filters.get("industry")
-        target_industry_code = filters.get("industry")
+        target_industry_code = industry
         if target_industry_code:
             industry_codes = await self._fetch_industry_codes_with_cache(target_industry_code)
             if industry_codes:
@@ -298,17 +296,17 @@ class AnalysisService:
             "total_jobs": resp["hits"]["total"]["value"],
         }
 
-    async def get_job_stats(self, **filters) -> Dict[str, Any]:
+    async def career_analysis(self, keywords: list[str], industry: int = None, industry_name: str = None, major_name: str = None) -> Dict[str, Any]:
         """获取职位统数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
-        cache_payload = {"filters": filters}
+        cache_payload = {"keywords": keywords, "industry": industry, "industry_name": industry_name, "major_name": major_name}
         cache_key = f"analysis:stats:v3:{self._stable_digest(cache_payload)}"
         
         # 1. 直接查缓存
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None: 
-            logger.debug(f"Analysis stats cache hit: {cache_key}")
+            logger.info(f"Analysis stats cache hit: {cache_key}")
             return cached_result
-        logger.debug(f"Analysis stats cache miss: {cache_key}")
+        logger.info(f"Analysis stats cache miss: {cache_key}")
             
         # 2. 缓存击穿防护：尝试获取分布式?(多等?5 秒，锁存?15 ?
         lock_key = f"lock:{cache_key}"
@@ -319,33 +317,31 @@ class AnalysisService:
             
             cached_result = await redis_manager.get_cache(cache_key)
             if cached_result is not None:
-                logger.debug(f"Analysis stats cache hit after lock: {cache_key}")
+                logger.info(f"Analysis stats cache hit after lock: {cache_key}")
                 return cached_result
 
             # 4. 执高时统查表
             try:
-                 result = await self._get_es_stats(**filters)
+                 result = await self._get_es_career_analysis(keywords, industry, industry_name, major_name)
                  logger.info("Generated job stats using Elasticsearch Aggregations.")
             except Exception as e:
-                 logger.warning(f"ES Stats Aggregation failed: {e}. Falling back to PostgreSQL.")
-                 async with db_manager.async_session() as session:
-                     result = await crud_job.get_statistics_from_db(
-                         session,
-                         keyword=filters.get("keyword"),
-                         location=filters.get("location"),
-                         experience=filters.get("experience"),
-                         education=filters.get("education"),
-                         industry=filters.get("industry"),
-                         industry_2=filters.get("industry_2"),
-                         salary_min=filters.get("salary_min"),
-                         salary_max=filters.get("salary_max")
-                     )
+                logger.warning(f"ES Stats Aggregation failed: {e}. Falling back to PostgreSQL.")
+                async with db_manager.async_session() as session:
+                    # Fallback logic: Use the first keyword for database search
+                    primary_keyword = keywords[0] if keywords else None
+                    result = await crud_job.get_statistics_from_db(
+                        session,
+                        keyword=primary_keyword,
+                        industry=industry,
+                        industry_name=industry_name,
+                        major_name=major_name,
+                    )
                      
             await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
             logger.debug(f"Analysis stats cache set: {cache_key}")
             return result
 
-    async def _get_es_analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None, **filters) -> Dict[str, Any]:
+    async def _get_es_analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None,location:str=None) -> Dict[str, Any]:
         """尝试?ES 聚合统多关锯（专业分析核心）"""
         es = await get_es()
         
@@ -361,7 +357,7 @@ class AnalysisService:
                 should_clauses.append({
                     "multi_match": {
                         "query": kw,
-                        "fields": ["title^2", "description"] 
+                        "fields": ["title^2", "description",'major_name^2'] 
                     }
                 })
                 
@@ -374,11 +370,9 @@ class AnalysisService:
             }
             bool_query["must"] = [major_bool]
             
-        location = filters.get("location")
         if location:
             if "filter" not in bool_query:
                 bool_query["filter"] = []
-            
             bool_query["filter"].append({
                 "prefix": {"location": location}
             })
@@ -473,16 +467,15 @@ class AnalysisService:
             "total_jobs": resp["hits"]["total"]["value"]
         }
 
-    async def analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None, **filters) -> Dict[str, Any]:
+    async def analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None,location:str=None) -> Dict[str, Any]:
         """多关锯对比分析"""
         if not keywords and not industry_codes: return {}
-        
         cache_payload = {
             "keywords": sorted(keywords) if keywords else [],
             "industry_codes": sorted(industry_codes) if industry_codes else [],
-            "filters": filters,
+            "location": location,
         }
-        cache_key = f"analysis:keywords:v6:{self._stable_digest(cache_payload)}"
+        cache_key = f"analysis:major_skills:v1:{self._stable_digest(cache_payload)}"
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None: 
             logger.debug(f"Analysis keywords cache hit: {cache_key}")
@@ -493,14 +486,12 @@ class AnalysisService:
         async with redis_manager.cache_lock(lock_key, expire=15, timeout=5.0) as locked:
             if not locked:
                 return {}
-                
             cached_result = await redis_manager.get_cache(cache_key)
             if cached_result is not None:
                 logger.debug(f"Analysis keywords cache hit after lock: {cache_key}")
                 return cached_result
-                
             try:
-                result = await self._get_es_analyze_by_keywords(keywords, industry_codes, **filters)
+                result = await self._get_es_analyze_by_keywords(keywords, industry_codes,location)
                 logger.info("Generated keyword analysis via ES.")
             except Exception as e:
                 logger.warning(f"ES Keyword Analysis failed: {e}. Falling back to PostgreSQL DB.")
@@ -508,7 +499,7 @@ class AnalysisService:
                     result = await crud_job.analyze_by_keywords(
                         session,
                         keywords=keywords,
-                        location=filters.get("location"),
+                        location=location,
                         industry_codes=industry_codes
                     )
                 
@@ -544,10 +535,10 @@ class AnalysisService:
             
         return codes
 
-    async def get_skill_cloud_stats(self, keyword: str, industry: int = None, industry_2: int = None, industry_name: str = None, industry_2_name: str = None, limit: int = 20) -> List[Dict[str, Any]]:
+    async def get_skill_cloud_stats(self, keyword: str, industry: int = None, industry_name: str = None, limit: int = 20) -> List[Dict[str, Any]]:
 
         
-        cache_key = f"analysis:skill_cloud:v3:{keyword}:{industry}:{industry_2}:{limit}"
+        cache_key = f"analysis:skill_cloud:v3:{keyword}:{industry}:{limit}"
         cached_result = await redis_manager.get_cache(cache_key)
         if cached_result is not None:
             logger.debug(f"Skill cloud cache hit: {cache_key}")
@@ -562,12 +553,10 @@ class AnalysisService:
             should_clauses = []
             
             if keyword:
-                should_clauses.append({"multi_match": {"query": keyword, "fields": ["title^3", "description"]}})
+                should_clauses.append({"multi_match": {"query": keyword, "fields": ["title^3", "description","major_name^4"]}})
+                #should_clauses.append({"multi_match": {"query": keyword}})
             if industry_name:
                 should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^3", "description"]}})
-            if industry_2_name:
-                should_clauses.append({"multi_match": {"query": industry_2_name, "fields": ["title^3", "description"]}})
-                
             if should_clauses:
                 bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
                 
