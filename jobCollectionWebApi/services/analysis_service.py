@@ -8,6 +8,7 @@ from common.databases.PostgresManager import db_manager
 from crud.job import job as crud_job
 from crud.industry import industry as crud_industry
 from common.search.conn import get_es
+from core.cache import cache
 from core.logger import sys_logger as logger
 from collections import Counter
 from sqlalchemy import select
@@ -193,36 +194,26 @@ class AnalysisService:
         es = await get_es()
         bool_query = {}
         should_clauses = []
-        # 1. 关键词相关的文本匹配（命中任一条件即可）
-        if keywords:
-            for kw in keywords:
-                should_clauses.append({
-                    "multi_match": {
-                        "query": kw,
-                        "fields": ["title^2", "description",'major_name^2'] 
-                    }
-                })
-        if industry_name:
-            should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^2", "description",'major_name^2']}})
+        filter_clauses = []
+        # if industry_name:
+        #     should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^2", "description",'major_name^2']}})
 
-        if should_clauses:
-            bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
+        # if should_clauses:
+        #     bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
 
         # 2. 结构化过滤条件（必须满足）
-        filter_clauses = []
-        # if location:
-        #     #filter_clauses.append({"prefix": {"location": location}})
-        #     filter_clauses.append({"term": {"city_code": location}})
-
+        
+        if major_name:
+            filter_clauses.append({"term": {"major_name": major_name}})
+       
         # 行业过滤：优先按二级行业过滤；未提供二级行业时，使用一级行业。
-        #target_industry_code = filters.get("industry_2") or filters.get("industry")
-        target_industry_code = industry
-        if target_industry_code:
-            industry_codes = await self._fetch_industry_codes_with_cache(target_industry_code)
-            if industry_codes:
-                filter_clauses.append({"terms": {"industry_code": industry_codes}})
-            else:
-                filter_clauses.append({"term": {"industry_code": -1}})
+        # target_industry_code = industry
+        # if target_industry_code:
+        #     industry_codes = await self._fetch_industry_codes_with_cache(target_industry_code)
+        #     if industry_codes:
+        #         filter_clauses.append({"terms": {"industry_code": industry_codes}})
+        #     else:
+        #         filter_clauses.append({"term": {"industry_code": -1}})
 
         if filter_clauses:
             bool_query["filter"] = filter_clauses
@@ -258,125 +249,81 @@ class AnalysisService:
 
         # 5. 解析聚合结果
         aggs = resp.get("aggregations", {})
-        salary_dist = [{"name": b["key"], "value": b["doc_count"]} for b in aggs.get("salary_ranges", {}).get("buckets", [])]
-
-        # 行业编码映射为行业名称
-        industry_buckets = aggs.get("top_industries", {}).get("buckets", [])
-        industry_dist = []
-        if industry_buckets:
-            industry_codes_to_fetch = [int(b["key"]) for b in industry_buckets if str(b["key"]).isdigit()]
-            if industry_codes_to_fetch:
-                async with db_manager.async_session() as session:
-                    stmt = select(Industry.code, Industry.name).where(Industry.code.in_(industry_codes_to_fetch))
-                    code_to_name = {row.code: row.name for row in await session.execute(stmt)}
-
-                for b in industry_buckets:
-                    code = int(b["key"]) if str(b["key"]).isdigit() else -1
-                    if code in code_to_name:
-                        industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
-
-        exact_rules, contains_rules = await self._get_skill_noise_rules()
-        skill_counter = Counter()
-        for b in aggs.get("top_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-        for b in aggs.get("top_ai_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-
-        skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(10)]
+        salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
         return {
             "salary": salary_dist,
             "skills": skill_dist,
-            "industries": industry_dist,
+            "industries": industry_dist[:5],
             "total_jobs": resp["hits"]["total"]["value"],
         }
 
+    @cache(expire=600, key_prefix="analysis:career_analysis:v4")
     async def career_analysis(self, keywords: list[str], industry: int = None, industry_name: str = None, major_name: str = None) -> Dict[str, Any]:
         """获取职位统数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
-        cache_payload = {"keywords": keywords, "industry": industry, "industry_name": industry_name, "major_name": major_name}
-        cache_key = f"analysis:stats:v3:{self._stable_digest(cache_payload)}"
-        
-        # 1. 直接查缓存
-        cached_result = await redis_manager.get_cache(cache_key)
-        if cached_result is not None: 
-            logger.info(f"Analysis stats cache hit: {cache_key}")
-            return cached_result
-        logger.info(f"Analysis stats cache miss: {cache_key}")
-            
-        # 2. 缓存击穿防护：尝试获取分布式?(多等?5 秒，锁存?15 ?
-        lock_key = f"lock:{cache_key}"
-        async with redis_manager.cache_lock(lock_key, expire=15, timeout=5.0) as locked:
-            if not locked:
-                logger.warning(f"Failed to acquire cache lock for {cache_key}, returning empty set.")
-                return {"salary": [], "skills": [], "industries": [], "total_jobs": 0}
-            
-            cached_result = await redis_manager.get_cache(cache_key)
-            if cached_result is not None:
-                logger.info(f"Analysis stats cache hit after lock: {cache_key}")
-                return cached_result
+        try:
+            result = await self._get_es_career_analysis(keywords, industry, industry_name, major_name)
+            logger.info("Generated job stats using Elasticsearch Aggregations.")
+        except Exception as e:
+            logger.warning(f"ES Stats Aggregation failed: {e}. Falling back to PostgreSQL.")
+            async with db_manager.async_session() as session:
+                # Fallback logic: Use the first keyword for database search
+                primary_keyword = keywords[0] if keywords else None
+                result = await crud_job.get_statistics_from_db(
+                    session,
+                    keyword=primary_keyword,
+                    industry=industry,
+                    industry_name=industry_name,
+                    major_name=major_name,
+                )
+        return result
 
-            # 4. 执高时统查表
-            try:
-                 result = await self._get_es_career_analysis(keywords, industry, industry_name, major_name)
-                 logger.info("Generated job stats using Elasticsearch Aggregations.")
-            except Exception as e:
-                logger.warning(f"ES Stats Aggregation failed: {e}. Falling back to PostgreSQL.")
-                async with db_manager.async_session() as session:
-                    # Fallback logic: Use the first keyword for database search
-                    primary_keyword = keywords[0] if keywords else None
-                    result = await crud_job.get_statistics_from_db(
-                        session,
-                        keyword=primary_keyword,
-                        industry=industry,
-                        industry_name=industry_name,
-                        major_name=major_name,
-                    )
-                     
-            await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
-            logger.debug(f"Analysis stats cache set: {cache_key}")
-            return result
-
-    async def _get_es_analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None,location:str=None) -> Dict[str, Any]:
+    async def _get_es_analyze_by_keywords(
+        self, 
+        keywords: List[str], 
+        industry_codes: List[int] = None,
+        location:str=None,
+        major_name:str=None
+        ) -> Dict[str, Any]:
         """尝试?ES 聚合统多关锯（专业分析核心）"""
         es = await get_es()
         
+        # 核心逻辑：
+        # 共同条件： industry_code, major_name, location 作为全局精准过滤 (filter)
+        # 关键字： keywords 作为泛查打分条件 (must -> should)
         bool_query = {}
-            
-        should_clauses = []
-        
-        if industry_codes:
-            should_clauses.append({"terms": {"industry_code": industry_codes}})
-            
-        if keywords:
-            for kw in keywords:
-                should_clauses.append({
-                    "multi_match": {
-                        "query": kw,
-                        "fields": ["title^2", "description",'major_name^2'] 
-                    }
-                })
-                
-        if should_clauses:
-            major_bool = {
-                "bool": {
-                    "should": should_clauses,
-                    "minimum_should_match": 1
-                }
-            }
-            bool_query["must"] = [major_bool]
-            
+        shoule_clauses = []
+        must_clauses = []
+        # 1. 精准过滤 (filter) 分支 - 这些条件必须同时满足，且不参与打分
+        filter_clauses = []
+        # if industry_codes:
+        #     exact_filter_clauses.append({"terms": {"industry_code": industry_codes}})
+        if major_name:
+            filter_clauses.append({"term": {"major_name": major_name}})
         if location:
-            if "filter" not in bool_query:
-                bool_query["filter"] = []
-            bool_query["filter"].append({
-                "prefix": {"location": location}
-            })
+            filter_clauses.append({"prefix": {"location": location}})
             
+        
+        # 2. 关键字泛查 (must) 分支 - 必须包含关键字之一
+        # if keywords:
+        #     for kw in keywords:
+        #         shoule_clauses.append({
+        #             "multi_match": {
+        #                 "query": kw,
+        #                 "fields": ["title^2", "description", "major_name^5"] 
+        #             }
+        #         })
+        #     if shoule_clauses:
+        #         must_clauses.append({
+        #             "bool": {
+        #                 "should": shoule_clauses,
+        #                 "minimum_should_match": 1
+        #             }
+        #         })
+        if filter_clauses:
+            bool_query['filter'] = filter_clauses
+        # if must_clauses:
+        #     bool_query['must'] = must_clauses
+
         # ==========================
         # ==========================
         aggs = {
@@ -422,44 +369,12 @@ class AnalysisService:
             "size": 0, 
             "aggs": aggs
         }
-        # ??????
+        print(dsl) 
         resp = await es.search(index=settings.ES_INDEX_JOB, body=dsl)
         # ??????
         aggs_result = resp.get("aggregations", {})
         
-        salary_dist = [{"name": b["key"], "value": b["doc_count"]} for b in aggs_result.get("salary_ranges", {}).get("buckets", [])]
-        
-        industry_buckets = aggs_result.get("top_industries", {}).get("buckets", [])
-        industry_dist = []
-        if industry_buckets:
-            industry_codes_to_fetch = [int(b["key"]) for b in industry_buckets if str(b["key"]).isdigit()]
-            if industry_codes_to_fetch:
-                from sqlalchemy import select
-                from common.databases.models.industry import Industry
-                async with db_manager.async_session() as session:
-                    stmt = select(Industry.code, Industry.name).where(Industry.code.in_(industry_codes_to_fetch))
-                    code_to_name = {row.code: row.name for row in await session.execute(stmt)}
-                    
-                for b in industry_buckets:
-                    code = int(b["key"]) if str(b["key"]).isdigit() else -1
-                    if code in code_to_name:
-                        industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
-        
-        exact_rules, contains_rules = await self._get_skill_noise_rules()
-        skill_counter = Counter()
-        for b in aggs_result.get("top_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-        for b in aggs_result.get("top_ai_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-            
-        skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(15)]
-        
+        salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs_result)
         return {
             "salary": salary_dist,
             "skills": skill_dist,
@@ -467,55 +382,30 @@ class AnalysisService:
             "total_jobs": resp["hits"]["total"]["value"]
         }
 
-    async def analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None,location:str=None) -> Dict[str, Any]:
+    @cache(expire=600, key_prefix="analysis:major_skills:v2")
+    async def analyze_by_keywords(self, keywords: List[str], industry_codes: List[int] = None,location:str=None,major_name:str=None) -> Dict[str, Any]:
         """多关锯对比分析"""
         if not keywords and not industry_codes: return {}
-        cache_payload = {
-            "keywords": sorted(keywords) if keywords else [],
-            "industry_codes": sorted(industry_codes) if industry_codes else [],
-            "location": location,
-        }
-        cache_key = f"analysis:major_skills:v1:{self._stable_digest(cache_payload)}"
-        cached_result = await redis_manager.get_cache(cache_key)
-        if cached_result is not None: 
-            logger.debug(f"Analysis keywords cache hit: {cache_key}")
-            return cached_result
-        logger.debug(f"Analysis keywords cache miss: {cache_key}")
+        try:
+            result = await self._get_es_analyze_by_keywords(keywords, industry_codes,location,major_name)
+            logger.info("Generated keyword analysis via ES.")
+        except Exception as e:
+            logger.warning(f"ES Keyword Analysis failed: {e}. Falling back to PostgreSQL DB.")
+            async with db_manager.async_session() as session:
+                result = await crud_job.analyze_by_keywords(
+                    session,
+                    keywords=keywords,
+                    location=location,
+                    industry_codes=industry_codes,
+                    major_name=major_name
+                )
+        return result
 
-        lock_key = f"lock:{cache_key}"
-        async with redis_manager.cache_lock(lock_key, expire=15, timeout=5.0) as locked:
-            if not locked:
-                return {}
-            cached_result = await redis_manager.get_cache(cache_key)
-            if cached_result is not None:
-                logger.debug(f"Analysis keywords cache hit after lock: {cache_key}")
-                return cached_result
-            try:
-                result = await self._get_es_analyze_by_keywords(keywords, industry_codes,location)
-                logger.info("Generated keyword analysis via ES.")
-            except Exception as e:
-                logger.warning(f"ES Keyword Analysis failed: {e}. Falling back to PostgreSQL DB.")
-                async with db_manager.async_session() as session:
-                    result = await crud_job.analyze_by_keywords(
-                        session,
-                        keywords=keywords,
-                        location=location,
-                        industry_codes=industry_codes
-                    )
-                
-            await redis_manager.set_cache(cache_key, result, expire=600, jitter=True)
-            logger.debug(f"Analysis keywords cache set: {cache_key}")
-            return result
-
+    @cache(expire=86400, key_prefix="analysis:industry_codes_v6")
     async def _fetch_industry_codes_with_cache(self, industry_code: int) -> List[int]:
         """根据行业 code 获取有相关的子业code列表 (利用 path 字极级?"""
         if not industry_code:
             return []
-            
-        cache_key = f"analysis:industry_codes_v5:code:{industry_code}"
-        cached = await redis_manager.get_cache(cache_key)
-        if cached is not None:
-            return cached
             
         from sqlalchemy import text
         
@@ -530,53 +420,44 @@ class AnalysisService:
                 result = await session.execute(stmt, {"path_prefix": f"{target_path}%"})
                 codes = [row[0] for row in result.all()]
             
-        if codes:
-            await redis_manager.set_cache(cache_key, codes, expire=86400)
-            
         return codes
 
+    @cache(expire=3600, key_prefix="analysis:skill_cloud:v4")
     async def get_skill_cloud_stats(self, keyword: str, industry: int = None, industry_name: str = None, limit: int = 20) -> List[Dict[str, Any]]:
-
-        
-        cache_key = f"analysis:skill_cloud:v3:{keyword}:{industry}:{limit}"
-        cached_result = await redis_manager.get_cache(cache_key)
-        if cached_result is not None:
-            logger.debug(f"Skill cloud cache hit: {cache_key}")
-            return cached_result
-        logger.debug(f"Skill cloud cache miss: {cache_key}")
-            
         try:
             es = await get_es()
             
             # 组过滤条件
             bool_query = {}
             should_clauses = []
-            
-            if keyword:
-                should_clauses.append({"multi_match": {"query": keyword, "fields": ["title^3", "description","major_name^4"]}})
-                #should_clauses.append({"multi_match": {"query": keyword}})
-            if industry_name:
-                should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^3", "description"]}})
-            if should_clauses:
-                bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
-                
             filter_clauses = []
-            
-            if industry:
-                industry_codes = await self._fetch_industry_codes_with_cache(industry)
-                if industry_codes:
-                    filter_clauses.append({"terms": {"industry_code": industry_codes}})
-                else:
-                    filter_clauses.append({"term": {"industry_code": -1}}) # 无效行业阻断
-            else:
-                stmt = select(MajorIndustryRelation).where(MajorIndustryRelation.major_name == keyword)
-                industry_data = None
-                async with db_manager.async_session() as session:
-                    ret = await session.execute(stmt)
-                    industry_data = ret.scalar_one_or_none()
+            if keyword:
+                filter_clauses.append({"term": {"major_name": keyword}})
+            # if keyword:
+            #     should_clauses.append({"multi_match": {"query": keyword, "fields": ["title^3", "description","major_name^4"]}})
+            #     #should_clauses.append({"multi_match": {"query": keyword}})
+            # if industry_name:
+            #     should_clauses.append({"multi_match": {"query": industry_name, "fields": ["title^3", "description"]}})
+            # if should_clauses:
+            #     bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
                 
-                if industry_data and industry_data.industry_codes:
-                    filter_clauses.append({"terms": {"industry_code": industry_data.industry_codes}})
+            
+            
+            # if industry:
+            #     industry_codes = await self._fetch_industry_codes_with_cache(industry)
+            #     if industry_codes:
+            #         filter_clauses.append({"terms": {"industry_code": industry_codes}})
+            #     else:
+            #         filter_clauses.append({"term": {"industry_code": -1}}) # 无效行业阻断
+            # else:
+            #     stmt = select(MajorIndustryRelation).where(MajorIndustryRelation.major_name == keyword)
+            #     industry_data = None
+            #     async with db_manager.async_session() as session:
+            #         ret = await session.execute(stmt)
+            #         industry_data = ret.scalar_one_or_none()
+                
+            #     if industry_data and industry_data.industry_codes:
+            #         filter_clauses.append({"terms": {"industry_code": industry_data.industry_codes}})
 
             if filter_clauses:
                 bool_query["filter"] = filter_clauses
@@ -629,15 +510,47 @@ class AnalysisService:
                 skill_counter[label] += b["doc_count"]
                     
             result = [{"name": k, "value": v} for k, v in skill_counter.most_common(limit)]
-            
-            await redis_manager.set_cache(cache_key, result, expire=3600, jitter=True) 
-            logger.debug(f"Skill cloud cache set: {cache_key}")
             return result
             
         except Exception as e:
             logger.error(f"Failed to fetch skill cloud stats from ES: {e}", exc_info=True)
             return []
 
+
+
+    async def resove_agg_bucket(self, aggs_result):
+        salary_dist = [{"name": b["key"], "value": b["doc_count"]} for b in aggs_result.get("salary_ranges", {}).get("buckets", [])]
+        industry_buckets = aggs_result.get("top_industries", {}).get("buckets", [])
+        industry_dist = []
+        if industry_buckets:
+            industry_codes_to_fetch = [int(b["key"]) for b in industry_buckets if str(b["key"]).isdigit()]
+            if industry_codes_to_fetch:
+                from sqlalchemy import select
+                from common.databases.models.industry import Industry
+                async with db_manager.async_session() as session:
+                    stmt = select(Industry.code, Industry.name).where(Industry.code.in_(industry_codes_to_fetch))
+                    code_to_name = {row.code: row.name for row in await session.execute(stmt)}
+                    
+                for b in industry_buckets:
+                    code = int(b["key"]) if str(b["key"]).isdigit() else -1
+                    if code in code_to_name:
+                        industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
+        
+        exact_rules, contains_rules = await self._get_skill_noise_rules()
+        skill_counter = Counter()
+        for b in aggs_result.get("top_skills", {}).get("buckets", []):
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
+        for b in aggs_result.get("top_ai_skills", {}).get("buckets", []):
+            label = self._normalize_skill_tag(b.get("key"))
+            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
+                continue
+            skill_counter[label] += b["doc_count"]
+            
+        skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(15)]
+        return salary_dist,industry_dist,skill_dist
 analysis_service = AnalysisService()
 
 

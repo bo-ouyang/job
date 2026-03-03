@@ -55,6 +55,12 @@ class CircuitBreaker:
         recovery_timeout: float = 60.0,
         success_threshold: int = 1,
     ):
+        """
+        【架构说明：熔断器状态机配置】
+        - failure_threshold: 连续失败多少次后触发熔断 (CLOSED -> OPEN)
+        - recovery_timeout: 熔断(OPEN)之后，需要冷静多久(秒)，才允许哪怕一个请求过去探活 (OPEN -> HALF_OPEN)
+        - success_threshold: 探活阶段(HALF_OPEN)连成功多少次，才算服务真恢复了 (HALF_OPEN -> CLOSED)
+        """
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -64,7 +70,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._success_count = 0
         self._last_failure_time: float = 0
-        self._lock = asyncio.Lock()
+        self._lock = asyncio.Lock()  # 保护状态变迁时的强一致性，防高并发现象
 
     # ── public ──────────────────────────────────────────────
 
@@ -73,7 +79,16 @@ class CircuitBreaker:
         return self._state
 
     async def call(self, func, *args, **kwargs):
-        """Execute *func* through the circuit breaker."""
+        """
+        通过熔断器执行目标函数 *func* (比如调用 LLM)。
+        
+        【架构说明：并发与锁的权衡】
+        这个方法分为两个阶段：
+        1. 状态判决阶段 (持锁): 快速判断当前处于什么状态 (OPEN/CLOSED/HALF_OPEN)。
+           如果是 OPEN (熔断中)，计算冷却倒计时并**立刻抛出异常拒绝请求 (Fast-Fail)**，保护下游。
+        2. 执行阶段 (无锁): 释放状态锁，正式发起网络请求。这样可以保证
+           成百上千个合法请求 (CLOSED状态下) 不会被这把 _lock 变成串行执行，最大化并发能力。
+        """
         async with self._lock:
             self._maybe_transition_to_half_open()
 
@@ -83,7 +98,7 @@ class CircuitBreaker:
                 )
                 raise CircuitBreakerOpen(self.name, max(retry_after, 0))
 
-        # Execute outside the lock so concurrent callers aren't serialised.
+        # 释放锁，开始真实的异步调用。不阻塞其他判断状态的协程。
         try:
             result = await func(*args, **kwargs)
         except Exception as exc:

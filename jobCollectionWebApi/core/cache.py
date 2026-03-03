@@ -63,7 +63,7 @@ def cache(expire: int = None, key_prefix: str = ""):
                 cache_kwargs = {}
                 for k, v in kwargs.items():
                     # 简单过滤掉不可序列化的复杂对象 (大致判断)
-                    if k in ['db', 'current_user', 'background_tasks', 'request', 'response']:
+                    if k in ['db', 'current_user', 'background_tasks', 'request', 'response', 'redis']:
                         continue
                     # 检查是否是 SQLAlchemy Session 或其他忽略对象
                     if hasattr(v, '__dict__') and not hasattr(v, 'model_dump') and not hasattr(v, 'dict'):

@@ -397,7 +397,8 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         db: AsyncSession,
         keywords: List[str],
         location: Optional[str] = None,
-        industry_codes: Optional[List[int]] = None
+        industry_codes: Optional[List[int]] = None,
+        major_name: Optional[str] = None,
     ) -> dict:
         """多关键词聚合分析 (SQL优化版)"""
         # 1. 构建基础过滤条件 (Relaxed conditions for Major Analysis)
@@ -407,6 +408,9 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         # 我们采用 OR 逻辑联合它们，即：【行业属于这些】或者【标题/描述包含这些词】的职位，
         # 都算作这个“专业”的候选池。
         major_criteria = []
+
+        if major_name:
+            major_criteria.append(Job.major_name.ilike(f"{major_name}%"))
 
         if keywords:
             keyword_filters = []

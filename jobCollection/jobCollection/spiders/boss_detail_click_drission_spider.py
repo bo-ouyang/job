@@ -10,13 +10,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import scrapy
-from scrapy import signals
+from scrapy import Selector, signals
 from scrapy.exceptions import CloseSpider, DontCloseSpider
 from sqlalchemy import select, update
 
 from common.databases.PostgresManager import db_manager
 from common.databases.models.boss_stu_crawl_url import BossStuCrawlUrl
-from jobCollection.items.boss_job_item import BossJobItem
+from common.databases.models.job import Job
+from jobCollection.items.boss_job_item import BossJobItem, BossJobDetailItem
 
 from DrissionPage import ChromiumPage, ChromiumOptions
 
@@ -27,17 +28,16 @@ if simple_script_dir not in sys.path:
 from proxy_manager import proxy_manager
 
 
-class BossListDrissionSpider(scrapy.Spider):
+class BossDetailClickDrissionSpider(scrapy.Spider):
     """
-    使用 DrissionPage 直接监听/抓取列表数据，不再依赖 mitmproxy + Redis 桥接。
-
-    启动流程：
-      1. 打开浏览器
-      2. 尝试注入已保存的 Cookie；若未登录则导航到登录页等待手动登录
-      3. 登录成功后启用图片屏蔽，然后开始循环抓取任务
+    重写的详情页抓取爬虫（模仿列表爬虫，点击抓取）。
+    - 启动后读取 BossStuCrawlUrl 列表任务
+    - 访问列表页，通过在列表页循环点击职位卡片触发新标签页（或者详情浮层）
+    - 监听/提取新页面的详情 URL 数据及 DOM 中的职位描述
+    - 将带有职位详情的数据回写到 DB (Job 表)
     """
 
-    name = "boss_list_drission"
+    name = "boss_detail_click_drission"
     allowed_domains = ["zhipin.com"]
 
     custom_settings = {
@@ -47,8 +47,7 @@ class BossListDrissionSpider(scrapy.Spider):
             "jobCollection.pipelines.redis_dedup_pipeline.RedisDeduplicationPipeline": 200,
             "jobCollection.pipelines.boss_pipeline.BossJobPipeline": 300,
         },
-        "LOG_FILE": f"static/log/scrapy-boss_list-{datetime.now().strftime('%Y-%m-%d')}.log",
-
+        "LOG_FILE": f"static/log/scrapy-boss_detail_click-{datetime.now().strftime('%Y-%m-%d')}.log",
     }
 
     @classmethod
@@ -77,7 +76,6 @@ class BossListDrissionSpider(scrapy.Spider):
         requested_idx = int(account_index) - 1
         self.account_index = max(0, requested_idx)
         
-        # 补齐账户列表以防止越界报错
         while len(self.accounts) <= self.account_index:
             self.accounts.append({
                 "name": f"account-{len(self.accounts) + 1}", 
@@ -88,40 +86,36 @@ class BossListDrissionSpider(scrapy.Spider):
         # ── 任务状态 ────────────────────────────────────────────────
         self.current_task_id: Optional[int] = None
         self.current_task_url = ""
-        self.current_task_major_name = ""  # 来自 BossStuCrawlUrl.major_name
+        self.current_task_major_name = ""
         self.current_task_retry = 0
+        self.clicked_job_ids = set()
 
-        # ── 抓取行为参数（可通过环境变量覆盖）────────────────────────────
-        # 每页最大重试次数
+        # ── 抓取行为参数 ────────────────────────────
         self.max_retry_per_page     = int(float(os.getenv("BOSS_MAX_RETRY_PER_PAGE",    "3")))
-        # 每页抓取完成后等待时间范围（秒），模拟人工停顿，避免风控
-        self.page_delay_min         = float(os.getenv("BOSS_PAGE_DELAY_MIN",            "2.0"))
-        self.page_delay_max         = float(os.getenv("BOSS_PAGE_DELAY_MAX",            "5.0"))
-        # 滚动次数
+        self.page_delay_min         = float(os.getenv("BOSS_DETAIL_DELAY_MIN",          "2.0"))
+        self.page_delay_max         = float(os.getenv("BOSS_DETAIL_DELAY_MAX",          "5.0"))
         self.scroll_count           = int(float(os.getenv("BOSS_SCROLL_COUNT",          "4")))
-        # 每次滚动基准距离（px）
         self.scroll_px              = int(float(os.getenv("BOSS_SCROLL_PX",             "800")))
-        # 每次滚动距离随机浮动范围（±px）
         self.scroll_px_jitter       = int(float(os.getenv("BOSS_SCROLL_PX_JITTER",      "100")))
-        # 页面初始渲染等待时间范围（秒）
         self.scroll_init_wait_min   = float(os.getenv("BOSS_SCROLL_INIT_WAIT_MIN",      "1.0"))
         self.scroll_init_wait_max   = float(os.getenv("BOSS_SCROLL_INIT_WAIT_MAX",      "2.0"))
-        # 每次滚动之间等待时间范围（秒）
         self.scroll_interval_min    = float(os.getenv("BOSS_SCROLL_INTERVAL_MIN",       "0.5"))
         self.scroll_interval_max    = float(os.getenv("BOSS_SCROLL_INTERVAL_MAX",       "1.5"))
-        # 登录等待轮询间隔（秒）
         self.login_poll_interval    = float(os.getenv("BOSS_LOGIN_POLL_INTERVAL",       "5.0"))
-        # 登录等待最长时间（秒）
         self.login_timeout          = float(os.getenv("BOSS_LOGIN_TIMEOUT",             "300.0"))
-        # 网络数据包监听超时（秒）
-        self.listen_timeout         = float(os.getenv("BOSS_LISTEN_TIMEOUT",            "15.0"))
-        # 每抓取 N 页后自动保存一次 Cookie
-        self.cookie_save_every_pages = int(float(os.getenv("BOSS_COOKIE_SAVE_EVERY_PAGES", "100")))
-        self._pages_since_cookie_save = 0  # 计数器
+        self.listen_timeout         = float(os.getenv("BOSS_LISTEN_TIMEOUT",            "8.0"))
+        self.cookie_save_every_pages= int(float(os.getenv("BOSS_COOKIE_SAVE_EVERY_PAGES", "100")))
+        self.load_wait_timeout      = float(os.getenv("BOSS_DETAIL_LOAD_WAIT",          "5.0"))
+        self.card_timeout           = float(os.getenv("BOSS_CARD_TIMEOUT",               "10.0"))
+        self._pages_since_cookie_save = 0
+
+        # ── Watchdog 充底：超过 N 秒无活动则强制触发下一任务 ──────────────
+        self.watchdog_timeout       = float(os.getenv("BOSS_WATCHDOG_TIMEOUT",           "60.0"))
+        self._last_active_at        = time.time()
 
         self.logger.info(
-            f"初始化完成，账户数: {len(self.accounts)}，"
-            f"页延迟: {self.page_delay_min}-{self.page_delay_max}s，"
+            f"重写版详情爬虫初始化完成，账户数: {len(self.accounts)}，"
+            f"详情页延迟: {self.page_delay_min}-{self.page_delay_max}s，"
             f"代理轮换: {self.proxy_rotate_seconds}s"
         )
 
@@ -131,7 +125,7 @@ class BossListDrissionSpider(scrapy.Spider):
 
     async def start(self):
         await db_manager.initialize()
-        await self._rebuild_browser()   # 打开浏览器 + 登录验证
+        await self._rebuild_browser()
         yield scrapy.Request("data:,started", callback=self.parse_loop, dont_filter=True)
 
     async def parse_loop(self, response):
@@ -140,6 +134,14 @@ class BossListDrissionSpider(scrapy.Spider):
             yield item
 
         if not self.is_checking:
+            # Watchdog 充底：超过 watchdog_timeout 秒无活动，强制触发
+            idle_secs = time.time() - self._last_active_at
+            if idle_secs > self.watchdog_timeout and self.current_task_id is None:
+                self.logger.warning(
+                    f"Watchdog 触发: 已闲置 {idle_secs:.0f}s 无任务，强制重新领取"
+                )
+                self._last_active_at = time.time()
+
             self.is_checking = True
             try:
                 await self._ensure_task_and_process_one_page()
@@ -185,12 +187,13 @@ class BossListDrissionSpider(scrapy.Spider):
 
     async def _process_current_page(self):
         """
-        抓取当前任务的全部数据：导航一次，每轮监听到 job/list.json 立即入库。
+        处理当前列表任务：滚屏获取基本数据，同时点击详细卡片抓取描述
         """
+        self._last_active_at = time.time()  # Watchdog 计时重置
         self.logger.info(
             f"处理任务 {self.current_task_id} [{self.current_task_major_name}]: {self.current_task_url}"
         )
-        total_count, success = await self._fetch_all_by_scroll(self.current_task_url)
+        total_count, success = await self._fetch_all_by_scroll_and_click(self.current_task_url)
 
         if not success:
             self.current_task_retry += 1
@@ -202,6 +205,7 @@ class BossListDrissionSpider(scrapy.Spider):
             return
 
         self.current_task_retry = 0
+        self.clicked_job_ids.clear()
 
         # 定期保存 Cookie
         self._pages_since_cookie_save += 1
@@ -209,11 +213,12 @@ class BossListDrissionSpider(scrapy.Spider):
             self._pages_since_cookie_save = 0
             await self._save_cookies_to_disk()
 
-        await self._update_db_status(self.current_task_id, "done")
-        self.logger.info(f"任务 {self.current_task_id} 完成，共入库 {total_count} 条")
+        await self._update_db_task_status(self.current_task_id, "done")
+        self.logger.info(f"任务 {self.current_task_id} 完成，共完成详情访问 {total_count} 条")
         self.current_task_id = None
         self.current_task_url = ""
         self.current_task_major_name = ""
+        self._last_active_at = time.time()  # 任务完成同样重置，给下一任务领取用预留时间
 
     async def _handle_page_failure(self):
         await self._rotate_proxy_and_browser()
@@ -222,29 +227,29 @@ class BossListDrissionSpider(scrapy.Spider):
             return
 
         if self.current_task_id:
-            await self._update_db_status(self.current_task_id, "error", error_msg="列表页抓取连续失败")
+            await self._update_db_task_status(self.current_task_id, "error", error_msg="列表页抓取连续失败")
         self.current_task_id = None
         self.current_task_url = ""
         self.current_task_major_name = ""
         self.current_task_retry = 0
+        self.clicked_job_ids.clear()
 
     # ------------------------------------------------------------------ #
-    #  数据抓取
+    #  数据抓取 (融合 List与Detail 点击抽取)
     # ------------------------------------------------------------------ #
 
-    async def _fetch_all_by_scroll(
-        self, url: str
-    ) -> Tuple[int, bool]:
+    async def _fetch_all_by_scroll_and_click(self, url: str) -> Tuple[int, bool]:
         """
-        导航到 url（仅一次），循环：滚动 -> 等待 job/list.json 包 -> 立即入库
-        直到 has_more=False 或达到最大页数。返回 (total_count, success)。
+        1. 导航到 url 并监听 list.json
+        2. 滚屏触发加载，拿到批量列表包提取基础职缺
+        3. 提取页面的卡片元素，挨个点击进行详情页监听和 DOM 提取
         """
         if not self.page:
             await self._rebuild_browser()
             if not self.page:
                 return 0, False
 
-        max_pages = int(os.getenv("BOSS_MAX_PAGES_PER_TASK", "10"))
+        #max_pages = int(os.getenv("BOSS_MAX_PAGES_PER_TASK", "10"))
         total_count = 0
         has_more = True
         try:
@@ -252,7 +257,6 @@ class BossListDrissionSpider(scrapy.Spider):
             if listen_ready:
                 self.page.listen.start(["job/list.json", "joblist.json"])
 
-            # 仅导航一次
             self.page.get(url)
 
             current_url = getattr(self.page, "url", "") or ""
@@ -260,51 +264,177 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.logger.warning(f"检测到拦截页面: {current_url}，重建浏览器")
                 await self._rebuild_browser()
                 return 0, False
+                
             page_num = 0
             while has_more:
                 page_num += 1
-                # 滚动触发懒加载
                 await self._scroll_to_load()
 
-                # 等待网络包
+                # 等待并处理列表的数据网络包 (兜底保证列表数据完整性)
                 payload: Optional[Dict[str, Any]] = None
                 if listen_ready:
                     packet = self.page.listen.wait(timeout=self.listen_timeout)
                     payload = self._extract_payload_from_packet(packet)
 
-                # 兜底：JS 直接请求 API
                 if payload is None:
                     payload = self._fetch_job_list_by_js(url)
 
                 if payload is None:
-                    self.logger.warning(f"第 {page_num} 轮未获取到数据，结束循环")
-                    break
+                    self.logger.warning(f"第 {page_num} 轮未获取到List数据，直接使用DOM寻找卡片点击")
 
                 jobs, has_more = self._extract_jobs_and_has_more(payload)
-
-                # 立即入库，不等所有轮次结束
                 if jobs:
+                    # 先把基础数据抛入队列，以防下面详情抓取中断导致一条数据都没留存
                     await self._emit_job_items(url, jobs, self.current_task_major_name)
-                    total_count += len(jobs)
 
-                self.logger.info(
-                    f"第 {page_num} 轮抓取 {len(jobs)} 条入库，has_more={has_more}，累计 {total_count} 条"
-                )
+                # ================= 核心：点击左侧卡片，右侧面板刷新详情 =================
+                # 新版 /web/geek/jobs 为左右分栏布局，点击卡片后详情在右侧展示，不开新标签
+                try:
+                    cards = self.page.eles('.job-card-wrap')
+                except Exception as e:
+                    self.logger.warning(f"找不到职位卡片集: {e}")
+                    cards = []
+
+                for card in cards:
+                    try:
+                        # 从卡片内任意 a 标签 href 中提取 encrypt_job_id
+                        job_id_part = ''
+                        for _sel in ['.job-info tag:a', 'tag:a']:
+                            _a = card.ele(_sel, timeout=1)
+                            if _a:
+                                _href = _a.attr('href') or ''
+                                if 'job_detail' in _href:
+                                    # 兼容绝对路径和相对路径，统一提取纯ID
+                                    job_id_part = _href.split('job_detail/')[-1].split('.html')[0].strip('/')
+                                    break
+
+                        if not job_id_part:
+                            self.logger.debug("卡片无法提取 job_id，跳过")
+                            continue
+
+                        # 防止本任务内重复点击同一条
+                        if job_id_part in self.clicked_job_ids:
+                            continue
+                        self.clicked_job_ids.add(job_id_part)
+
+                        # 【关键】先启动监听，再点击，确保不错过响应包
+                        if listen_ready:
+                            self.page.listen.start("wapi/zpgeek/job/detail.json")
+
+                        self.logger.info(f"点击详情卡片: {job_id_part}")
+                        card.click()
+
+                        # 点击后最多等 card_timeout 秒，超时自动跳下一张
+                        async def _fetch_detail():
+                            # 随机停顿，模拟真实用户浏览
+                            await asyncio.sleep(random.uniform(self.page_delay_min, self.page_delay_max))
+
+                            desc = None
+
+                            # 方式1：从监听到的 API 数据包获取职位描述（最优先）
+                            if listen_ready:
+                                try:
+                                    packet = self.page.listen.wait(timeout=self.listen_timeout)
+                                    if packet:
+                                        det_payload = self._extract_payload_from_packet(packet)
+                                        if det_payload and "zpData" in det_payload:
+                                            job_info = det_payload["zpData"].get("jobInfo") or {}
+                                            desc = job_info.get("postDescription") or job_info.get("desc")
+                                            if desc:
+                                                self.logger.info(f"从数据包获取到职位描述: {job_id_part} (长度: {len(desc)})")
+                                except Exception as e:
+                                    self.logger.debug(f"监听数据包异常: {e}")
+
+                            # 方式2：从右侧详情面板 DOM 提取（兜底）
+                            if not desc:
+                                try:
+                                    self.page.wait.ele_loaded('.job-detail-body', timeout=self.load_wait_timeout)
+                                    sel = Selector(text=self.page.html)
+                                    parts = sel.css(".job-detail-body > .desc::text").getall()
+                                    if not parts:
+                                        parts = sel.css(".job-detail-body .desc *::text").getall()
+                                    desc = "\n".join(x.strip() for x in parts if x.strip()) or None
+                                    if desc:
+                                        self.logger.info(f"从DOM提取到职位描述: {job_id_part} (长度: {len(desc)})")
+                                except Exception as e:
+                                    self.logger.warning(f"详情DOM解析异常: {e}")
+
+                            return desc
+
+                        try:
+                            job_desc = await asyncio.wait_for(
+                                _fetch_detail(),
+                                timeout=self.card_timeout,
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.warning(f"卡片详情超时 ({self.card_timeout}s)，跳过: {job_id_part}")
+                            job_desc = None
+
+                        # 直接写入 DB（upsert：先 update，job 未入库则 insert 占位行）
+                        # 注意：不能走 item_queue，因为 parse_loop 与本函数不并发
+                        if job_desc:
+                            await self._write_detail_to_db(job_id_part, job_desc)
+                            total_count += 1
+                            self.logger.info(f"详情数据已写入 DB: {job_id_part} (长度: {len(job_desc)})")
+                        else:
+                            self.logger.warning(f"未获取到职位描述: {job_id_part}")
+
+                    except Exception as e:
+                        self.logger.warning(f"处理卡片点击抓取异常: {e}")
 
                 if not has_more:
                     break
 
-                # 轮次间随机等待，模拟人工操作
-                await asyncio.sleep(random.uniform(self.page_delay_min, self.page_delay_max))
-
             return total_count, True
 
         except Exception as e:
-            self.logger.error(f"滚动抓取异常: {e}")
+            self.logger.error(f"合并抓取滚动+点击异常: {e}")
             return 0, False
 
+    async def _write_detail_to_db(self, encrypt_job_id: str, job_desc: str):
+        """
+        直接 upsert 写入职位描述，绕过 Scrapy item_queue（两者不并发）。
+        先 UPDATE；若该 job 尚未由列表 pipeline 入库，则 INSERT 占位行，
+        列表 pipeline 写入时会 upsert 合并完整字段。
+        """
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            async with (await db_manager.get_session()) as session:
+                async with session.begin():
+                    now = datetime.now()
+                    # 先尝试 UPDATE
+                    stmt = (
+                        update(Job)
+                        .where(Job.encrypt_job_id == encrypt_job_id)
+                        .values(description=job_desc, is_crawl=1, updated_at=now)
+                        .returning(Job.id)
+                    )
+                    res = await session.execute(stmt)
+                    job_id = res.scalar()
+                    if not job_id:
+                        # job 尚未入库，INSERT 占位行（列表 pipeline 后续 upsert 会补全其他字段）
+                        ins = pg_insert(Job).values(
+                            encrypt_job_id=encrypt_job_id,
+                            source_site="BossZhipin",
+                            source_url=f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html",
+                            description=job_desc,
+                            is_crawl=1,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        ins = ins.on_conflict_do_update(
+                            index_elements=["encrypt_job_id"],
+                            set_={"description": ins.excluded.description,
+                                  "is_crawl": ins.excluded.is_crawl,
+                                  "updated_at": ins.excluded.updated_at},
+                        )
+                        await session.execute(ins)
+                        self.logger.info(f"job 尚未入库，已插入描述占位行: {encrypt_job_id}")
+        except Exception as e:
+            self.logger.error(f"职位描述写入 DB 失败: {e}")
+
     async def _scroll_to_load(self):
-        """模拟人工滚动（随机停顿），触发 BOSS 直聘列表页懒加载 API 请求。"""
+        """模拟人工滚动（随机停顿），触发懒加载"""
         if not self.page:
             return
         await asyncio.sleep(random.uniform(self.scroll_init_wait_min, self.scroll_init_wait_max))
@@ -317,7 +447,6 @@ class BossListDrissionSpider(scrapy.Spider):
             self.logger.warning(f"页面滚动异常（可忽略）: {e}")
 
     def _fetch_job_list_by_js(self, page_url: str) -> Optional[Dict[str, Any]]:
-        """JS fetch 兜底：直接请求 API"""
         if not self.page:
             return None
         api_url = self._build_job_api_url(page_url)
@@ -344,7 +473,8 @@ class BossListDrissionSpider(scrapy.Spider):
     def _build_job_api_url(self, page_url: str) -> Optional[str]:
         parsed = urlparse(page_url)
         query = parse_qs(parsed.query)
-        query.setdefault("page", [str(self.current_page)])
+        # We don't have self.current_page explicit tracked for the api call here securely, defaulting.
+        query.setdefault("page", ["1"])
         query.setdefault("pageSize", ["30"])
         q = urlencode({k: v[0] for k, v in query.items() if v}, doseq=False)
         return f"https://www.zhipin.com/wapi/zpgeek/search/joblist.json?{q}"
@@ -465,16 +595,14 @@ class BossListDrissionSpider(scrapy.Spider):
             s.bind(('127.0.0.1', 0))
             free_port = s.getsockname()[1]
         co.set_address(f'127.0.0.1:{free_port}')
-        #co.auto_port(True)   # 自动选空闲端口，避免与其他爬虫实例冲突
         co.set_argument("--disable-blink-features=AutomationControlled")
         co.set_argument("--ignore-certificate-errors")
         co.set_argument("--disable-infobars")
         co.set_argument("--hide-scrollbars")
-        # 注意：不在启动时禁用图片，登录页需显示二维码；图片屏蔽在登录后动态启用
 
         account = self.accounts[self.account_index]
         user_data_dir = account.get("user_data_dir") or os.path.join(
-            simple_script_dir, f"chrome_isolated_data_list_{self.account_index + 1}"
+            simple_script_dir, f"chrome_isolated_data_detail_click_{self.account_index + 1}"
         )
         os.makedirs(user_data_dir, exist_ok=True)
         co.set_user_data_path(user_data_dir)
@@ -488,28 +616,20 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.logger.info(f"使用代理: {self.current_proxy}")
         else:
             self.logger.warning("代理池为空，使用直连")
-        #co.headless(True)
+
         self.page = ChromiumPage(co)
         self.page.set.load_mode.none()
-        self.logger.info("浏览器已创建，开始登录验证...")
+        self.logger.info("重写版浏览器已创建，开始登录验证...")
 
         await self._ensure_logged_in()
 
     async def _ensure_logged_in(self):
-        """
-        登录保证流程：
-        1. 尝试从磁盘加载已保存 Cookie 并注入
-        2. 访问首页检查登录状态
-        3. 若未登录 → 打开登录页等待手动登录（最长 5 分钟）
-        4. 登录成功 → 保存 Cookie 到磁盘 + 启用图片屏蔽
-        """
         if not self.page:
             return
 
         account = self.accounts[self.account_index]
         account_name = account.get("name", f"account-{self.account_index + 1}")
 
-        # Step 1：注入 Cookie（优先磁盘 > 配置）
         cookies = account.get("cookies") or self._load_cookies_from_disk(self.account_index)
         if cookies:
             try:
@@ -517,11 +637,9 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.page.get("https://www.zhipin.com/")
                 self.page.set.cookies(self._parse_cookies(cookies))
                 self.page.set.load_mode.none()
-                self.logger.info(f"账户 [{account_name}] 已注入 Cookie（{len(cookies) if isinstance(cookies, list) else '?'} 条）")
             except Exception as e:
                 self.logger.warning(f"Cookie 注入失败: {e}")
 
-        # Step 2：检查登录状态
         await asyncio.sleep(1)
         try:
             self.page.set.load_mode.normal()
@@ -536,7 +654,6 @@ class BossListDrissionSpider(scrapy.Spider):
             self._block_images()
             return
 
-        # Step 3：未登录 → 等待手动登录
         self.logger.warning(f"✗ 账户 [{account_name}] 未登录，打开登录页等待手动操作...")
         logged_in = await self._wait_for_manual_login(account_name=account_name)
         if not logged_in:
@@ -548,10 +665,6 @@ class BossListDrissionSpider(scrapy.Spider):
         poll_interval: Optional[float] = None,
         timeout: Optional[float] = None,
     ) -> bool:
-        """
-        导航到 BOSS 直聘登录页，每 5 秒轮询一次登录状态。
-        登录成功后保存 Cookie 到磁盘并启用图片屏蔽。
-        """
         if not self.page:
             return False
 
@@ -592,10 +705,6 @@ class BossListDrissionSpider(scrapy.Spider):
         return False
 
     def _is_logged_in(self) -> bool:
-        """
-        检查当前页面是否已登录。
-        优先 Cookie token 检测，辅以 URL / DOM 检测。
-        """
         if not self.page:
             return False
         try:
@@ -603,7 +712,6 @@ class BossListDrissionSpider(scrapy.Spider):
             if any(sig in url for sig in ["login", "user/safe", "captcha", "/passport"]):
                 return False
 
-            # Cookie 检测：BOSS 直聘认证 token
             try:
                 cookies = self.page.cookies(as_dict=True)
                 if cookies:
@@ -612,7 +720,6 @@ class BossListDrissionSpider(scrapy.Spider):
             except Exception:
                 pass
 
-            # DOM 检测：未登录元素
             for sel in [".btn-login", ".sign-btn", "[ka='header-login']"]:
                 try:
                     if self.page.ele(f"css:{sel}", timeout=1):
@@ -620,7 +727,6 @@ class BossListDrissionSpider(scrapy.Spider):
                 except Exception:
                     pass
 
-            # DOM 检测：已登录元素
             for sel in [".nav-figure", ".user-nav", ".header-username", ".nav-user-enter"]:
                 try:
                     if self.page.ele(f"css:{sel}", timeout=1):
@@ -628,14 +734,13 @@ class BossListDrissionSpider(scrapy.Spider):
                 except Exception:
                     pass
 
-            return True  # 有 token 但无明确 DOM 信号，保守认为已登录
+            return True
 
         except Exception as e:
             self.logger.warning(f"登录状态检测异常: {e}")
             return True
 
     def _block_images(self):
-        """登录后动态屏蔽图片请求，提升抓取速度。"""
         if not self.page:
             return
         try:
@@ -652,7 +757,6 @@ class BossListDrissionSpider(scrapy.Spider):
     # ------------------------------------------------------------------ #
 
     async def _save_cookies_to_disk(self):
-        """将当前浏览器 Cookie 保存到磁盘。"""
         if not self.page:
             return
         try:
@@ -668,6 +772,7 @@ class BossListDrissionSpider(scrapy.Spider):
             self.logger.warning(f"保存 Cookie 失败: {e}")
 
     def _cookie_file_path(self, index: int) -> str:
+        # Note we share cookies with lists ideally if we can, to avoid relogins.
         return os.path.join(simple_script_dir, f"cookies_account_{index + 1}.json")
 
     def _load_cookies_from_disk(self, index: int) -> Optional[List[Dict[str, Any]]]:
@@ -756,7 +861,7 @@ class BossListDrissionSpider(scrapy.Spider):
                 return False
             if task.status == "stopped":
                 self.logger.info(f"任务 {self.current_task_id} 已停止")
-                await self._update_db_status(self.current_task_id, "stopped")
+                await self._update_db_task_status(self.current_task_id, "stopped")
                 self.current_task_id = None
                 if self.target_task_id:
                     raise CloseSpider(reason="任务被停止")
@@ -781,15 +886,10 @@ class BossListDrissionSpider(scrapy.Spider):
             self.current_task_id = task.id
             self.current_task_url = task.url
             self.current_task_major_name = task.major_name or ""
-            self.current_page = 1  # BossStuCrawlUrl 无 page 字段，页码仅内存追踪
             self.current_task_retry = 0
-            self.logger.info(f"领取任务 {task.id} [{task.major_name}]: {task.url}")
+            self.logger.info(f"领取新任务 {task.id} [{task.major_name}]: {task.url}")
 
-    async def _update_task_page(self, task_id: int, page: int):
-        # BossStuCrawlUrl 无 page 字段，页码状态仅内存追踪，无需写入 DB
-        pass
-
-    async def _update_db_status(self, task_id: int, status: str, error_msg: Optional[str] = None):
+    async def _update_db_task_status(self, task_id: int, status: str, error_msg: Optional[str] = None):
         async with (await db_manager.get_session()) as session:
             stmt = (
                 update(BossStuCrawlUrl)
@@ -799,37 +899,34 @@ class BossListDrissionSpider(scrapy.Spider):
             await session.execute(stmt)
             await session.commit()
 
-    # ------------------------------------------------------------------ #
-    #  工具方法
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _replace_query_page(url: str, page: int) -> str:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
-        query["page"] = [str(page)]
-        query_str = urlencode({k: v[0] for k, v in query.items()}, doseq=False)
-        return urlunparse(parsed._replace(query=query_str))
-
     def _create_proxy_extension(self, proxy_url: str) -> str:
-        """为带认证的代理创建 Chrome 扩展插件。"""
-        proxy_url = proxy_url.replace("http://", "").replace("https://", "")
-        auth, ip_port = proxy_url.split("@")
-        username, password = auth.split(":")
-        ip, port = ip_port.split(":")
+        url_clean = proxy_url.replace("http://", "").replace("https://", "")
+        if "@" in url_clean:
+            auth_part, addr_part = url_clean.split("@", 1)
+        else:
+            auth_part, addr_part = "", url_clean
 
-        plugin_path = os.path.join(simple_script_dir, f"proxy_auth_plugin_list_{self.account_index}")
+        if ":" in auth_part:
+            username, password = auth_part.split(":", 1)
+        else:
+            username, password = auth_part, ""
+
+        if ":" in addr_part:
+            ip, port = addr_part.split(":", 1)
+        else:
+            ip, port = addr_part, "80"
+
+        plugin_path = os.path.join(simple_script_dir, f"proxy_auth_plugin_detail_click_{self.account_index}")
         os.makedirs(plugin_path, exist_ok=True)
 
         manifest_json = """{
     "version": "1.0.0",
     "manifest_version": 2,
-    "name": "Chrome Proxy",
+    "name": "Chrome Proxy Detail Click",
     "permissions": ["proxy","tabs","unlimitedStorage","storage","<all_urls>","webRequest","webRequestBlocking"],
     "background": {"scripts": ["background.js"]},
     "minimum_chrome_version": "22.0.0"
 }"""
-
         background_js = """var config = {
     mode: "fixed_servers",
     rules: { singleProxy: { scheme: "http", host: "%s", port: parseInt(%s) }, bypassList: ["localhost"] }

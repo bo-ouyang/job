@@ -1,5 +1,6 @@
 import hashlib
-from typing import TypedDict, List, Dict, Any
+from typing import TypedDict, List, Dict, Any, Optional, Type
+from pydantic import BaseModel, Field
 from config import settings
 from core.logger import sys_logger as logger
 from core.circuit_breaker import ai_circuit_breaker, CircuitBreakerOpen
@@ -24,7 +25,16 @@ class AIService:
 
     @staticmethod
     def get_ai_cache_key(prefix: str, payload: dict) -> str:
-        """Generate a stable cache key for AI results."""
+        """
+        Generate a stable cache key for AI results.
+        
+        Args:
+            prefix (str): 缓存键的业务前缀，例如 "career_advice" 或 "career_compass"。
+            payload (dict): 用户输入的请求参数载荷，用于生成 MD5 摘要校验。
+            
+        Returns:
+            str: 拼接完成的 Redis 缓存键，格式如 "ai:career_advice:c4ca4238a0b923820dcc509a6f75849b"。
+        """
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
         return f"ai:{prefix}:{hashlib.md5(serialized.encode()).hexdigest()}"
 
@@ -35,7 +45,23 @@ class AIService:
         engine: str = "auto",
         market_context: Dict[str, Any] = None,
     ) -> str:
-        """Generate career advice with engine routing + result cache."""
+        """
+        生成职业规划诊断建议
+        【核心架构：结果级 AI 缓存】
+        因为大量同专业 (Major) + 同技能 (Skills) 的请求会得到非常类似的高级汇总答案。
+        通过计算用户输入参数的 MD5/Hash 值，我们在实际调用 OpenAI/DeepSeek 前
+        先从 Redis 捞出缓存。如果有则以 1毫秒 的速度返回，极大程度为您节省了 
+        API Rate limit 额度与计费成本。
+        
+        Args:
+            major (str): 用户填报的就读专业或当前身份，例如 "计算机科学与技术"
+            skills (list): 用户的擅长技能数组，例如 ["Python", "Vue3", "Redis"]
+            engine (str, optional): 使用的大模型引擎选择策略 ("auto", "classic", "langgraph")。默认 "auto"。
+            market_context (Dict[str, Any], optional): 结合专业与技能预查出来的行业数据上下文，防幻觉使用。默认 None。
+            
+        Returns:
+            str: AI 规划师输出的 Markdown 格式建议。如发生熔断异常，返回友好的 ❌ 错误提示。
+        """
         # ── Result-level cache ──
         cache_key = self.get_ai_cache_key("career_advice", {
             "major": major, "skills": sorted(skills or []), "engine": engine,
@@ -43,6 +69,7 @@ class AIService:
         cached = await redis_manager.get_cache(cache_key)
         if cached is not None:
             logger.debug(f"AI career_advice cache HIT: {cache_key}")
+            # Prometheus 监控：统计拦截了多少没被真正打到大模型的请求
             ai_cache_hits.labels(feature="career_advice").inc()
             return cached
 
@@ -80,7 +107,18 @@ class AIService:
         skills: list,
         market_context: Dict[str, Any] = None,
     ) -> str:
-        """Generate advice through a LangGraph multi-step workflow."""
+        """
+        使用 LangGraph 多环节智能体工作流 (Agentic Workflow) 深度生成职业建议。
+        将原本一次性“生成”任务，拆解为多个子节点：(获取行情 -> 总结候选人 -> 寻找差距 -> 生成落地计划)。
+        
+        Args:
+            major (str): 就读专业
+            skills (list): 拥有的技能列表
+            market_context (Dict[str, Any], optional): 市场行情客观大盘作为证据锚点。默认 None。
+            
+        Returns:
+            str: 经复杂思考链输出的高质量建议文本。
+        """
         try:
             workflow = self._get_career_advice_graph()
         except Exception as exc:
@@ -125,6 +163,17 @@ class AIService:
         return graph.compile()
 
     def _normalize_market_evidence(self, market_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        【优化策略：Token 上下文瘦身 (Context Optimization)】
+        从真实 ES 里拉出的聚合数据往往非常庞杂，容易导致模型陷入干扰，且增加昂贵 Token 花销。
+        此函数将庞杂字典规范化，仅提取最具价值的市场特征（Top10 技能，Top6 薪资带和行业）。
+        
+        Args:
+            market_context (Dict[str, Any]): ES 聚合查询直接返回的原始大对象。
+            
+        Returns:
+            Dict[str, Any]: 精简、清洗后的市场证据上下文，确保大模型吸收不超载。
+        """
         if not isinstance(market_context, dict):
             return {}
 
@@ -321,6 +370,18 @@ class AIService:
         user_prompt: str,
         temperature: float = None,
     ) -> str:
+        """
+        基于 LangChain 封装的通用 LLM 核心交互通道。
+        内置容错提取和异步断路器保护。
+        
+        Args:
+            system_prompt (str): 赋予大模型的人设或核心动作系统提示词 (例如 "你是一名资深面试官...")。
+            user_prompt (str): 用户交互层携带实际上下文片段的数据提示词。
+            temperature (float, optional): 温度参数(影响答复发散性)。不填则取自配置 Default。
+            
+        Returns:
+            str: LLM 的返回文本；若大模型返回异常结构（数组/对象），会经过清洗合并成文本返回。
+        """
         async def _inner():
             from langchain_core.messages import HumanMessage, SystemMessage
             from langchain_openai import ChatOpenAI
@@ -366,15 +427,23 @@ class AIService:
                 return "\n".join(chunks)
             return str(content)
 
-        # Wrap with circuit breaker
+        # Wrap with circuit breaker 
+        # 【核心架构：第三方 API 熔断器保护 (Circuit Breaker)】
+        # 由于外网调用（如 OpenAI、DeepSeek）极不可控（超时、封号、宕机），
+        # 我们用 `ai_circuit_breaker.call` 将请求包裹。一旦内部抛出异常（如 HTTP Error/Timeout）连续超过 5 次，
+        # 熔断器会从 CLOSED（健康）立马切换为 OPEN（断开）。
+        # 在接下来 60 秒（降级冷却期）内，所有流经这里的请求不再苦苦等待超时，而是立刻直接抛出 CircuitBreakerOpen。
+        # 此举彻底避免了由于大模型端点堵塞，引发雪崩进而耗光整台服务器性能的灾难事故。
         start_time = time.time()
         try:
             result = await ai_circuit_breaker.call(_inner)
             duration = time.time() - start_time
+            # 记录接口调用耗时
             ai_call_duration.labels(method="langchain").observe(duration)
             ai_calls_total.labels(method="langchain", status="success").inc()
             return result
         except CircuitBreakerOpen as e:
+            # 【优雅降级处理】: 通知用户服务暂不可用，而非返回恐怖的 500 服务器错误页面
             ai_calls_total.labels(method="langchain", status="circuit_open").inc()
             logger.warning(f"Circuit breaker open for LangChain call: {e}")
             return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
@@ -407,7 +476,18 @@ class AIService:
 *(💡 提示: 在配置文件中设置真实 AI API Key，可解锁针对您个人情况的实时深度分析)*"""
 
     async def get_career_navigation_report(self, major_name: str, es_stats: dict) -> str:
-        """根据 ES 的真实岗位数据和特定专业生成职业病理诊断与规划报告 (with cache)"""
+        """
+        【职业罗盘核心：客观数据加持的诊断报告】
+        根据 Elasticsearch 处理出来海量招聘数据的真实面貌，交由大语言模型
+        生成一份带有强烈事实支撑依据、不偏离市场轨道的求职行动指南。
+        
+        Args:
+            major_name (str): 进行大盘检索分析的初始锚点（专业）。
+            es_stats (dict): 该专业相关的 ES 宏观聚合数据 (薪资分布、热门行业分布、经验要求倒置规律)。
+            
+        Returns:
+            str: 生成带有薪水天花板预估、Gap分析警告信息的职业罗盘报告 (Markdown)。
+        """
         # ── Result-level cache (12h) ──
         stats_hash = hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest()
         cache_key = self.get_ai_cache_key("career_compass", {
@@ -441,231 +521,162 @@ class AIService:
 
 请严格基于上述客观数据（不能瞎编数据，要引用上述的行业分布和技能需求频率），为该专业的学生撰写完整的《职业罗盘诊断报告》。重点做 Gap Analysis，也就是学校教的理论同企业真实要的硬技能的差距。
 """
-        result = await self._call_llm_generic_text(system_prompt, user_prompt)
+        result = await self._call_llm_with_langchain(system_prompt, user_prompt)
         if isinstance(result, str) and not result.strip().startswith("❌"):
             await redis_manager.set_cache(cache_key, result, expire=43200)  # 12h
         return result
-        
-    async def _call_llm_generic_text(self, system_prompt: str, user_prompt: str) -> str:
-        """通用 LLM 纯文本调用 (circuit breaker protected)"""
-        async def _inner():
-            import aiohttp
-            headers = {
-                "Authorization": f"Bearer {settings.AI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": settings.AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.7, 
-                "stream": False
-            }
-            url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-            timeout = aiohttp.ClientTimeout(total=90)
-            
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    if resp.status != 200:
-                        raise Exception(f"AI API HTTP {resp.status}")
-                    data = await resp.json()
-                    return data['choices'][0]['message']['content']
-
-        start_time = time.time()
-        try:
-            result = await ai_circuit_breaker.call(_inner)
-            duration = time.time() - start_time
-            ai_call_duration.labels(method="http_generic").observe(duration)
-            ai_calls_total.labels(method="http_generic", status="success").inc()
-            return result
-        except CircuitBreakerOpen as e:
-            ai_calls_total.labels(method="http_generic", status="circuit_open").inc()
-            logger.warning(f"Circuit breaker open for generic_text: {e}")
-            return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
-        except Exception as e:
-            ai_calls_total.labels(method="http_generic", status="failure").inc()
-            logger.error(f"Generate report error: {e}")
-            return "❌ AI 职业分析暂时不可用，请稍后再试。"
 
     async def _call_llm(self, major, skills):
-        """调用大模型 API (OpenAI 兼容格式, circuit breaker protected)"""
-        try:
-            import aiohttp
-        except ImportError:
-            return "❌ 错误: 未安装 aiohttp 库，无法调用 AI 接口。"
+        """
+        调用大模型 API (直连底层)。
+        已重构：统一收束为 `_call_llm_with_langchain` 以复用全局 LangChain 设置及熔断监控。
+        
+        Args:
+            major (str): 需要投递获取建议的专业名称。
+            skills (list): 需要投递评估的技能矩阵。
             
+        Returns:
+            str: 成功获取的规划文本。受到外层断路器安全兜底。
+        """
         system_prompt = "你是一名资深的互联网职业规划师和技术面试官。请根据用户的专业和市场热门技能，提供一份简练、专业的职业发展建议。输出格式为 Markdown。"
         user_prompt = f"我的专业是{major}，目前的市场热门技能是{', '.join(skills)}。请为我规划核心岗位方向、3个月学习路线及简历建议。"
-        
-        headers = {
-            "Authorization": f"Bearer {settings.AI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": settings.AI_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.7,
-            "stream": False
-        }
+        return await self._call_llm_with_langchain(system_prompt, user_prompt)
 
-        async def _inner():
-            import aiohttp as _aiohttp
-            url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-            logger.info(f"AI Request URL: {url}")
-            timeout = _aiohttp.ClientTimeout(total=60)
+    async def parse_resume_text(self, text: str) -> dict:
+        """
+        简历的自动化提取与重构：结构化输出范例 (Structured Prompting)
+        将 PDF 解析器抽出来的非结构化、带有空行乱码的简历纯文本，重塑为严格的 JSON 视图对象，
+        以便能够直接与 Postgres ORM 对象建立 Mapping 后安全持久化。
+        
+        Args:
+            text (str): 用户上传简历中所能 OCR 或 PdfPlumber 解析出来的文字部分。
             
-            async with _aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    if resp.status != 200:
-                        err = await resp.text()
-                        raise Exception(f"AI API HTTP {resp.status}: {err[:100]}")
-                    
-                    data = await resp.json()
-                    if 'choices' not in data or not data['choices']:
-                        raise Exception(f"AI 返回格式异常: {json.dumps(data)}")
-                         
-                    return data['choices'][0]['message']['content']
+        Returns:
+            dict: 提取包含姓名、教育背调数组、工作履历数组的高规整度数据结构。
+        """
+        class Education(BaseModel):
+            school: str = Field(description="学校名称")
+            major: str = Field(description="专业")
+            degree: str = Field(description="学历，如 '本科'")
+            start_date: str = Field(description="YYYY-MM-DD 格式")
+            end_date: str = Field(description="YYYY-MM-DD 格式")
 
+        class WorkExperience(BaseModel):
+            company: str = Field(description="公司名称")
+            position: str = Field(description="职位")
+            department: Optional[str] = Field(default=None, description="部门，可选")
+            start_date: str = Field(description="YYYY-MM-DD 格式")
+            end_date: str = Field(description="YYYY-MM-DD 格式，至今写今天日期")
+            content: str = Field(description="工作内容描述")
+
+        class ResumeParsingResult(BaseModel):
+            name: str = Field(default="", description="姓名")
+            phone: str = Field(default="", description="手机号")
+            email: str = Field(default="", description="邮箱")
+            age: Optional[int] = Field(default=None, description="年龄，估测值无则为null")
+            gender: Optional[str] = Field(default=None, description="性别，如 '男', '女'")
+            desired_position: str = Field(default="", description="期望职位")
+            summary: str = Field(default="", description="200字以内的个人总结/个人优势")
+            skills: List[str] = Field(default=[], description="技能列表")
+            educations: List[Education] = Field(default=[])
+            work_experiences: List[WorkExperience] = Field(default=[])
+
+        system_prompt = "你是一个专业的简历解析引擎。运用你的推理能力，将毫无规律的乱码及不规范的文本片段，清洗、纠错并梳理为高度结构化的信息，忽略不相干的特殊符号。"
+        user_prompt = f"提取自简历的原始乱码纯文本 (截取最多前 3000 字)：\n{text[:3000]}"
+
+        return await self._call_llm_with_structured_output(system_prompt, user_prompt, ResumeParsingResult)
+
+    async def parse_job_search_intent(self, user_query: str) -> dict:
+        """
+        【高阶 AI 语义搜索引擎：用户意图拆解解析】
+        接收用户杂乱无章、极度口语化的长难句（例如：“我是应届本科不想写代码不想去外包，希望找个离家近薪水过八千的活”），
+        推理并转换成对应的 ElasticSearch 的强类型搜索语句骨架，填补薪金上下限与包含排除词汇。
+        
+        Args:
+            user_query (str): C 端用户的口水原话输入。
+            
+        Returns:
+            dict: 提取所得的、极其适合映射进 Query Builder 的约束意图参数集。
+        """
+        class JobSearchIntent(BaseModel):
+            locations: List[str] = Field(default=[], description="地点/城市。比如 '北京', '杭州'。")
+            keywords: List[str] = Field(default=[], description="岗位通配词、职能大类。比如 '后端开发', '产品经理'。")
+            skills_must_have: List[str] = Field(default=[], description="明确点名的技术栈或工具。比如 'Python', 'Golang', 'Figma'。")
+            salary_min: Optional[int] = Field(default=None, description="最低月薪要求(单位:人民币元)。如 '2万' 记为 20000。")
+            salary_max: Optional[int] = Field(default=None, description="最高月薪要求(单位:人民币元)。如 '不超过3万' 记为 30000。")
+            exclude_keywords: List[str] = Field(default=[], description="用户明确排斥的词汇。如 '不要外包' -> ['外包']。")
+            benefits_desired: List[str] = Field(default=[], description="期望的公司福利。如 '双休', '不加班', '五险一金'。")
+            education: Optional[str] = Field(default=None, description="学历要求。如 '本科' 或 '大专'。")
+            experience: Optional[str] = Field(default=None, description="经验年限要求。如 '1-3年', '应届生', '5-10年'。")
+            industry: Optional[str] = Field(default=None, description="行业类型。如 '互联网', '游戏行业'。")
+
+        system_prompt = "你是一个聪明的意图解析器。不论用户的语言多么口语化，你都能精确抽象出过滤条件。对于无法判断的字段必须严格留空。"
+        user_prompt = f"用户的口语化找工作原话：【{user_query}】"
+
+        return await self._call_llm_with_structured_output(system_prompt, user_prompt, JobSearchIntent)
+
+    async def _call_llm_with_structured_output(self, system_prompt: str, user_prompt: str, schema: Type[BaseModel]) -> dict:
+        """
+        【架构重构：基于 LangChain v0.2 的强约束结构化输出 (Structured Outputs)】
+        使用 ChatOpenAI 的 .with_structured_output() 方法天然挂载 Pydantic Schema。
+        依靠 OpenAI Function Calling 能力彻底避免老旧繁琐的“JSON字符串切割解析”，
+        带来原生的字段校验拦截及更强烈的语义对齐。
+        
+        Args:
+            system_prompt (str): 系统约束词汇。
+            user_prompt (str): 业务侧文本描述。
+            schema (Type[BaseModel]): 期望模型严格遵循输出的 Pydantic 数据模型定义。
+            
+        Returns:
+            dict: 严格遵循传入 Pydantic 模型的数据字典。受到全局断路器保护。
+        """
+        async def _inner():
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_openai import ChatOpenAI
+            from langchain_core.output_parsers import PydanticOutputParser
+            
+            base_url = settings.AI_BASE_URL.rstrip("/")
+            llm_kwargs = {
+                "model": settings.AI_MODEL,
+                "api_key": settings.AI_API_KEY,
+                "temperature": 0.1,
+                "timeout": settings.AI_LANGCHAIN_TIMEOUT_SECONDS,
+            }
+            try:
+                llm = ChatOpenAI(**llm_kwargs, base_url=base_url)
+            except TypeError:
+                llm = ChatOpenAI(**llm_kwargs, openai_api_base=base_url)
+                
+            parser = PydanticOutputParser(pydantic_object=schema)
+            format_instructions = parser.get_format_instructions()
+            
+            # 兼容不支持原生 Structured Output 的模型，直接使用 Prompt 要求输出 JSON
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt + "\n\n{format_instructions}\n请务必只返回合法的 JSON，不要输出任何 markdown 标记、括号里的解释或其它额外的说明文字。"),
+                ("user", "{query}")
+            ])
+            
+            chain = prompt | llm | parser
+            result = await chain.ainvoke({
+                "query": user_prompt,
+                "format_instructions": format_instructions
+            })
+            return result.model_dump()
+            
         start_time = time.time()
         try:
             result = await ai_circuit_breaker.call(_inner)
             duration = time.time() - start_time
-            ai_call_duration.labels(method="http_llm").observe(duration)
-            ai_calls_total.labels(method="http_llm", status="success").inc()
+            ai_call_duration.labels(method="langchain_json").observe(duration)
+            ai_calls_total.labels(method="langchain_json", status="success").inc()
             return result
         except CircuitBreakerOpen as e:
-            ai_calls_total.labels(method="http_llm", status="circuit_open").inc()
-            logger.warning(f"Circuit breaker open for _call_llm: {e}")
-            return "❌ AI 服务暂时不可用（熔断保护中），请稍后再试。"
-        except Exception as e:
-            ai_calls_total.labels(method="http_llm", status="failure").inc()
-            logger.error(f"AI Call Failed: {str(e)}")
-            return f"❌ 调用 AI 发生异常: {str(e)}"
-
-    async def parse_resume_text(self, text: str) -> dict:
-        """解析简历文本为 JSON"""
-        # if settings.AI_PROVIDER == "mock":
-        #     return {
-        #         "name": "模拟用户", 
-        #         "education": "本科",
-        #         "experience": "3年",
-        #         "skills": ["Python", "Vue"],
-        #         "summary": "这是模拟的简历解析结果。"
-        #     }
-            
-        system_prompt = "你是一个专业的简历解析助手。请提取以下简历内容的关键信息，并以严格的 JSON 格式返回。不要包含任何markdown标记。"
-        user_prompt = f"""
-        请分析以下简历内容，并提取关键信息。返回 JSON 格式。
-        字段包括：
-        - name (string: 姓名)
-        - phone (string: 手机号)
-        - email (string: 邮箱)
-        - age (number: 年龄，如果没有则估算或为null)
-        - gender (string: 性别，如 "男", "女")
-        - desired_position (string: 期望职位)
-        - summary (string: 200字以内的个人总结/个人优势)
-        - skills (list of strings: 技能列表)
-        - educations (list of objects):
-            - school (string: 学校名称)
-            - major (string: 专业)
-            - degree (string: 学历，如 "本科")
-            - start_date (string: YYYY-MM-DD 格式)
-            - end_date (string: YYYY-MM-DD 格式)
-        - work_experiences (list of objects):
-            - company (string: 公司名称)
-            - position (string: 职位)
-            - department (string: 部门，可选)
-            - start_date (string: YYYY-MM-DD 格式)
-            - end_date (string: YYYY-MM-DD 格式，至今写今天日期)
-            - content (string: 工作内容描述)
-        
-        简历内容：
-        {text[:3000]}
-        """
-        
-        return await self._call_llm_generic(system_prompt, user_prompt)
-
-    async def _call_llm_generic(self, system_prompt, user_prompt):
-        """Generic LLM call returning JSON if possible or string (circuit breaker protected)"""
-        async def _inner():
-            import aiohttp
-            headers = {
-                "Authorization": f"Bearer {settings.AI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": settings.AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.1, 
-                "stream": False
-            }
-            
-            url = f"{settings.AI_BASE_URL.rstrip('/')}/chat/completions"
-            timeout = aiohttp.ClientTimeout(total=60)
-            
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    if resp.status != 200:
-                        raise Exception(f"AI API HTTP {resp.status}")
-                    
-                    data = await resp.json()
-                    content = data['choices'][0]['message']['content']
-                    
-                    if "```json" in content:
-                        content = content.split("```json")[1].split("```")[0].strip()
-                    elif "```" in content:
-                        content = content.split("```")[1].split("```")[0].strip()
-                    
-                    try:
-                        return json.loads(content)
-                    except:
-                        return {"summary": content}
-
-        try:
-            return await ai_circuit_breaker.call(_inner)
-        except CircuitBreakerOpen as e:
-            logger.warning(f"Circuit breaker open for _call_llm_generic: {e}")
+            ai_calls_total.labels(method="langchain_json", status="circuit_open").inc()
+            logger.warning(f"Circuit breaker open for structured_output: {e}")
             return {"error": "AI 服务暂时不可用（熔断保护中）"}
         except Exception as e:
-            logger.error(f"AI Error: {e}")
+            ai_calls_total.labels(method="langchain_json", status="failure").inc()
+            logger.error(f"Structured Output AI Error: {e}")
             return {}
-
-    async def parse_job_search_intent(self, user_query: str) -> dict:
-        """解析口语化的职位搜索意图为结构化 JSON"""
-        
-        system_prompt = """
-你是一个专业的招聘意图分析引擎。你的任务是将用户自然语言表达的求职需求，精确地转换为结构化的 JSON 数据。
-无论用户的语言多么零散、口语化，你都需要运用逻辑推理能力对其进行分类和提取。
-如果某个字段在用户的表述中没有提及或无法安全推断，请留空（如 null 或 []，严格按照下面的定义）。
-不要输出任何 Markdown 标记或多余的文字说明，只输出原始 JSON 字符串。
-"""
-        
-        user_prompt = f"""
-请分析以下求职意图，并提取包含以下键名的 JSON 数据：
-- locations (list of strings): 地点/城市。比如 "北京", "杭州"。
-- keywords (list of strings): 岗位通配词、职能大类。比如 "后端开发", "产品经理"。
-- skills_must_have (list of strings): 明确点名的技术栈或工具。比如 "Python", "Golang", "Figma"。
-- salary_min (number或null): 最低月薪要求(单位:人民币元)。如 "2万" 记为 20000。
-- salary_max (number或null): 最高月薪要求(单位:人民币元)。如 "不超过3万" 记为 30000。
-- exclude_keywords (list of strings): 用户明确排斥的词汇。如 "不要外包" -> ["外包"]。
-- benefits_desired (list of strings): 期望的公司福利。如 "双休", "不加班", "五险一金"。
-- education (string或null): 学历要求。如 "本科" 或 "大专"。
-- experience (string或null): 经验年限要求。如 "1-3年", "应届生", "5-10年"。
-- industry (string或null): 行业类型。如 "互联网", "游戏行业"。
-
-用户的求职意图原话如下：
-{user_query}
-"""
-        
-        return await self._call_llm_generic(system_prompt, user_prompt)
 
 ai_service = AIService()

@@ -15,6 +15,7 @@ class MySQLManager:
     def __init__(self):
         self.async_session = None
         self._initialized = False
+        self._init_lock = asyncio.Lock()
         
         # 创建异步引擎 (Sync operation, safe in init)
         self.engine = create_async_engine(
@@ -26,42 +27,39 @@ class MySQLManager:
             echo=settings.MYSQL_POOL_ECHO,
             connect_args={
                 "connect_timeout": settings.MYSQL_CONNECT_TIMEOUT,
-                #"read_timeout": settings.MYSQL_READ_TIMEOUT,
-                #"write_timeout": settings.MYSQL_WRITE_TIMEOUT,
             }
         )
-        
     async def initialize(self):
         """初始化数据库连接"""
         if self._initialized:
             return
-        
-        try:
-            # Engine created in __init__
             
-            # 创建会话工厂
+        async with self._init_lock:
+            if self._initialized:
+                return
             
-            # 创建会话工厂
-            self.async_session = async_sessionmaker(
-                self.engine,
-                class_=AsyncSession,
-                expire_on_commit=settings.MYSQL_EXPIRE_ON_COMMIT,
-                autoflush=settings.MYSQL_AUTOFLUSH,
-                #autocommit=settings.MYSQL_AUTOCOMMIT
-            )
-            
-            # 测试连接
-            async with self.engine.begin() as conn:
-                await conn.execute(text("SELECT 1"))
-            
-            self._initialized = True
-            await self.create_tables()
-            logger.info("MySQL connection initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize MySQL connection: {e}")
-            raise
-    
+            try:
+                # Engine created in __init__
+                
+                # 创建会话工厂
+                self.async_session = async_sessionmaker(
+                    self.engine,
+                    class_=AsyncSession,
+                    expire_on_commit=settings.MYSQL_EXPIRE_ON_COMMIT,
+                    autoflush=settings.MYSQL_AUTOFLUSH,
+                )
+                
+                # 测试连接
+                async with self.engine.begin() as conn:
+                    await conn.execute(text("SELECT 1"))
+                
+                self._initialized = True
+                await self.create_tables()
+                logger.info("MySQL connection initialized successfully")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize MySQL connection: {e}")
+                raise
     async def get_session(self):
         """获取数据库会话（返回会话对象）"""
         await self.initialize()

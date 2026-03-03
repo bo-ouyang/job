@@ -21,6 +21,7 @@ from dependencies import (
 )
 from common.databases.RedisManager import RedisManager, get_redis
 from core.logger import sys_logger as logger
+from core.cache import cache
 router = APIRouter()
 strict_limit = RateLimiter(requests_per_minute=10)
 
@@ -30,7 +31,6 @@ from services.ai_service import ai_service
 from services.ai_access_service import ai_access_service
 from config import settings
 from pydantic import BaseModel
-
 class AIParseRequest(BaseModel):
     query: str
 
@@ -64,6 +64,7 @@ from core.cache import cache
 
 
 @router.get("/", response_model=JobList)
+@cache(expire=600, key_prefix="api:jobs:v1")
 async def jobs(
     request: Request,
     q: str = Query(None, description="Natural language search describing what you want"),
@@ -78,16 +79,6 @@ async def jobs(
     redis: RedisManager = Depends(get_redis),   
     current_user: dict = Depends(get_current_user),
 ):
-    import hashlib
-    # 构造唯一缓存键
-    q_str = q or ""
-    hash_payload = f"{q_str}:{location}:{experience}:{education}:{industry}:{salary_min}:{salary_max}:{pagination.page}:{pagination.page_size}"
-    q_hash = hashlib.md5(hash_payload.encode('utf-8')).hexdigest()
-    cache_key = f"jobs:hash_{q_hash}"
-    
-    cache_data = await redis.get_cache(cache_key)
-    if cache_data is not None:
-        return JobList(**cache_data)
     try:
         jobs_data, total = await search_service.search_jobs(
             keyword=q,
@@ -119,18 +110,15 @@ async def jobs(
             status_code=StatusCode.INTERNAL_SERVER_ERROR,
             detail=f"Failed to search jobs: {str(e)}"
         )
-    result = JobList(
+    return JobList(
         items=jobs_data,
         total=total,
         page=pagination.page,
         size=pagination.page_size,
         pages=(total + pagination.page_size - 1) // pagination.page_size
     )
-    
-    await redis.set_cache(cache_key, result.model_dump(mode='json'), expire=600)
-    return result
 
-
+@cache(expire=600, key_prefix="api:jobs:v1:ai_search")
 @router.get("/ai_search", summary="AI Intent Search (Async)")
 async def ai_search_jobs(
     request: Request,
@@ -148,45 +136,65 @@ async def ai_search_jobs(
     if not settings.AI_ENABLED:
         raise HTTPException(status_code=503, detail="AI service is disabled")
 
-    import hashlib
-    # 构造唯一缓存键
-    q_hash = hashlib.md5(q.encode('utf-8')).hexdigest()
-    cache_key = f"ai_search:q_{q_hash}:page_{pagination.page}:size_{pagination.page_size}"
-    # Cache hit → return immediately
-    cached = await redis.get_cache(cache_key)
-    #命中就不计费
-    if cached is not None:
-        return JobList(**cached)
-    # Cache miss → billing check then submit Celery task
     charge_amount = await ai_access_service.ensure_access(
         db=db,
         user_id=current_user.id,
         feature_key="ai_search",
     )
-    
+
     try:
-        from core.metrics import celery_tasks_submitted
-        celery_tasks_submitted.labels(task_name="tasks.ai_tasks.ai_search_task", queue="realtime").inc()
-        task = ai_search_task.delay(
-            user_id=current_user.id,
-            query=q,
-            page=pagination.page,
-            page_size=pagination.page_size,
-            charge_amount=charge_amount,
+        skip = (pagination.page - 1) * pagination.page_size
+        # 1. Parse intent
+        parsed_intent = await ai_service.parse_job_search_intent(q)
+        # 2. Search by intent
+        jobs, total = await search_service.search_jobs_by_ai_intent(
+            intent=parsed_intent,
+            skip=skip,
+            limit=pagination.page_size,
         )
         
+        # 3. Charge usage if successful
+        if charge_amount > 0:
+            await ai_access_service.charge_usage(
+                db=db,
+                user_id=current_user.id,
+                feature_key="ai_search",
+                amount=charge_amount,
+            )
+
+        # 4. Serialize job items for JSON transport
+        serialized_jobs = []
+        for job in jobs:
+            if hasattr(job, "model_dump"):
+                serialized_jobs.append(job.model_dump(mode="json"))
+            elif hasattr(job, "__dict__"):
+                serialized_jobs.append({
+                    k: v for k, v in job.__dict__.items()
+                    if not k.startswith("_")
+                })
+            else:
+                serialized_jobs.append(job)
+        
         # 日志审计异步记录
-        search_data = {"q": q, "async": True, "task_id": task.id}
+        search_data = {"q": q, "async": False}
         background_tasks.add_task(
             log_search_activity,
             query_type="ai_search",
             params=search_data,
-            result_count=0,
+            result_count=total,
             ip=request.client.host,
-            ua=request.headers.get("user-agent")
+            ua=request.headers.get("user-agent"),
+            user_id=current_user.id
         )
 
-        return {"task_id": task.id, "status": "pending"}
+        # 返回符合 JobList schemas 的数据
+        return JobList(
+            items=serialized_jobs,
+            total=total,
+            page=pagination.page,
+            size=pagination.page_size,
+            pages=(total + pagination.page_size - 1) // pagination.page_size
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -197,25 +205,6 @@ async def ai_search_jobs(
         )
 
 
-@router.get("/ai_search/task/{task_id}", summary="Poll AI Search Task Result")
-async def get_ai_search_task_result(
-    task_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """轮询 AI 搜索任务状态和结果"""
-    from core.celery_app import celery_app
-    result = celery_app.AsyncResult(task_id)
-    
-    if result.state == "PENDING":
-        return {"task_id": task_id, "status": "pending"}
-    elif result.state == "STARTED":
-        return {"task_id": task_id, "status": "processing"}
-    elif result.state == "SUCCESS":
-        return {"task_id": task_id, "status": "completed", "result": result.result}
-    elif result.state == "FAILURE":
-        return {"task_id": task_id, "status": "failed", "error": str(result.result)}
-    else:
-        return {"task_id": task_id, "status": result.state.lower()}
 
 
 @router.get("/skills/{skill_names}", response_model=List[JobInDB])
@@ -234,6 +223,7 @@ async def read_jobs_by_skills(
 
 # 公开接口（不需要认证）
 @router.get("/public/jobs", response_model=JobList)
+@cache(expire=600, key_prefix="api:public_jobs:v1")
 async def read_public_jobs(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -243,13 +233,6 @@ async def read_public_jobs(
     redis: RedisManager = Depends(get_redis)
 ):
     """获取公开职位列表 (ES 驱动，不需要认证)"""
-    # 1. 缓存 key
-    cache_key = get_cache_key("public_jobs", pagination=pagination, search=search)
-    
-    cached = await redis.get_cache(cache_key)
-    if cached:
-        return JobList(**cached)
-
     # 2. 从 ES 搜索 (仅支持基础关键词)
     try:
         jobs, total = await search_service.search_jobs(
@@ -260,6 +243,7 @@ async def read_public_jobs(
     except Exception as e:
         logger.error(f"ES public search failed, falling back to DB: {e}")
         # 降级：从数据库搜索
+        from crud.job import job as crud_job
         jobs, total = await crud_job.search(
             db,
             keyword=search.q,
@@ -274,9 +258,6 @@ async def read_public_jobs(
         size=pagination.page_size,
         pages=(total + pagination.page_size - 1) // pagination.page_size
     )
-    
-    # 3. 写入缓存
-    await redis.set_cache(cache_key, result.model_dump(mode='json'), expire=600)
     
     # 4. 记录搜索日志 (公共搜索不带用户ID)
     if search.q:

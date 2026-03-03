@@ -46,50 +46,48 @@ async def _safe_increment_counter(key: str, amount: int = 1) -> None:
     except Exception as exc:
         logger.warning(f"Failed to increment counter {key}: {exc}")
 
-# @router.get("/stats")
-# async def get_job_statistics(
-#     industry_name: str = None,
-#     industry_2_name: str = None,
-#     job_params: JobQueryParams = Depends(),
-#     db: AsyncSession = Depends(get_db),
-# ):
-#     """获取职位统计数据 (集成 ES 聚合与 Redis 缓存)"""
-#     try:
-#         return await analysis_service.get_job_stats(
-#             keyword=job_params.common.search.q,
-#             location=job_params.location,
-#             experience=job_params.experience,
-#             education=job_params.education,
-#             industry=job_params.industry,
-#             industry_2=job_params.industry_2,
-#             industry_name=industry_name,
-#             industry_2_name=industry_2_name,
-#             salary_min=job_params.salary_min,
-#             salary_max=job_params.salary_max,
-#             major_name=job_params.major_name,
-#         )
-#     except Exception as e:
-#         logger.error(f"ES stats failed, falling back to DB: {e}")
-#         # 降级：从数据库获取统计 (支持筛选)
-#         return await crud_job.get_statistics_from_db(
-#             db, 
-#             keyword=job_params.common.search.q,
-#             location=job_params.location,
-#             experience=job_params.experience,
-#             education=job_params.education,
-#             industry=job_params.industry,
-#             industry_2=job_params.industry_2,
-#             salary_min=job_params.salary_min,
-#             salary_max=job_params.salary_max
-#         )
+@router.get("/stats")
+async def get_job_statistics(
+    industry_name: str = None,
+    industry_2_name: str = None,
+    job_params: JobQueryParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取职位统计数据 (集成 ES 聚合与 Redis 缓存)"""
+    try:
+        return await analysis_service.get_job_stats(
+            keyword=job_params.common.search.q,
+            location=job_params.location,
+            experience=job_params.experience,
+            education=job_params.education,
+            industry=job_params.industry,
+            industry_2=job_params.industry_2,
+            industry_name=industry_name,
+            industry_2_name=industry_2_name,
+            salary_min=job_params.salary_min,
+            salary_max=job_params.salary_max,
+            major_name=job_params.major_name,
+        )
+    except Exception as e:
+        logger.error(f"ES stats failed, falling back to DB: {e}")
+        # 降级：从数据库获取统计 (支持筛选)
+        return await crud_job.get_statistics_from_db(
+            db, 
+            keyword=job_params.common.search.q,
+            location=job_params.location,
+            experience=job_params.experience,
+            education=job_params.education,
+            industry=job_params.industry,
+            industry_2=job_params.industry_2,
+            salary_min=job_params.salary_min,
+            salary_max=job_params.salary_max
+        )
 
 @router.get("/skill-cloud")
 async def get_skill_cloud(
     keyword: str = None,
     industry: int = None,
-    industry_2: int = None,
     industry_name: str = None,
-    industry_2_name: str = None,
     limit: int = 20,
 ):
     """获取技能词云数据 (基于 ES 聚合)"""
@@ -99,9 +97,7 @@ async def get_skill_cloud(
         return await analysis_service.get_skill_cloud_stats(
             keyword=keyword, 
             industry=industry, 
-            industry_2=industry_2, 
             industry_name=industry_name,
-            industry_2_name=industry_2_name,
             limit=limit
         )
     except Exception as e:
@@ -213,50 +209,46 @@ async def analyze_major_skills(
             "location": request.location,
             "keywords": sorted(request.keywords) if request.keywords else [],
         }
-        cache_key = f"analysis:major:v3:{_stable_digest(cache_payload)}"
+        cache_key = f"analysis:major_skills:{await _stable_digest(cache_payload)}"
         cached_result = await redis_manager.get_cache(cache_key)
         # 2. 如果有缓存，直接返回数据，但扔要异步更新热度
         if cached_result is not None:
-            await _safe_increment_counter("metrics:analysis:major:cache_hit")
+            await _safe_increment_counter("metrics:analysis:major_skills:cache_hit")
             if request.major_name:
                 # 添加后台任务
                 background_tasks.add_task(task_update_major_stats, request.major_name)
             return cached_result
-        await _safe_increment_counter("metrics:analysis:major:cache_miss")
+        await _safe_increment_counter("metrics:analysis:major_skills:cache_miss")
         industry_codes = []
         job_type_keywords = []
+        major_codes = []
         if request.major_name:
-            # 1. ??????????????
             relation = await crud_major.get_relation_by_major_name(db, request.major_name)
-            logger.debug(f"Major analysis relation resolved: major={request.major_name}, relation={relation}")
-            if relation and relation.industry_codes:
-                # ???????????0/1 ??????2 ???????????
-                
-                _, job_type_names = await crud_industry.classify_codes_by_level(db, relation.industry_codes)
-                
+            major_codes = relation.industry_codes
+            logger.info(f"Major analysis relation resolved: major={request.major_name}, relation={relation}")
 
+            if relation and relation.industry_codes:
+                _, job_type_names = await crud_industry.classify_codes_by_level(db, major_codes)
                 if relation.industry_codes:
-                    industry_codes = await crud_industry.get_rollup_codes(db, relation.industry_codes,level=1,depth=2)
-                
-                # ? 2 ??????????????
+                    #industry_codes = await crud_industry.get_rollup_codes(db, major_codes,level=1,depth=1)
+                    industry_codes = list(set(major_codes + industry_codes))
                 if job_type_names:
                     job_type_keywords.extend(job_type_names)
-                    
-                logger.debug(f"Major analysis rollup industry codes: {industry_codes}")
-                logger.debug(f"Major analysis derived job-type keywords: {job_type_keywords}")
-            
+
 
                 background_tasks.add_task(task_update_major_stats, request.major_name)
-
-        # ????????????????????
+                
         combined_keywords = list(request.keywords) if request.keywords else []
         if job_type_keywords:
             combined_keywords.extend(job_type_keywords)
-
+        combined_keywords.append(request.major_name)
+        logger.info(f"Major analysis rollup industry codes: {industry_codes}")
+        logger.info(f"Major analysis derived job-type keywords: {combined_keywords}")
         result = await analysis_service.analyze_by_keywords(
             keywords=combined_keywords,
             location=request.location,
-            industry_codes=industry_codes
+            industry_codes=industry_codes,
+            major_name=request.major_name
         )
         await redis_manager.set_cache(cache_key, result, expire=14400)
         await _safe_increment_counter("metrics:analysis:major:cache_set")
@@ -336,17 +328,39 @@ async def get_ai_advice(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)"""
+    """
+    获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)
+    
+    【核心架构说明】
+    为何使用异步提交？
+    大语言模型生成结果极慢（几秒到几十秒不等），如果在此处 `await` 等待，
+    高并发下会迅速耗尽 FastAPI/Uvicorn 的 HTTP Worker 工作进程，导致服务器假死。
+    因此，本接口采取“立即返回 TaskID (202 Accepted)”的设计模式，
+    将真实的 AI 请求卸载 (Offload) 给了后端的 Celery `realtime` 队列处理。
+    """
+    # 1. 功能开关检查 (故障降级)
     if not settings.AI_ENABLED:
         raise HTTPException(status_code=503, detail="AI service is disabled")
+        
+    # 2. 前置鉴权与计费校验 (Fail-Fast 尽早报错)
+    # 在进入漫长的后台队列之前，必须先校验用户是否有足够的余额/点数。
+    # 真正的扣费动作被设计在了 Celery Worker 处理成功之后再执行，以防任务失败错扣费。
     charge_amount = await ai_access_service.ensure_access(
         db=db,
         user_id=current_user.id,
         feature_key="career_advice",
     )
+    
+    # 3. 动态导入以避免循环依赖，同时引入任务体
     from tasks.ai_tasks import career_advice_task
     from core.metrics import celery_tasks_submitted
+    
+    # 4. 可观测性 (Prometheus Metrics) 监控埋点
+    # 将抛往 realtime (实时计算) 队列的任务数推向普罗米修斯指标监控
     celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_advice_task", queue="realtime").inc()
+    
+    # 5. 异步投递任务到 Celery 队列
+    # .delay() 实现了非阻塞投递。传入的参数必须是可序列化的基础数据类型 (如 Pydantic 取出的 int, str)。
     task = career_advice_task.delay(
         user_id=current_user.id,
         major=req.major_name,
@@ -354,6 +368,8 @@ async def get_ai_advice(
         engine=req.engine or "auto",
         charge_amount=charge_amount,
     )
+    
+    # 6. 立刻释放 HTTP 连接，返回任务追踪 ID 供前端轮询或长连接监听
     return {"task_id": task.id, "status": "pending"}
 
 

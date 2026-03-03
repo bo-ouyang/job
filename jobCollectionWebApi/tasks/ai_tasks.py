@@ -61,6 +61,16 @@ async def _career_advice_logic(
     engine: str,
     charge_amount: float,
 ):
+    """
+    【架构说明：Celery 中的异步业务处理】
+    由于外层的 Celery Task 包装器是同步运行的（依赖于底层的 billiard 进程架构），
+    我们在 Task 函数内部手动获取并运行了 AsyncIO Event Loop (_get_event_loop)。
+    
+    这里的业务逻辑：
+    1. 调用处于同进程内的 ai_service.generate_career_advice 访问大模型。
+    2. 如果 AI 返回成功（没有被熔断拦截），我们再利用独立的 session 连接数据库进行**真实验扣费**，
+       以此保证“计费”与“服务返回”的绝对原子性强一致。
+    """
     from services.ai_service import ai_service
     from services.ai_access_service import ai_access_service
     from common.databases.PostgresManager import db_manager
@@ -171,96 +181,3 @@ def career_compass_task(
         return {"status": "error", "error": str(exc)}
 
 
-# ═══════════════════════════════════════════════════
-# Task 3: AI Search
-# ═══════════════════════════════════════════════════
-
-async def _ai_search_logic(
-    user_id: int,
-    query: str,
-    skip: int,
-    page_size: int,
-    charge_amount: float,
-):
-    from services.ai_service import ai_service
-    from services.ai_access_service import ai_access_service
-    from services.search_service import search_service
-    from common.databases.PostgresManager import db_manager
-
-    # 1. Parse intent
-    parsed_intent = await ai_service.parse_job_search_intent(query)
-
-    # 2. Search by intent
-    jobs, total = await search_service.search_jobs_by_ai_intent(
-        intent=parsed_intent,
-        skip=skip,
-        limit=page_size,
-    )
-
-    # 3. Charge usage if successful
-    if charge_amount > 0:
-        session_obj = await db_manager.get_session()
-        async with session_obj as db:
-            await ai_access_service.charge_usage(
-                db=db,
-                user_id=user_id,
-                feature_key="ai_search",
-                amount=charge_amount,
-            )
-
-    # 4. Serialize job items for JSON transport
-    serialized_jobs = []
-    for job in jobs:
-        if hasattr(job, "model_dump"):
-            serialized_jobs.append(job.model_dump(mode="json"))
-        elif hasattr(job, "__dict__"):
-            serialized_jobs.append({
-                k: v for k, v in job.__dict__.items()
-                if not k.startswith("_")
-            })
-        else:
-            serialized_jobs.append(job)
-
-    return {
-        "items": serialized_jobs,
-        "total": total,
-        "parsed_intent": parsed_intent,
-    }
-
-
-@shared_task(bind=True, name="tasks.ai_tasks.ai_search_task")
-def ai_search_task(
-    self,
-    user_id: int,
-    query: str,
-    page: int,
-    page_size: int,
-    charge_amount: float = 0,
-):
-    """Celery task: AI-powered job search asynchronously."""
-    loop = _get_event_loop()
-    skip = (page - 1) * page_size
-    try:
-        result = loop.run_until_complete(
-            _ai_search_logic(user_id, query, skip, page_size, charge_amount)
-        )
-        _publish_result(user_id, "ai_search_result", {
-            "task_id": self.request.id,
-            "items": result["items"],
-            "total": result["total"],
-            "page": page,
-            "size": page_size,
-            "pages": (result["total"] + page_size - 1) // page_size,
-        })
-        return {
-            "status": "success",
-            "items": result["items"],
-            "total": result["total"],
-            "page": page,
-            "size": page_size,
-            "pages": (result["total"] + page_size - 1) // page_size,
-        }
-    except Exception as exc:
-        logger.error(f"ai_search_task failed: {exc}")
-        _publish_error(user_id, "ai_search_error", str(exc))
-        return {"status": "error", "error": str(exc)}

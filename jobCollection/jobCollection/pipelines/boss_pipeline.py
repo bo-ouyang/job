@@ -122,6 +122,8 @@ class BossJobPipeline:
         for item in items:
             if not item.get("job_desc"):
                 continue
+
+            encrypt_job_id = item["encrypt_job_id"]
             values = {
                 "description": item["job_desc"],
                 "updated_at": datetime.now(),
@@ -134,16 +136,46 @@ class BossJobPipeline:
             if item.get("skills"):
                 values["tags"] = item["skills"]
 
+            # 先尝试 UPDATE
             stmt = (
                 update(Job)
-                .where(Job.encrypt_job_id == item["encrypt_job_id"])
+                .where(Job.encrypt_job_id == encrypt_job_id)
                 .values(**values)
                 .returning(Job.id)
             )
             res = await session.execute(stmt)
             job_id = res.scalar()
+
             if job_id:
+                # UPDATE 命中 —— 正常路径
                 self._dispatch_es_sync(job_id)
+            else:
+                # UPDATE 未命中：job 尚未由列表 pipeline 写入，先插入占位行
+                # 列表 pipeline 写入时会 upsert 合并完整字段
+                now = datetime.now()
+                placeholder = {
+                    "encrypt_job_id": encrypt_job_id,
+                    "source_site": "BossZhipin",
+                    "source_url": f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html",
+                    "description": item["job_desc"],
+                    "is_crawl": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                ins_stmt = insert(Job).values(placeholder)
+                ins_stmt = ins_stmt.on_conflict_do_update(
+                    index_elements=["encrypt_job_id"],
+                    set_={
+                        "description": ins_stmt.excluded.description,
+                        "is_crawl": ins_stmt.excluded.is_crawl,
+                        "updated_at": ins_stmt.excluded.updated_at,
+                    },
+                ).returning(Job.id)
+                ins_res = await session.execute(ins_stmt)
+                placeholder_id = ins_res.scalar()
+                logger.info(f"job 尚未入库，已插入描述占位行: {encrypt_job_id} (id={placeholder_id})")
+                if placeholder_id:
+                    self._dispatch_es_sync(placeholder_id)
 
         logger.info(f"更新 job 详情 {len(items)} 条")
 

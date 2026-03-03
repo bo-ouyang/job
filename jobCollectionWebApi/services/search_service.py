@@ -218,7 +218,7 @@ class SearchService:
                 must_clauses.append({
                     "multi_match": {
                         "query": sk,
-                        "fields": ["skills^5", "description", "requirements"]
+                        "fields": ["skills^5", "description", "requirements",'title^2']
                     }
                 })
                 

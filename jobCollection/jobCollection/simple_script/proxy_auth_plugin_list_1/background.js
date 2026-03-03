@@ -1,6 +1,6 @@
 var config = {
     mode: "fixed_servers",
-    rules: { singleProxy: { scheme: "http", host: "58.19.54.132", port: parseInt(20579) }, bypassList: ["localhost"] }
+    rules: { singleProxy: { scheme: "http", host: "59.47.5.148", port: parseInt(12232) }, bypassList: ["localhost"] }
 };
 chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
 function callbackFn(details) {

@@ -90,8 +90,9 @@ class BossDetailDrissionSpider(scrapy.Spider):
         crawler.signals.connect(spider._spider_idle, signal=signals.spider_idle)
         return spider
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, account_index: str = "1", *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.account_index = str(account_index)
         self.page: ChromiumPage | None = None
         self.current_proxy: str | None = None
         self.proxy_start_time: float = 0.0
@@ -295,8 +296,8 @@ class BossDetailDrissionSpider(scrapy.Spider):
         else:
             self.logger.warning("代理池为空，使用直连")
 
-        # 4. 隔离数据目录
-        user_data_dir = os.path.join(simple_script_dir, "chrome_detail_data")
+        # 4. 隔离数据目录(避免多个终端并发报错锁文件)
+        user_data_dir = os.path.join(simple_script_dir, f"chrome_detail_data_{self.account_index}")
         co.set_user_data_path(user_data_dir)
 
         # 5. 创建页面
@@ -444,7 +445,9 @@ class BossDetailDrissionSpider(scrapy.Spider):
     #  Cookie 持久化
     # ------------------------------------------------------------------ #
 
-    def _cookie_file_path(self,file_path:str="cookies_detail.json") -> str:
+    def _cookie_file_path(self, file_path: str = None) -> str:
+        if not file_path:
+            file_path = f"cookies_detail_account_{self.account_index}.json"
         return os.path.join(simple_script_dir, file_path)
 
     def _save_cookies_to_disk(self):
@@ -466,9 +469,12 @@ class BossDetailDrissionSpider(scrapy.Spider):
         """从磁盘加载 Cookie 并注入浏览器。"""
         if not self.page:
             return
-        path = self._cookie_file_path('cookies_account_1.json')
+        path = self._cookie_file_path()
         if not os.path.exists(path):
-            return
+            # 兼容读取 list 爬虫登录并缓存下来的对应的 Cookie
+            path = self._cookie_file_path(f'cookies_account_{self.account_index}.json')
+            if not os.path.exists(path):
+                return
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cookies = json.load(f)
@@ -510,8 +516,8 @@ class BossDetailDrissionSpider(scrapy.Spider):
         else:
             ip, port = addr_part, "80"
 
-        # 使用专用的插件目录，避免与 list 爬虫冲突
-        plugin_path = os.path.join(simple_script_dir, "proxy_auth_plugin_detail")
+        # 使用专用的插件目录，避免与多个账号、爬虫冲突
+        plugin_path = os.path.join(simple_script_dir, f"proxy_auth_plugin_detail_{self.account_index}")
         os.makedirs(plugin_path, exist_ok=True)
 
         manifest_json = """{

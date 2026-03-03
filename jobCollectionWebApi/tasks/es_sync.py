@@ -73,10 +73,22 @@ async def _sync_job_logic(job_id: int):
         logger.error(f"Failed to sync job {job_id}: {e}")
         raise e
 
+def _get_event_loop():
+    """获取或创建一个新的事件循环，防止 Celery Worker 中出现 RuntimeError (Closed)"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
 @celery_app.task(bind=True, max_retries=3, name="sync_job_to_es")
 def sync_job_to_es(self, job_id: int):
     """把单独一条的变动映射到 ES 中"""
-    loop = asyncio.get_event_loop()
+    loop = _get_event_loop()
     loop.run_until_complete(_sync_job_logic(job_id))
     
 @celery_app.task(bind=True, max_retries=3, name="delete_job_from_es")
@@ -91,5 +103,5 @@ def delete_job_from_es(self, job_id: int):
             logger.error(f"Failed to delete job {job_id} from ES: {e}")
             raise e
             
-    loop = asyncio.get_event_loop()
+    loop = _get_event_loop()
     loop.run_until_complete(_delete())

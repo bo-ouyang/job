@@ -22,4 +22,10 @@ export const jobAPI = {
   getRecommendedJobs(params) {
     return request.get("/jobs/recommendations", { params });
   },
+  aiSearch(params) {
+    return request.get("/jobs/ai_search", {
+      params,
+      timeout: 90000,
+    });
+  },
 };

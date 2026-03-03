@@ -1,18 +1,16 @@
-from fastapi import Depends, HTTPException, status, Header, Query,Request
+from fastapi import Depends, HTTPException, status, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.logger import sys_logger as logger
 import time
 from typing import AsyncGenerator, Optional
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
-from core.logger import sys_logger as logger
 from config import settings
 from core.security import verify_token, is_token_blacklisted
 from crud import user as crud_user
 from schemas.token import TokenData
 from common.databases.PostgresManager import db_manager
-from common.databases.RedisManager import get_redis,RedisManager
-from fastapi import Depends, HTTPException, status, Request
+from common.databases.RedisManager import get_redis, RedisManager
+
 # 安全方案
 security = HTTPBearer()
 
@@ -20,14 +18,7 @@ security = HTTPBearer()
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """获取数据库会话依赖"""
     async for session in db_manager.get_db():
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {e}")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+        yield session
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),

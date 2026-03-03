@@ -11,7 +11,6 @@ const loading = ref(true);
 const total = ref(0);
 const selectedJob = ref(null); // 当前选中的职位
 
-// 筛选状态
 const filters = reactive({
   location: "", // Now stores City Code (int) or empty string
   experience: "",
@@ -22,6 +21,7 @@ const filters = reactive({
   ai_q: route.query.ai_q || "", // ⚡ 捕获 AI 查询意图
 });
 
+const isAiMode = ref(!!filters.ai_q); // AI Search Toggle State (independent from filters to avoid watch trigger)
 const isAiLoading = ref(false); // AI 专属加载遮罩状态
 
 // 选项配置
@@ -65,8 +65,10 @@ const fetchMetadata = async () => {
 
 const fetchJobs = async () => {
   // 💡 智能分流逻辑：如果是 AI 模式，转走专门的通道
-  if (filters.ai_q) {
-    await executeAiSearch();
+  if (isAiMode.value) {
+    if ((filters.ai_q || "").trim()) {
+      await executeAiSearch();
+    }
     return;
   }
 
@@ -127,22 +129,24 @@ const executeAiSearch = async () => {
       page: currentPage.value,
       page_size: pageSize.value,
     };
-    const response = await api.get("/jobs/ai_search", { params });
+    
+    // 调用封装在 jobAPI 中的接口，并内部自带 90 秒超时配置
+    const response = await jobAPI.aiSearch(params);
     const responseData = response.data;
 
-    if (responseData?.task_id) {
-      // Async path: poll for result
-      const result = await pollTaskResult("/jobs/ai_search/task", responseData.task_id, {
-        interval: 2000,
-        timeout: 120000,
-      });
-      jobs.value = result?.items || [];
-      total.value = result?.total || 0;
-    } else {
+    // if (responseData?.task_id) {
+    //   // Async path: poll for result
+    //   const result = await pollTaskResult("/jobs/ai_search/task", responseData.task_id, {
+    //     interval: 2000,
+    //     timeout: 120000,
+    //   });
+    //   jobs.value = result?.items || [];
+    //   total.value = result?.total || 0;
+    // } else {
       // Cache hit: immediate JobList response
       jobs.value = responseData.items || [];
       total.value = responseData.total || 0;
-    }
+    
 
     if (jobs.value.length > 0) {
       selectedJob.value = jobs.value[0];
@@ -243,12 +247,12 @@ watch(
     <!-- 顶部搜索栏 (保持不变) -->
     <div class="page-header">
       <div class="header-content">
-        <div class="search-section" :class="{ 'ai-active': !!filters.ai_q }">
-          <div class="search-bar" :class="{ 'ai-mode': !!filters.ai_q }">
-            <span class="search-icon" v-if="!filters.ai_q">🔍</span>
+        <div class="search-section" :class="{ 'ai-active': isAiMode }">
+          <div class="search-bar" :class="{ 'ai-mode': isAiMode }">
+            <span class="search-icon" v-if="!isAiMode">🔍</span>
             <span class="search-icon ai-sparkle" v-else>✨</span>
             <input
-              v-if="!filters.ai_q"
+              v-if="!isAiMode"
               v-model.lazy="filters.q"
               placeholder="搜索职位、公司、技能..."
               @keyup.enter="fetchJobs"
@@ -263,12 +267,16 @@ watch(
             <div
               class="ai-toggle"
               @click="
-                filters.ai_q = filters.ai_q ? '' : ' ';
-                filters.q = '';
+                isAiMode = !isAiMode;
+                if (!isAiMode) {
+                  filters.ai_q = '';
+                } else {
+                  filters.q = '';
+                }
               "
               title="切换 AI 语义引擎"
             >
-              <span class="toggle-track" :class="{ active: !!filters.ai_q }"
+              <span class="toggle-track" :class="{ active: isAiMode }"
                 ><span class="toggle-thumb"></span
               ></span>
               <span class="toggle-label">AI引擎</span>
@@ -276,16 +284,16 @@ watch(
           </div>
           <button
             class="primary-search-btn"
-            :class="{ 'ai-btn': !!filters.ai_q }"
+            :class="{ 'ai-btn': isAiMode }"
             @click="fetchJobs"
           >
-            {{ filters.ai_q ? "精准发现" : "搜 索" }}
+            {{ isAiMode ? "精准发现" : "搜 索" }}
           </button>
         </div>
         <!-- 简化的筛选栏，放顶部 -->
-        <div class="filters-bar" :class="{ disabled: !!filters.ai_q }">
+        <div class="filters-bar" :class="{ disabled: isAiMode }">
           <!-- Location Filter: Binds to City Code -->
-          <select v-model="filters.location" :disabled="!!filters.ai_q">
+          <select v-model="filters.location" :disabled="isAiMode">
             <option value="">城市</option>
             <option v-for="l in locations" :key="l.code" :value="l.code">
               {{ l.name }}
@@ -293,22 +301,22 @@ watch(
           </select>
 
           <!-- Industry Filter: Binds to Industry Code -->
-          <select v-model="filters.industry" :disabled="!!filters.ai_q">
+          <select v-model="filters.industry" :disabled="isAiMode">
             <option value="">行业</option>
             <option v-for="i in industryOptions" :key="i.code" :value="i.code">
               {{ i.name }}
             </option>
           </select>
 
-          <select v-model="filters.experience" :disabled="!!filters.ai_q">
+          <select v-model="filters.experience" :disabled="isAiMode">
             <option value="">经验</option>
             <option v-for="e in experiences" :value="e">{{ e }}</option>
           </select>
-          <select v-model="filters.education" :disabled="!!filters.ai_q">
+          <select v-model="filters.education" :disabled="isAiMode">
             <option value="">学历</option>
             <option v-for="e in educations" :value="e">{{ e }}</option>
           </select>
-          <select v-model="filters.salary_range" :disabled="!!filters.ai_q">
+          <select v-model="filters.salary_range" :disabled="isAiMode">
             <option value="">薪资</option>
             <option v-for="r in salaryRanges" :value="r.label">
               {{ r.label }}
