@@ -1,7 +1,7 @@
 from celery.signals import task_prerun, task_postrun, task_success, task_failure, worker_process_init, setup_logging
 from common.databases.PostgresManager import db_manager
 from crud.analysis import task_log
-from schemas.analysis import TaskLogCreate, TaskLogUpdate
+from schemas.analysis_schema import TaskLogCreate, TaskLogUpdate
 import asyncio
 import json
 import os

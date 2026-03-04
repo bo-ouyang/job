@@ -1,11 +1,10 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from core.status_code import StatusCode
+from fastapi import APIRouter, Depends, Query
+from core.exceptions import UserNotFoundException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies import get_db, get_current_admin_user, get_current_user
+from dependencies import get_db, get_current_user, get_current_admin_user
 from crud import user as crud_user
-from schemas.user import UserPublic, UserList, UserDetail, UserUpdate, UserAdminUpdate, UserRole, UserStatus
+from schemas.user_schema import UserPublic, UserList, UserDetail, UserUpdate, UserAdminUpdate, UserRole, UserStatus
 from dependencies import CommonQueryParams
 
 router = APIRouter()
@@ -32,7 +31,6 @@ async def read_users(
     role: UserRole = Query(None),
     status: UserStatus = Query(None),
     db: AsyncSession = Depends(get_db),
-    admin_user: dict = Depends(get_current_admin_user)
 ):
     """获取用户列表（管理员）"""
     users = await crud_user.search(
@@ -58,23 +56,18 @@ async def read_users(
 async def read_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    admin_user: dict = Depends(get_current_admin_user)
 ):
     """获取用户详情（管理员）"""
     user = await crud_user.get(db, id=user_id)
     if not user:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="用户不存在"
-        )
+        raise UserNotFoundException()
     return user
 
 @router.put("/{user_id}", response_model=UserPublic)
 async def update_user_by_admin(
     user_id: int,
     user_in: UserUpdate,
-    db: AsyncSession = Depends(get_db),
-    admin_user: dict = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_db)
 ):
     """管理员更新用户信息 (通用字段)"""
     # 仅管理员可调用此接口修改任意用户信息
@@ -82,10 +75,7 @@ async def update_user_by_admin(
     
     user = await crud_user.get(db, id=user_id)
     if not user:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="用户不存在"
-        )
+        raise UserNotFoundException()
     
     return await crud_user.update(db, db_obj=user, obj_in=user_in)
 
@@ -93,15 +83,11 @@ async def update_user_by_admin(
 async def update_user_admin(
     user_id: int,
     user_in: UserAdminUpdate,
-    db: AsyncSession = Depends(get_db),
-    admin_user: dict = Depends(get_current_admin_user)
+    db: AsyncSession = Depends(get_db)
 ):
     """管理员更新用户信息"""
     user = await crud_user.get(db, id=user_id)
     if not user:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="用户不存在"
-        )
+        raise UserNotFoundException()
     
     return await crud_user.update(db, db_obj=user, obj_in=user_in)

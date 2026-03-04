@@ -13,6 +13,7 @@ celery_app = Celery(
         "jobCollectionWebApi.tasks.job_parser",
         "jobCollectionWebApi.tasks.es_sync",
         "jobCollectionWebApi.tasks.ai_tasks",
+        "jobCollectionWebApi.tasks.ai_task_cleanup",
     ],
 )
 
@@ -36,6 +37,7 @@ celery_app.conf.update(
         "tasks.check_proxies": {"queue": "batch"},
         "tasks.fetch_proxies": {"queue": "batch"},
         "tasks.sync_proxies": {"queue": "batch"},
+        "tasks.ai_task_cleanup.*": {"queue": "batch"},
     },
 
     # Schedule configuration (will adhere to Celery Beat)
@@ -55,6 +57,10 @@ celery_app.conf.update(
         'fetch-and-parse-jobs-every-1-minutes': {
             'task': 'jobCollectionWebApi.tasks.job_parser.process_job_parsing_task',
             'schedule': 60, # 每隔1分钟捞取一次
-        }
+        },
+        'cleanup-stale-ai-tasks-every-5-minutes': {
+            'task': 'tasks.ai_task_cleanup.cleanup_stale_ai_tasks',
+            'schedule': 300, # 每5分钟清理一次僵死AI任务
+        },
     }
 )

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
-from .job import JobSimple
+from .job_schema import JobSimple
 
 class FavoriteJobCreate(BaseModel):
     job_id: int

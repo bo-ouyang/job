@@ -5,10 +5,17 @@ These tasks run asynchronously in the 'realtime' queue so that the
 FastAPI worker can return immediately after submitting the task.
 Results are pushed to the user via Redis Pub/Sub → WebSocket,
 and also stored in the Celery result backend for polling.
+
+【v3 更新】
+- mark_completed/failed 回写 AiTask + 释放并发锁
+- Prometheus 指标 (ai_task_completed/failed/duration)
+- 去重缓存写入 (set_dedup_cache)
+- 统一 WS 通知：任务完成/失败时推 ai_task_completed / ai_task_failed
 """
 
 import asyncio
 import json
+import time
 import redis
 from celery import shared_task
 
@@ -50,6 +57,114 @@ def _publish_error(user_id: int, task_type: str, error_msg: str):
     _publish_result(user_id, task_type, {"error": error_msg})
 
 
+# ─── AiTask 回写辅助 ─────────────────────────────
+
+def _mark_task_completed(
+    user_id: int,
+    feature_key: str,
+    celery_task_id: str,
+    result_data: str,
+    started_at: float,
+    request_params: dict = None,
+):
+    """同步包装：在 Celery worker 中调用 async mark_completed + 去重缓存 + 指标"""
+    from crud import ai_task as crud_ai_task
+    loop = _get_event_loop()
+    execution_time = round(time.time() - started_at, 2) if started_at else None
+
+    try:
+        loop.run_until_complete(
+            crud_ai_task.mark_completed(
+                user_id=user_id,
+                feature_key=feature_key,
+                celery_task_id=celery_task_id,
+                result_data=result_data,
+                started_at=started_at,
+            )
+        )
+    except Exception as exc:
+        logger.error(f"mark_completed callback failed: {exc}")
+
+    # 去重缓存
+    try:
+        loop.run_until_complete(
+            crud_ai_task.set_dedup_cache(feature_key, request_params, celery_task_id)
+        )
+    except Exception as exc:
+        logger.warning(f"set_dedup_cache failed: {exc}")
+
+    # Prometheus 指标
+    try:
+        from core.metrics import ai_task_completed, ai_task_duration
+        ai_task_completed.labels(feature=feature_key).inc()
+        if execution_time is not None:
+            ai_task_duration.labels(feature=feature_key).observe(execution_time)
+    except Exception:
+        pass
+
+    # 统一 WS 通知: ai_task_completed
+    _publish_result(user_id, "ai_task_completed", {
+        "task_id": celery_task_id,
+        "feature_key": feature_key,
+        "status": "completed",
+        "execution_time": execution_time,
+        "message": f"您的{_feature_display(feature_key)}已完成",
+    })
+
+
+def _mark_task_failed(
+    user_id: int,
+    feature_key: str,
+    celery_task_id: str,
+    error_message: str,
+    started_at: float,
+):
+    """同步包装：在 Celery worker 中调用 async mark_failed + 指标"""
+    from crud import ai_task as crud_ai_task
+    loop = _get_event_loop()
+    execution_time = round(time.time() - started_at, 2) if started_at else None
+
+    try:
+        loop.run_until_complete(
+            crud_ai_task.mark_failed(
+                user_id=user_id,
+                feature_key=feature_key,
+                celery_task_id=celery_task_id,
+                error_message=error_message,
+                started_at=started_at,
+            )
+        )
+    except Exception as exc:
+        logger.error(f"mark_failed callback failed: {exc}")
+
+    # Prometheus 指标
+    try:
+        from core.metrics import ai_task_failed, ai_task_duration
+        ai_task_failed.labels(feature=feature_key).inc()
+        if execution_time is not None:
+            ai_task_duration.labels(feature=feature_key).observe(execution_time)
+    except Exception:
+        pass
+
+    # 统一 WS 通知: ai_task_failed
+    _publish_result(user_id, "ai_task_failed", {
+        "task_id": celery_task_id,
+        "feature_key": feature_key,
+        "status": "failed",
+        "error": error_message,
+        "message": f"您的{_feature_display(feature_key)}处理失败",
+    })
+
+
+def _feature_display(feature_key: str) -> str:
+    """功能名称中文映射"""
+    return {
+        "career_advice": "AI职业建议",
+        "career_compass": "职业罗盘分析",
+        "resume_parse": "简历解析",
+    }.get(feature_key, "AI任务")
+
+
 # ═══════════════════════════════════════════════════
 # Task 1: Career Advice
 # ═══════════════════════════════════════════════════
@@ -61,16 +176,6 @@ async def _career_advice_logic(
     engine: str,
     charge_amount: float,
 ):
-    """
-    【架构说明：Celery 中的异步业务处理】
-    由于外层的 Celery Task 包装器是同步运行的（依赖于底层的 billiard 进程架构），
-    我们在 Task 函数内部手动获取并运行了 AsyncIO Event Loop (_get_event_loop)。
-    
-    这里的业务逻辑：
-    1. 调用处于同进程内的 ai_service.generate_career_advice 访问大模型。
-    2. 如果 AI 返回成功（没有被熔断拦截），我们再利用独立的 session 连接数据库进行**真实验扣费**，
-       以此保证“计费”与“服务返回”的绝对原子性强一致。
-    """
     from services.ai_service import ai_service
     from services.ai_access_service import ai_access_service
     from common.databases.PostgresManager import db_manager
@@ -95,7 +200,13 @@ async def _career_advice_logic(
     return advice_text
 
 
-@shared_task(bind=True, name="tasks.ai_tasks.career_advice_task")
+@shared_task(
+    bind=True,
+    name="tasks.ai_tasks.career_advice_task",
+    acks_late=True,
+    time_limit=300,
+    soft_time_limit=270,
+)
 def career_advice_task(
     self,
     user_id: int,
@@ -106,18 +217,24 @@ def career_advice_task(
 ):
     """Celery task: generate career advice asynchronously."""
     loop = _get_event_loop()
+    started_at = time.time()
+    request_params = {"major_name": major, "skills": skills, "engine": engine}
     try:
         result = loop.run_until_complete(
             _career_advice_logic(user_id, major, skills, engine, charge_amount)
         )
+        # 功能级 WS 通知 (保持向后兼容)
         _publish_result(user_id, "career_advice_result", {
             "task_id": self.request.id,
             "advice": result,
         })
+        # 回写 AiTask + 去重 + 指标 + 统一通知
+        _mark_task_completed(user_id, "career_advice", self.request.id, result, started_at, request_params)
         return {"status": "success", "advice": result}
     except Exception as exc:
         logger.error(f"career_advice_task failed: {exc}")
         _publish_error(user_id, "career_advice_error", str(exc))
+        _mark_task_failed(user_id, "career_advice", self.request.id, str(exc), started_at)
         return {"status": "error", "error": str(exc)}
 
 
@@ -156,7 +273,13 @@ async def _career_compass_logic(
     return report_text
 
 
-@shared_task(bind=True, name="tasks.ai_tasks.career_compass_task")
+@shared_task(
+    bind=True,
+    name="tasks.ai_tasks.career_compass_task",
+    acks_late=True,
+    time_limit=300,
+    soft_time_limit=270,
+)
 def career_compass_task(
     self,
     user_id: int,
@@ -166,18 +289,22 @@ def career_compass_task(
 ):
     """Celery task: generate career compass report asynchronously."""
     loop = _get_event_loop()
+    started_at = time.time()
+    request_params = {"major_name": major_name}
     try:
         result = loop.run_until_complete(
             _career_compass_logic(user_id, major_name, es_stats, charge_amount)
         )
+        # 功能级 WS 通知 (保持向后兼容)
         _publish_result(user_id, "career_compass_result", {
             "task_id": self.request.id,
             "report": result,
         })
+        # 回写 AiTask + 去重 + 指标 + 统一通知
+        _mark_task_completed(user_id, "career_compass", self.request.id, result, started_at, request_params)
         return {"status": "success", "report": result}
     except Exception as exc:
         logger.error(f"career_compass_task failed: {exc}")
         _publish_error(user_id, "career_compass_error", str(exc))
+        _mark_task_failed(user_id, "career_compass", self.request.id, str(exc), started_at)
         return {"status": "error", "error": str(exc)}
-
-

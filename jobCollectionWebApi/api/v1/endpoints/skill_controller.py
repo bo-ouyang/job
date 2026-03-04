@@ -1,8 +1,7 @@
-from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud import skill as crud_skill
-from schemas.skill import SkillInDB, SkillList, SkillFrequencyList
+from schemas.skill_schema import SkillList, SkillFrequencyList
 from dependencies import get_db
 from dependencies import CommonQueryParams
 
@@ -12,7 +11,7 @@ router = APIRouter()
 async def read_skills(
     db: AsyncSession = Depends(get_db),
     commons: CommonQueryParams = Depends(),
-    category: str = Query(None),
+    category: str = Query(None, max_length=100, description="技能分类"),
 ):
     """获取技能列表"""
     if category:

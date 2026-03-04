@@ -1,23 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks
+from core.exceptions import AppException, ExternalServiceException
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies import get_db
 from crud import job as crud_job
 from crud.analysis import user_query
-from schemas.job import *
-from schemas.analysis import UserQueryCreate
+from schemas.job_schema import *
+from schemas.job_schema import JobQueryParams
+from schemas.analysis_schema import UserQueryCreate
 from common.databases.PostgresManager import db_manager
 from dependencies import (
     get_db, 
     PaginationParams, 
     SearchParams,
-    JobQueryParams,
     get_current_user,
-    get_admin_user,
-    rate_limiter,
-    verify_db_health,
     RateLimiter,
-    get_cache_key 
 )
 from common.databases.RedisManager import RedisManager, get_redis
 from core.logger import sys_logger as logger
@@ -30,9 +27,9 @@ from services.search_service import search_service
 from services.ai_service import ai_service
 from services.ai_access_service import ai_access_service
 from config import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 class AIParseRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=1, max_length=500, description="Query string for AI intent parsing")
 
 async def log_search_activity(
     query_type: str, 
@@ -63,31 +60,24 @@ from core.cache import cache
 
 
 
-@router.get("/", response_model=JobList)
+@router.get("/", response_model=JobList,dependencies=[Depends(RateLimiter(requests_per_minute=20))])
 @cache(expire=600, key_prefix="api:jobs:v1")
 async def jobs(
     request: Request,
-    q: str = Query(None, description="Natural language search describing what you want"),
-    location: Optional[int] = Query(None, description="City code"),
-    experience: Optional[str] = Query(None, description="Experience level"),
-    education: Optional[str] = Query(None, description="Education level"),
-    industry: Optional[int] = Query(None, description="Industry code"),
-    salary_min: Optional[float] = Query(None, description="Minimum salary"),
-    salary_max: Optional[float] = Query(None, description="Maximum salary"),
+    job_query: JobQueryParams = Depends(),
+    search: SearchParams = Depends(),
     pagination: PaginationParams = Depends(),
-    db: AsyncSession = Depends(get_db),
-    redis: RedisManager = Depends(get_redis),   
-    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         jobs_data, total = await search_service.search_jobs(
-            keyword=q,
-            location=location,
-            experience=experience,
-            education=education,
-            industry=str(industry) if industry else None,
-            salary_min=salary_min,
-            salary_max=salary_max,
+            keyword=search.q,
+            location=job_query.location,
+            experience=job_query.experience,
+            education=job_query.education,
+            industry=str(job_query.industry) if job_query.industry else None,
+            salary_min=job_query.salary_min,
+            salary_max=job_query.salary_max,
             skip=pagination.skip,
             limit=pagination.page_size
         )
@@ -95,20 +85,21 @@ async def jobs(
         from crud.job import job as crud_job
         jobs_data, total = await crud_job.search(
             db, 
-            keyword=q,
-            location=location,
-            experience=experience,
-            education=education,
-            industry=str(industry) if industry else None,
-            salary_min=salary_min,
-            salary_max=salary_max,
+            keyword=search.q,
+            location=job_query.location,
+            experience=job_query.experience,
+            education=job_query.education,
+            industry=str(job_query.industry) if job_query.industry else None,
+            salary_min=job_query.salary_min,
+            salary_max=job_query.salary_max,
             skip=pagination.skip,
             limit=pagination.page_size
         )
         logger.error(f"Failed to search jobs: {e}")
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to search jobs: {str(e)}"
+            code=StatusCode.INTERNAL_SERVER_ERROR,
+            message=f"Failed to search jobs: {str(e)}"
         )
     return JobList(
         items=jobs_data,
@@ -123,10 +114,9 @@ async def jobs(
 async def ai_search_jobs(
     request: Request,
     background_tasks: BackgroundTasks,
-    q: str = Query(..., description="Natural language search describing what you want"),
+    q: str = Query(..., min_length=1, max_length=500, description="Natural language search describing what you want"),
     pagination: PaginationParams = Depends(),
     db: AsyncSession = Depends(get_db),
-    redis: RedisManager = Depends(get_redis),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -134,7 +124,7 @@ async def ai_search_jobs(
     缓存命中 → 立即返回 JobList; 缓存未命中 → 提交 Celery 任务, 返回 task_id
     """
     if not settings.AI_ENABLED:
-        raise HTTPException(status_code=503, detail="AI service is disabled")
+        raise ExternalServiceException(message="AI service is disabled")
 
     charge_amount = await ai_access_service.ensure_access(
         db=db,
@@ -195,13 +185,14 @@ async def ai_search_jobs(
             size=pagination.page_size,
             pages=(total + pagination.page_size - 1) // pagination.page_size
         )
-    except HTTPException:
+    except AppException:
         raise
     except Exception as e:
         logger.error(f"AI Search Endpoint Error: {e}")
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.INTERNAL_SERVER_ERROR,
-            detail=f"AI Search Failed: {str(e)}"
+            code=StatusCode.INTERNAL_SERVER_ERROR,
+            message=f"AI Search Failed: {str(e)}"
         )
 
 
@@ -209,7 +200,7 @@ async def ai_search_jobs(
 
 @router.get("/skills/{skill_names}", response_model=List[JobInDB])
 async def read_jobs_by_skills(
-    skill_names: str,
+    skill_names: str = Query(..., min_length=1, max_length=200, description="Comma separated skill names"),
     db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -289,7 +280,7 @@ async def test_ai_parse(
     """
     try:
         if not settings.AI_ENABLED:
-            raise HTTPException(status_code=503, detail="AI service is disabled")
+            raise ExternalServiceException(message="AI service is disabled")
         charge_amount = await ai_access_service.ensure_access(
             db=db,
             user_id=current_user.id,
@@ -306,11 +297,12 @@ async def test_ai_parse(
             "query": request.query,
             "parsed_intent": parsed_intent
         }
-    except HTTPException:
+    except AppException:
         raise
     except Exception as e:
         logger.error(f"Error parsing AI intent: {e}")
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse query via AI: {e}"
+            code=StatusCode.INTERNAL_SERVER_ERROR,
+            message=f"Failed to parse query via AI: {e}"
         )

@@ -18,7 +18,8 @@ from api.v1.endpoints import (
     ws_controller as ws,
     payment_controller as payment,
     wallet_controller as wallet,
-    city_controller as city
+    city_controller as city,
+    ai_controller as ai,
 )
 api_router = APIRouter()
 
@@ -39,3 +40,4 @@ api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])
 api_router.include_router(payment.router, prefix="/payment", tags=["payment"])
 api_router.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
 api_router.include_router(city.router, prefix="/cities", tags=["cities"])
+api_router.include_router(ai.router, prefix="/ai", tags=["ai"])

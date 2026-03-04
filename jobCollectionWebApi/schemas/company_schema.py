@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from .base import TimestampSchema
+from .base_schema import TimestampSchema
 
 class CompanyBase(BaseModel):
     name: str

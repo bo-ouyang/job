@@ -1,9 +1,11 @@
+from core.status_code import StatusCode
+from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from dependencies import get_db
 from crud.city import CityCRUD
-from schemas.city import City, CityCreate, CityUpdate
+from schemas.city_schema import City, CityCreate, CityUpdate
 router = APIRouter(tags=["cities"])
 city_crud = CityCRUD()
 
@@ -32,7 +34,7 @@ async def get_city(
     """根据ID获取城市"""
     city = await city_crud.get_city(db, city_id)
     if not city:
-        raise HTTPException(status_code=404, detail="城市不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="城市不存在")
     return city
 
 @router.get("/code/{code}", response_model=City)
@@ -43,7 +45,7 @@ async def get_city_by_code(
     """根据编码获取城市"""
     city = await city_crud.get_city_by_code(db, code)
     if not city:
-        raise HTTPException(status_code=404, detail="城市不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="城市不存在")
     return city
 
 @router.get("/parent/{parent_id}", response_model=List[City])

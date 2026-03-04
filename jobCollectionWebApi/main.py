@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import os
@@ -20,10 +21,11 @@ from api.v1.api import api_router
 from core.logger import sys_logger as logger
 from middleware.log_middleware import APILogMiddleware
 from common.search.conn import es_manager
-from schemas.es_mapping import JOB_INDEX_MAPPING
+from schemas.es_mapping_schema import JOB_INDEX_MAPPING
 from prometheus_fastapi_instrumentator import Instrumentator
 from core.metrics import infra_health, circuit_breaker_state, circuit_breaker_failures
 from middleware.response_middleware import UnifiedResponseMiddleware
+from middleware.security_middleware import SecurityHeadersMiddleware, WAFMiddleware
 from core.status_code import StatusCode
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
@@ -120,9 +122,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 新增：HTTP 防护头识别与框架版本隐藏中间件 (应尽早执行)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 新增：防范简单特征的 SQLi 与 XSS WAF 中间件
+app.add_middleware(WAFMiddleware)
+
 # 注册 API 全局日志中间件
 app.add_middleware(APILogMiddleware)
 app.add_middleware(UnifiedResponseMiddleware)
+
+# 添加 Gzip 压缩中间件，大幅节省带宽 (最小压缩体积 1000 字节)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Prometheus Instrumentator ────────────────────────────────
 # Auto-instruments all HTTP endpoints with RED metrics and exposes /metrics
@@ -134,7 +145,21 @@ Instrumentator(
 ).instrument(app).expose(app, include_in_schema=False)
 
 
+from core.exceptions import AppException
+
 # 全局异常处理
+@app.exception_handler(AppException)
+async def app_exception_handler(request, exc: AppException):
+    logger.warning(f"Business Exception (Captured by Loguru): {exc.message} | Code: {exc.code}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "code": exc.code,
+            "msg": exc.message,
+            "data": exc.data
+        }
+    )
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request, exc):
     return JSONResponse(

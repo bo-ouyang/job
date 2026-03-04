@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 import re
 
-from .base import TimestampSchema
+from .base_schema import TimestampSchema
 from pydantic import field_serializer
 from common.utils.masking import mask_email, mask_phone
 

@@ -1,11 +1,12 @@
+from core.exceptions import AppException
 import hashlib
 import json
 from typing import Any, Dict, List
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud import analysis_result as crud_analysis, user_query as crud_user_query, job as crud_job
-from schemas.analysis import (
+from schemas.analysis_schema import (
     AnalysisResultInDB, 
     AnalysisResultList, 
     AnalysisResultCreate, 
@@ -13,19 +14,14 @@ from schemas.analysis import (
     UserQueryCreate,
     MajorAnalysisRequest,
     MajorCategory,
-    AIAdviceRequest,
-    CareerCompassRequest
 )
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
-from dependencies import JobQueryParams, get_current_user, get_db
+from dependencies import JobQueryParams, get_db
 from crud.major import major as crud_major
 from services.analysis_service import analysis_service
-from services.ai_access_service import ai_access_service
 from common.databases.RedisManager import redis_manager
-from services.ai_service import ai_service
 from crud import industry as crud_industry
-from config import settings
 router = APIRouter()
 
 
@@ -146,10 +142,7 @@ async def read_analysis_result(
     """获取分析结果详情"""
     db_result = await crud_analysis.get(db, id=result_id)
     if not db_result:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="Analysis result not found"
-        )
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="Analysis result not found")
     return db_result
 
 @router.post("/queries", response_model=UserQueryInDB)
@@ -257,10 +250,7 @@ async def analyze_major_skills(
     except Exception as e:
         
         logger.error(f"Major analysis failed: {e}")
-        raise HTTPException(
-            status_code=StatusCode.INTERNAL_SERVER_ERROR, 
-            detail="Analysis service unavailable"
-        )
+        raise AppException(status_code=StatusCode.INTERNAL_SERVER_ERROR, code=StatusCode.BUSINESS_ERROR, message="Analysis service unavailable")
 
 from core.cache import cache
 
@@ -322,168 +312,5 @@ async def get_major_industries(
 
     return industry_trees
 
-@router.post("/ai/advice")
-async def get_ai_advice(
-    req: AIAdviceRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)
-    
-    【核心架构说明】
-    为何使用异步提交？
-    大语言模型生成结果极慢（几秒到几十秒不等），如果在此处 `await` 等待，
-    高并发下会迅速耗尽 FastAPI/Uvicorn 的 HTTP Worker 工作进程，导致服务器假死。
-    因此，本接口采取“立即返回 TaskID (202 Accepted)”的设计模式，
-    将真实的 AI 请求卸载 (Offload) 给了后端的 Celery `realtime` 队列处理。
-    """
-    # 1. 功能开关检查 (故障降级)
-    if not settings.AI_ENABLED:
-        raise HTTPException(status_code=503, detail="AI service is disabled")
-        
-    # 2. 前置鉴权与计费校验 (Fail-Fast 尽早报错)
-    # 在进入漫长的后台队列之前，必须先校验用户是否有足够的余额/点数。
-    # 真正的扣费动作被设计在了 Celery Worker 处理成功之后再执行，以防任务失败错扣费。
-    charge_amount = await ai_access_service.ensure_access(
-        db=db,
-        user_id=current_user.id,
-        feature_key="career_advice",
-    )
-    
-    # 3. 动态导入以避免循环依赖，同时引入任务体
-    from tasks.ai_tasks import career_advice_task
-    from core.metrics import celery_tasks_submitted
-    
-    # 4. 可观测性 (Prometheus Metrics) 监控埋点
-    # 将抛往 realtime (实时计算) 队列的任务数推向普罗米修斯指标监控
-    celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_advice_task", queue="realtime").inc()
-    
-    # 5. 异步投递任务到 Celery 队列
-    # .delay() 实现了非阻塞投递。传入的参数必须是可序列化的基础数据类型 (如 Pydantic 取出的 int, str)。
-    task = career_advice_task.delay(
-        user_id=current_user.id,
-        major=req.major_name,
-        skills=req.skills,
-        engine=req.engine or "auto",
-        charge_amount=charge_amount,
-    )
-    
-    # 6. 立刻释放 HTTP 连接，返回任务追踪 ID 供前端轮询或长连接监听
-    return {"task_id": task.id, "status": "pending"}
 
 
-@router.post("/career-compass")
-async def get_career_compass(
-    req: CareerCompassRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    【核心功能】BI职业数据大盘与 AI 职业罗盘分析 (异步版)
-    ES 数据聚合仍在 controller 完成，AI 报告生成提交 Celery 任务。
-    """
-    if not settings.AI_ENABLED or not settings.AI_CAREER_COMPASS_ENABLED:
-        raise HTTPException(status_code=503, detail="Career compass is disabled")
-
-    # cache_payload = {
-    #     "major_name": req.major_name,
-    #     "target_industry": req.target_industry,
-    #     "target_industry_name": req.target_industry_name,
-    # }
-    # cache_key = f"analysis:career_compass:v2:{_stable_digest(cache_payload)}"
-    # cached_report = await redis_manager.get_cache(cache_key)
-    # if cached_report is not None:
-    #     await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
-    #     return {"report": cached_report}
-    # await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
-    charge_amount = await ai_access_service.ensure_access(
-        db=db,
-        user_id=current_user.id,
-        feature_key="career_compass",
-    ) 
-    try:
-        # 1. 确定搜索关键词与行业 (fast, stays in controller)
-        keywords = []
-        relation = await crud_major.get_relation_by_major_name(db, req.major_name)
-        
-        job_type_keywords = []
-        if relation:
-            if relation.keywords:
-                keywords = [k.strip() for k in relation.keywords.split(',')]
-                
-            if relation.industry_codes:
-                _, job_type_names = await crud_industry.classify_codes_by_level(db, relation.industry_codes)
-                if job_type_names:
-                    job_type_keywords.extend(job_type_names)
-
-        if not keywords and not job_type_keywords:
-            keywords = [req.major_name]
-            
-        combined_keywords = keywords + job_type_keywords + [req.major_name]
-        logger.info(f"combined_keywords: {combined_keywords}")        
-
-        # Calculate stats first
-        es_stats = await analysis_service.career_analysis(
-            keywords=combined_keywords, 
-            industry=req.target_industry,
-            industry_name=req.target_industry_name,
-            major_name=req.major_name,
-        )
-
-        # 2. Check unified cache key (consistent with ai_service)
-        stats_hash = hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest()
-        cache_key = ai_service.get_ai_cache_key("career_compass", {
-            "major": req.major_name,
-            "stats_hash": stats_hash,
-        })
-        
-        cached_report = await redis_manager.get_cache(cache_key)
-        if cached_report is not None:
-            logger.info(f"Career Compass report CACHE HIT: {cache_key}")
-            await _safe_increment_counter("metrics:ai:career_compass:cache_hit")
-            from core.metrics import ai_cache_hits
-            ai_cache_hits.labels(feature="career_compass").inc()
-            return {"report": cached_report, "es_stats": es_stats, "cached": True}
-
-        await _safe_increment_counter("metrics:ai:career_compass:cache_miss")
-
-        # 3. 提交 AI 报告生成为 Celery 任务
-        from tasks.ai_tasks import career_compass_task
-        from core.metrics import celery_tasks_submitted
-        celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_compass_task", queue="realtime").inc()
-        task = career_compass_task.delay(
-            user_id=current_user.id,
-            major_name=req.major_name,
-            es_stats=es_stats,
-            charge_amount=charge_amount,
-        )
-        return {"task_id": task.id, "status": "pending", "es_stats": es_stats}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await _safe_increment_counter("metrics:ai:career_compass:exceptions")
-        logger.error(f"Career Compass Analysis Failed: {e}")
-        raise HTTPException(status_code=500, detail="生成职业罗盘报告失败")
-
-
-@router.get("/ai/task/{task_id}")
-async def get_ai_task_result(
-    task_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """轮询 AI 任务状态和结果 (适用于 career_advice, career_compass)"""
-    from core.celery_app import celery_app
-    result = celery_app.AsyncResult(task_id)
-    
-    if result.state == "PENDING":
-        return {"task_id": task_id, "status": "pending"}
-    elif result.state == "STARTED":
-        return {"task_id": task_id, "status": "processing"}
-    elif result.state == "SUCCESS":
-        return {"task_id": task_id, "status": "completed", "result": result.result}
-    elif result.state == "FAILURE":
-        return {"task_id": task_id, "status": "failed", "error": str(result.result)}
-    else:
-        return {"task_id": task_id, "status": result.state.lower()}

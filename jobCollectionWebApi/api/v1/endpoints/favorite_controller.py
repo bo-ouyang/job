@@ -1,3 +1,4 @@
+from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
 from fastapi import APIRouter, Depends, HTTPException, Query
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from dependencies import get_db, get_current_user
 from common.databases.models.favorite import FavoriteJob, FollowCompany
-from schemas.favorite import FavoriteJobSchema, FollowCompanySchema
+from schemas.favorite_schema import FavoriteJobSchema, FollowCompanySchema
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ async def favorite_job(
         await db.commit()
     except Exception:
         await db.rollback()
-        raise HTTPException(status_code=StatusCode.BAD_REQUEST, detail="收藏失败")
+        raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="收藏失败")
     return {"message": "收藏成功"}
 
 @router.delete("/jobs/{job_id}")
@@ -59,7 +60,7 @@ async def unfavorite_job(
     result = await db.execute(stmt)
     fav = result.scalars().first()
     if not fav:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="未找到收藏记录")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="未找到收藏记录")
         
     await db.delete(fav)
     await db.commit()
@@ -98,7 +99,7 @@ async def follow_company(
         await db.commit()
     except Exception:
         await db.rollback()
-        raise HTTPException(status_code=StatusCode.BAD_REQUEST, detail="关注失败")
+        raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="关注失败")
     return {"message": "关注成功"}
 
 @router.delete("/companies/{company_id}")
@@ -112,7 +113,7 @@ async def unfollow_company(
     result = await db.execute(stmt)
     follow = result.scalars().first()
     if not follow:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="未找到关注记录")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="未找到关注记录")
         
     await db.delete(follow)
     await db.commit()

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, datetime
-from .base import TimestampSchema
+from .base_schema import TimestampSchema
 from pydantic import field_serializer
 from common.utils.masking import mask_email, mask_phone, mask_name, mask_wechat
 

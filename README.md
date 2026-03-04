@@ -20,8 +20,10 @@
    - 基于 **FastAPI** 的高性能异步核心引擎，支持 **uvicorn 多 Worker 生产部署**。
    - 提供完备的 RESTful API，用于内部数据流转及前端大盘展示。
    - 依赖 **PostgreSQL** 进行核心元数据层级化存储。
-   - 原生支持 **Loguru** 全链路可视化日志与全局异常熔断接管。
-   - 集成 **Circuit Breaker 熔断器**，防止 AI API 故障雪崩。
+   - 原生支持 **Loguru** 全链路可视化日志与 **全局 AppException 业务异常拦截体系**。
+   - 搭载了 **独立 WAF 防火墙中间件** 与防 XSS/SQL 注入的**安全防护头 (Helmet Headers)**。
+   - 集成 **Circuit Breaker 熔断器** 与 **Redis Lua 原子态限流器**，防止高并发雪崩与恶意盗刷。
+   - **AI 任务全生命周期管理**：独立 `ai_controller` + `AiTask` 持久化模型 + Redis-First 并发锁 + 去重缓存 + 僵死清理 + Prometheus 18 项自定义指标。
 
 2. **🕷️ 智能爬虫调度 (`jobCollection`)**
    - 基于 **Scrapy** 的专业采集器，搭配自定义 Middleware 规避封控。
@@ -40,21 +42,24 @@
 - **📄 AI 一键智能简历生成**：允许求职者上传 PDF 后，后端自动剥析建立关系数据库画像，前端无感回填成结构化履历。
 - **🔄 全链路日志审计**：从 Web 请求 -> DB 事务 -> Celery 定时任务 -> Spider 子进程，全部集中经由 Loguru 分发按天落盘留存。
 - **🧭 BI 级职业数据罗盘**：利用 Elasticsearch 引擎底座提供高并发聚合透视，支持省市穿透与一二级行业细分画像，并配合前端 ECharts 即时生成宏观薪资漏斗及岗位技能池云图展示。
-- **🧱 企业级高可用缓存防御体系**：集成自动化 Hash 对象生成 `@cache` 装饰器与底层深度的分布式 Redis 强互斥锁，兼具开发敏捷度与生产级的高并发防御（穿透/雪崩免疫）。
-- **🛡️ AI 弹性基础设施**：Circuit Breaker 熔断器（5 次失败→60s 自动熔断恢复）+ AI 结果级 Redis 缓存（career_advice 24h / career_compass 12h）+ Celery 双队列物理隔离（realtime / batch），确保用户请求永远不被后台批量任务阻塞。
-- **⚡ 全异步 AI 端点**：3 大 AI 接口（职业建议 / 罗盘报告 / AI 搜索）全链路 Celery 异步化，前端通过 WebSocket 实时推送或 HTTP 轮询获取结果，不再阻塞。
-- **📈 Prometheus + Grafana 全景监控**：自动暴露 `/metrics` 端点（HTTP RED + 12 项自定义业务指标），预置 Grafana 看板（熔断器状态/AI 缓存/计费/Celery 趋势），Docker 一键启动零配置。
+- **🧱 企业级高可用体系与架构隔离**：拥有自动化 Hash 对象生成 `@cache` 装饰器与底层深度的分布互斥锁。彻底解耦 Pydantic Data Schema 验证层与底仓逻辑，以极强的数据洁癖防御渗透。
+- **🛡️ 立体化网关安全防线 (Security Gateway)**：从底层的 HTTP HSTS / Anti-MIME 嗅探保护头封装，到直连 Redis 无僵尸键的极致 Lua 原子操作限流器，辅以应用层中间件直截 SQLi / XSS 的过滤黑名单探针封禁，护航银行级访问安全。
+- **⚡ 弹性基础设施**：Circuit Breaker 熔断器（5 次失败→60s 自动熔断恢复）+ AI 结果级 Redis 缓存（career_advice 24h / career_compass 12h）+ Celery 双队列物理隔离，全异步 AI 体验，轮询/WebSocket 自由回射结果不阻塞主线程。
+- **🔒 AI 任务并发管控**：每用户每接口 Redis 原子锁 + AiTask 持久化模型 + 请求去重缓存（MD5 摘要 1h TTL）+ 僵死任务 Celery Beat 自动清理，构建企业级 AI 任务全生命周期管理闭环。
+- **🔔 实时 AI 任务通知**：后端 Celery Worker → Redis Pub/Sub → WebSocket → 前端 Pinia Store + ElNotification，用户无需停留在页面即可收到 AI 任务完成/失败推送通知。
+- **📈 Prometheus + Grafana 全景监控**：自动暴露 `/metrics` 端点（HTTP RED + 18 项自定义业务指标），预置 Grafana 看板（熔断器状态/AI 缓存/计费/Celery 趋势/AI 任务生命周期），Docker 一键启动零配置。
 
 ## 🛠️ 技术栈清单
 
-- **后端层**: `Python` · `FastAPI` · `Scrapy`
-- **前端层**: `Vue 3` · `ECharts` · `Element Plus`
-- **管控中台**: `Starlette-Admin`
+- **后端核心**: `Python` · `FastAPI`
+- **安全与控制**: `SecurityMiddleware` (WAF/Helmet) · `Lua 原子限流` · `AppException 捕获`
+- **前端架构**: `Vue 3` · `Vite` · `ECharts` · `Element Plus` · `Pinia` (AI 任务全局 Store)
+- **中台与爬虫**: `Starlette-Admin` · `Scrapy`
 - **任务分发**: `Celery` (双队列: realtime / batch) · `Redis`
-- **持久层**: `PostgreSQL` (基于 asyncpg & SQLAlchemy 2.0) · `Elasticsearch`
-- **大模型解析**: `LangChain Core` · `Pydantic`
-- **弹性架构**: Circuit Breaker · Redis 结果缓存 · uvicorn 多 Worker
-- **可观测性**: Prometheus · Grafana (预置看板)
+- **持久层与引擎**: `PostgreSQL` (基于 asyncpg & SQLAlchemy 2.0) · `Elasticsearch`
+- **AI 解析**: `LangChain Core` · `Pydantic` Schema
+- **微服务高可用**: Circuit Breaker · 多层拦截缓存锁 · Redis 并发锁 · 去重缓存 · uvicorn M-Worker
+- **可观测性**: Prometheus (18 项指标) · Grafana (18 面板) · Loguru
 
 ## 🚀 快速启动
 

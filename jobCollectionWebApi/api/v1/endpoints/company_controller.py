@@ -1,9 +1,10 @@
+from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud import company as crud_company
-from schemas.company import CompanyInDB, CompanyList, CompanyCreate, CompanyUpdate
+from schemas.company_schema import CompanyInDB, CompanyList, CompanyCreate, CompanyUpdate
 from dependencies import get_db
 from dependencies import CommonQueryParams
 
@@ -43,10 +44,7 @@ async def read_company(
     """获取公司详情"""
     db_company = await crud_company.get(db, id=company_id)
     if not db_company:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="Company not found"
-        )
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="Company not found")
     return db_company
 
 @router.post("", response_model=CompanyInDB)
@@ -58,10 +56,7 @@ async def create_company(
     # 检查公司名称是否已存在
     existing_company = await crud_company.get_by_name(db, name=company_in.name)
     if existing_company:
-        raise HTTPException(
-            status_code=StatusCode.BAD_REQUEST,
-            detail="Company with this name already exists"
-        )
+        raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="Company with this name already exists")
     
     return await crud_company.create(db, obj_in=company_in)
 
@@ -74,9 +69,6 @@ async def update_company(
     """更新公司"""
     db_company = await crud_company.get(db, id=company_id)
     if not db_company:
-        raise HTTPException(
-            status_code=StatusCode.NOT_FOUND,
-            detail="Company not found"
-        )
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="Company not found")
     
     return await crud_company.update(db, db_obj=db_company, obj_in=company_in)

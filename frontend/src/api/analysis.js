@@ -27,26 +27,7 @@ export const analysisAPI = {
     });
   },
 
-  // 获取专业-职业罗盘分析报告（AI）
-  getCareerCompass(
-    majorName,
-    targetIndustry1 = null,
-    targetIndustry2 = null,
-    targetIndustry1Name = null,
-    targetIndustry2Name = null,
-  ) {
-    return api.post(
-      "/analysis/career-compass",
-      {
-        major_name: majorName,
-        target_industry: targetIndustry1,
-        target_industry_2: targetIndustry2,
-        target_industry_name: targetIndustry1Name,
-        target_industry_2_name: targetIndustry2Name,
-      },
-      { timeout: 60000 },
-    );
-  },
+  // 注意: getCareerCompass 已迁移至 @/api/ai.js → aiAPI.getCareerCompass
 
   getMajorPresets() {
     return api.get("/analysis/major/presets");

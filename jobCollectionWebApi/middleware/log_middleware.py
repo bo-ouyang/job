@@ -2,7 +2,7 @@ import time
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from crud.analysis import api_log
-from schemas.analysis import APILogCreate
+from schemas.analysis_schema import APILogCreate
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
 

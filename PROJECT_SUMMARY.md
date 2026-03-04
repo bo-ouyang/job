@@ -340,3 +340,107 @@
 #### E. 项目架构文档化
 
 - **新增 `ARCHITECTURE.md`**：涵盖系统全局架构（Mermaid 拓扑图）、技术栈矩阵、后端分层设计（16 Controller / 9 Service / 7 Core）、29 个数据模型 ER 图、数据采集流水线、前端 15 个页面模块清单、弹性高可用架构图、部署端口分配、JWT 认证与 AI 计费流程。
+
+## 14. 最近更新 (2026-03-04)
+
+### 核心 API 架构重构与网关安全层加固 (API Architecture Refactoring & Gateway Security)
+
+本次核心迭代主要聚焦于 **API 容错规范化**、**全链路参数类型约束** 以及构建 **Web 应用网关立体防线**。
+
+#### A. 全局业务异常与状态码规范化 (Global Exception & Error Code Standardization)
+
+- **自定义异常基类体系**：抛弃裸露的 `HTTPException`，在 `core/exceptions.py` 定义了 `AppException` 及其派生子类（如 `UserNotFoundException`, `PermissionDeniedException`, `ExternalServiceException` 等）。
+- **统一业务错误码**：在 `core/status_code.py` 中引入一套独立于 HTTP 状态码的业务级错误标号 (`StatusCode.BUSINESS_ERROR`, `StatusCode.AUTH_FAILED` 等)。
+- **全局集中捕获**：经由 `main.py` 的 FastAPI 全局 Exception Handler 统一拦截 `AppException` 并将其规范为一致的 `{"code", "msg", "data"}` 响应报文返回。
+
+#### B. 网关层安全防线加固 (Gateway Security Headers & WAF Middleware)
+
+- **Helmet Headers (`SecurityHeadersMiddleware`)**：
+  - 自动向所有 HTTP 响应附加反 XSS (`X-XSS-Protection`)、防止 MIME 嗅探 (`X-Content-Type-Options: nosniff`)、HSTS 强制 HTTPS (`Strict-Transport-Security`) 以及反点击劫持 (`X-Frame-Options: DENY`) 头。
+  - **框架指纹隐身**：隐蔽真实的底层引擎标识 (移除 `server: uvicorn`)，统一伪装为 `OceanServer` 混淆探测。
+- **自定义 WAF 门禁 (`WAFMiddleware`)**：
+  - 实现一层轻量级 Query 探测防漏墙，利用正则提前在中间件层熔断诸如 `' OR 1=1` (SQL 注入) 或 `<script>` (跨站脚本) 特征的恶意载荷请求并封禁请求端点 (`403 Forbidden`)。
+
+#### C. 数据抽象层解耦与深层校验 (Schema Layer Decoupling & Deep Validation)
+
+- **全局 Schema 文件标准化更名**：应用一键重构脚本，将所有的 Pydantic 数据类文件（原 `job.py`, `user.py`等）全量变更为 `*_schema.py` 约定名风格，根除了内部模块名与 `crud` 文件夹及标准库的循环引入冲突。
+- **类解耦与 Pydantic 原生验证器**：
+  - 将庞杂的 `JobQueryParams` 依赖从 `dependencies.py` 中剥离并迁入专属的 Data Schema 层 (`job_schema.py`)，重构为纯正的 Pydantic `BaseModel`。
+  - **多字段联动校验 (`@model_validator`)**：直接在 Schema 级内聚完成了诸如 `salary_min <= salary_max` 之类的深度逻辑验证。
+- **参数收口防御**：为整个项目的各独立 Controller（支持搜索参数、行业、关键字查询等入口）全面追加了严苛的 `max_length` 防击穿约束与正则类型限制。
+
+#### D. 限流器原子操作升级 (Atomic Redis Rate Limiting)
+
+- **Lua 脚本原子锁执行**：彻底重写了 `RateLimiter`（存在于 `dependencies.py`），采用 Redis Lua 脚本原子性包装 `INCR` 和 `EXPIRE` 命令，根治了极端并发下限流器可能产生僵尸 Key（永不过期）和越权绕过限流机制的设计漏洞。
+
+## 15. 最近更新 (2026-03-04 续)
+
+### AI 任务全生命周期管理与通知中心 (AI Task Lifecycle Management & Notification Center)
+
+本次大规模更新实现了 AI 长时任务的 **全链路管理闭环**：从后端并发控制、持久化、监控，到前端跨页面状态保持与实时通知，构建了完整的企业级 AI 任务管理体系。
+
+#### A. AI Controller 抽取与并发锁 (Controller Extraction & Concurrency Lock)
+
+- **新增 `ai_controller.py`**：将散落在 `analysis_controller.py` 和 `resume_controller.py` 中的 AI 端点统一抽取至独立 Controller，包含 5 个端点：
+  - `POST /ai/advice` — AI 职业建议
+  - `POST /ai/career-compass` — 职业罗盘分析
+  - `POST /ai/parse-resume` — 简历智能解析
+  - `GET /ai/task/{task_id}` — 任务轮询（Redis-first → PG → Celery 三级降级）
+  - `GET /ai/tasks/history` — 历史记录分页
+- **每用户每接口并发锁**：基于 `Redis SET NX EX` 原子操作，一个用户同一时间只能执行一个同类 AI 任务（AI 搜索除外），前后端同时拦截并返回 `409 + AI_TASK_RUNNING (40902)` 业务错误码。
+
+#### B. AiTask 数据模型与 Redis-First CRUD
+
+- **新增 `AiTask` SQLAlchemy 模型**：记录 `user_id`, `celery_task_id`, `feature_key`, `status`, `request_params` (JSONB), `result_data` (TEXT), `execution_time`, `error_message` 等完整生命周期字段，含 `(user_id, feature_key, status)` 复合索引。
+- **Redis-First 查询模式 (`crud/ai_task.py`)**：
+  - 活跃锁查询：Redis `GET` → PG fallback。
+  - 结果查询：Redis 结果缓存 (TTL 1h) → PG fallback。
+  - 全部 Redis 操作均有 `try/except` 降级，Redis 崩溃不影响核心功能。
+
+#### C. Celery 任务回写与去重缓存 (Task Callbacks & Dedup Cache)
+
+- **完成/失败回写**：`ai_tasks.py` 与 `resume_parser.py` 的 Celery 任务在执行结束后自动调用 `mark_completed` / `mark_failed`，同步更新 PG 状态 + 释放 Redis 锁 + 写入结果缓存。
+- **生产级增强**：`acks_late=True` + `time_limit=300` + `soft_time_limit=270`，防止任务丢失与无限挂起。
+- **请求去重缓存**：对请求参数做 MD5 摘要 → Redis `ai_task:dedup:{feature}:{hash}` (TTL 1h)。相同参数已有完成结果时直接返回缓存，避免重复提交浪费 LLM 调用。
+- **僵死任务清理**：新增 `ai_task_cleanup.py` Celery Beat 定时任务，每 5 分钟扫描 `status=pending/processing` 且 `created_at > 10min` 的记录，检查 Celery result backend 恢复或标记失败并释放锁。
+
+#### D. Prometheus 指标扩展 (AI Task Metrics)
+
+- **新增 6 项指标** (`core/metrics.py`)：
+  - `ai_task_created_total` / `ai_task_completed_total` / `ai_task_failed_total` — 按 feature 分类计数。
+  - `ai_task_rejected_total` — 并发锁拒绝计数。
+  - `ai_task_duration_seconds` — Histogram，桶范围 1s~300s。
+  - `ai_task_dedup_hits_total` — 去重命中计数。
+- **采集点**：Controller 层计 `created` / `rejected` / `dedup_hits`，Worker 层计 `completed` / `failed` / `duration`。
+
+#### E. WebSocket 统一任务通知 (Unified Task Notification)
+
+- **后端双层通知**：任务完成/失败时，Celery Worker 通过 Redis Pub/Sub 同时推送：
+  - 功能级消息（`career_advice_result`, `resume_parsed` 等）— 向后兼容。
+  - 统一消息（`ai_task_completed` / `ai_task_failed`）— 携带 `task_id`, `feature_key`, `status`, `message` 中文提示。
+- **前端全局捕获**：`BasicLayout.vue` 的 WS `onmessage` 中捕获统一通知，调用 `ElNotification` 弹窗提示，同时写入 Pinia store。
+
+#### F. 前端 AI 任务通知中心 (Frontend Notification Center)
+
+- **新增 `stores/aiTask.js` (Pinia Store)**：全局管理所有 AI 任务状态与结果缓存，页面切换不丢失。
+  - `addTask()` — 提交任务时注册。
+  - `markCompleted()` / `markFailed()` — WS 消息自动更新。
+  - `getLatestResult(featureKey)` — 读取上次完成结果（支持跨页面恢复）。
+  - `pollAndUpdate()` — 替代原 `pollTaskResult`，轮询结果自动写入 store。
+- **新增 `components/AiTaskPanel.vue`**：右侧滑出式抽屉面板，展示所有 AI 任务列表，包含状态图标（⏳🔄✅❌）、未读蓝点、进行中 spinner、耗时显示。
+- **导航栏集成**：`BasicLayout.vue` 新增 🤖 图标入口，进行中任务显示黄色数量 badge，有未读结果显示蓝点。
+
+#### G. 跨页面结果持久化 (Cross-Page Data Persistence)
+
+- **`CareerCompass.vue`**：提交时 `aiTaskStore.addTask()`，轮询改用 `aiTaskStore.pollAndUpdate()`。`onMounted` 时调用 `getLatestResult('career_compass')` 恢复上次报告。
+- **`MajorAnalysis.vue`**：同理，恢复 `career_advice` 上次结果。
+- **效果**：用户提交 AI 任务后切换页面，再回到原页面，上次的结果仍然完整显示。
+
+#### H. Grafana 仪表盘扩展
+
+- **新增「🧠 AI 任务生命周期」行**，包含 6 个面板：
+  - AI 任务创建/完成/失败速率 (timeseries)
+  - AI 任务并发拒绝-锁冲突 (timeseries)
+  - AI 任务去重命中 (stat)
+  - AI 任务执行耗时 P50/P95 (timeseries)
+  - AI 任务总量统计-累计 (stat，含四项指标)

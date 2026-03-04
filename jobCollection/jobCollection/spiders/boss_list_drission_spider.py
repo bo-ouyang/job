@@ -15,7 +15,7 @@ from scrapy.exceptions import CloseSpider, DontCloseSpider
 from sqlalchemy import select, update
 
 from common.databases.PostgresManager import db_manager
-from common.databases.models.boss_stu_crawl_url import BossStuCrawlUrl
+from common.databases.models.boss_crawl_task import BossCrawlTask
 from jobCollection.items.boss_job_item import BossJobItem
 
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -58,9 +58,10 @@ class BossListDrissionSpider(scrapy.Spider):
         crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
         return spider
 
-    def __init__(self, task_id: Optional[str] = None, accounts_json: Optional[str] = None, account_index: str = "1", *args, **kwargs):
+    def __init__(self, task_id: Optional[str] = None, task_url: Optional[str] = None, accounts_json: Optional[str] = None, account_index: str = "1", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.target_task_id = int(task_id) if task_id else None
+        self.target_task_url = task_url
         self.accounts_json = accounts_json
 
         self.page: Optional[ChromiumPage] = None
@@ -747,7 +748,7 @@ class BossListDrissionSpider(scrapy.Spider):
         if not self.current_task_id:
             return False
         async with (await db_manager.get_session()) as session:
-            task = await session.get(BossStuCrawlUrl, self.current_task_id)
+            task = await session.get(BossCrawlTask, self.current_task_id)
             if not task:
                 self.current_task_id = None
                 return False
@@ -768,22 +769,30 @@ class BossListDrissionSpider(scrapy.Spider):
 
     async def _fetch_and_assign_new_task(self):
         async with (await db_manager.get_session()) as session:
-            stmt = select(BossStuCrawlUrl).where(BossStuCrawlUrl.status == "pending")
+            stmt = select(BossCrawlTask).where(BossCrawlTask.status == "pending")
             if self.target_task_id:
-                stmt = stmt.where(BossStuCrawlUrl.id == self.target_task_id)
-            stmt = stmt.order_by(BossStuCrawlUrl.id.asc()).limit(1)
+                stmt = stmt.where(BossCrawlTask.id == self.target_task_id)
+            stmt = stmt.order_by(BossCrawlTask.id.asc()).limit(1)
             result = await session.execute(stmt)
             task = result.scalar_one_or_none()
             if not task:
+                if self.target_task_id and self.target_task_url:
+                    self.current_task_id = self.target_task_id
+                    self.current_task_url = self.target_task_url
+                    self.current_task_major_name = ""
+                    self.current_page = 1
+                    self.current_task_retry = 0
+                    self.logger.info(f"直接使用指定任务参数: {self.current_task_id} -> {self.current_task_url}")
+                    await self._update_db_status(self.current_task_id, "processing")
                 return
             task.status = "processing"
             await session.commit()
             self.current_task_id = task.id
             self.current_task_url = task.url
-            self.current_task_major_name = task.major_name or ""
-            self.current_page = 1  # BossStuCrawlUrl 无 page 字段，页码仅内存追踪
+            self.current_task_major_name = getattr(task, "major_name", "")
+            self.current_page = 1  
             self.current_task_retry = 0
-            self.logger.info(f"领取任务 {task.id} [{task.major_name}]: {task.url}")
+            self.logger.info(f"领取任务 {task.id}: {task.url}")
 
     async def _update_task_page(self, task_id: int, page: int):
         # BossStuCrawlUrl 无 page 字段，页码状态仅内存追踪，无需写入 DB
@@ -792,8 +801,8 @@ class BossListDrissionSpider(scrapy.Spider):
     async def _update_db_status(self, task_id: int, status: str, error_msg: Optional[str] = None):
         async with (await db_manager.get_session()) as session:
             stmt = (
-                update(BossStuCrawlUrl)
-                .where(BossStuCrawlUrl.id == task_id)
+                update(BossCrawlTask)
+                .where(BossCrawlTask.id == task_id)
                 .values(status=status, last_crawl_time=datetime.now(), error_msg=error_msg)
             )
             await session.execute(stmt)

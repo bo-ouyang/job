@@ -17,6 +17,7 @@ class BossCrawlTask(Base):
     # 任务状态
     status = Column(String(50), default='pending', index=True, comment='状态: pending, processing, done, error')
     priority = Column(Integer, default=0, comment='优先级 (越大越优先)')
+    pid = Column(Integer, nullable=True, comment='爬虫进程ID')
     
     # 执行结果
     last_crawl_time = Column(DateTime, nullable=True, comment='最后爬取时间')

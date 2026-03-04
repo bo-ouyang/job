@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import settings
 from core.security import verify_token, is_token_blacklisted
 from crud import user as crud_user
-from schemas.token import TokenData
+from schemas.token_schema import TokenData
 from common.databases.PostgresManager import db_manager
 from common.databases.RedisManager import get_redis, RedisManager
 
@@ -53,17 +53,6 @@ async def get_current_user(
     
     return user
 
-async def get_current_active_user(
-    current_user: dict = Depends(get_current_user),
-) -> dict:
-    """获取当前活跃用户"""
-    if current_user.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="用户账户已被禁用"
-        )
-    return current_user
-
 async def get_current_admin_user(
     current_user: dict = Depends(get_current_user),
 ) -> dict:
@@ -74,44 +63,6 @@ async def get_current_admin_user(
             detail="权限不足"
         )
     return current_user
-
-async def get_current_super_admin(
-    current_user: dict = Depends(get_current_user),
-) -> dict:
-    """获取当前超级管理员"""
-    if current_user.role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要超级管理员权限"
-        )
-    return current_user
-
-# 可选的用户认证（不强制要求登录）
-async def get_optional_user(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-) -> Optional[dict]:
-    """获取可选用户（如果提供了有效的令牌）"""
-    authorization = request.headers.get("Authorization")
-    
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    
-    token = authorization.replace("Bearer ", "")
-    payload = verify_token(token)
-    
-    if payload is None or await is_token_blacklisted(token):
-        return None
-    
-    user_id: int = int(payload.get("sub"))
-    if user_id is None:
-        return None
-    
-    user = await crud_user.get(db, id=user_id)
-    if user is None or user.status != "active":
-        return None
-    
-    return user
 
 # 获取客户端信息
 async def get_client_info(
@@ -127,7 +78,6 @@ async def get_client_info(
         "ip_address": client_ip,
         "user_agent": user_agent
     }
-
 
 # 分页依赖
 class PaginationParams:
@@ -148,8 +98,8 @@ class SearchParams:
     
     def __init__(
         self,
-        q: Optional[str] = Query(None, description="搜索关键词"),
-        sort: Optional[str] = Query(None, description="排序字段"),
+        q: Optional[str] = Query(None, max_length=100, description="搜索关键词"),
+        sort: Optional[str] = Query(None, max_length=50, description="排序字段"),
         order: Optional[str] = Query("desc", regex="^(asc|desc)$", description="排序方向")
     ):
         self.q = q
@@ -167,49 +117,6 @@ class CommonQueryParams:
     ):
         self.pagination = pagination
         self.search = search
-
-# 认证依赖（基础版本）
-async def get_api_key(
-    x_api_key: Optional[str] = Header(None, description="API Key")
-) -> str:
-    """
-    API Key 认证依赖
-    使用示例:
-        async def protected_endpoint(api_key: str = Depends(get_api_key)):
-    """
-    if not x_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API Key is missing"
-        )
-    
-    # 这里可以添加更复杂的认证逻辑
-    # 例如验证 API Key 是否有效、检查权限等
-    valid_api_keys = settings.API_KEYS
-    if valid_api_keys and x_api_key not in valid_api_keys:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API Key"
-        )
-    
-    return x_api_key
-
-
-
-# 管理员权限依赖
-async def get_admin_user(
-    current_user: dict = Depends(get_current_user)
-) -> dict:
-    """
-    管理员权限验证依赖
-    """
-    role = getattr(current_user, "role", None)
-    if role not in ["admin", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions"
-        )
-    return current_user
 
 # 缓存键生成依赖
 def get_cache_key(
@@ -276,143 +183,50 @@ async def verify_db_health():
 
 # 速率限制依赖（基础版本）
 
-
 class RateLimiter:
-    """基于 Redis 的分布式速率限制器"""
+    """基于 Redis 的分布式速率限制器 (防穿透 & 无僵尸Key进阶版)"""
     def __init__(self, requests_per_minute: int = 60):
         self.requests_per_minute = requests_per_minute
+        # 使用 Lua 保证 INCR 和 EXPIRE 是绝对原子绑定操作，永不产生僵尸Key
+        self.lua_script = """
+        local current = redis.call("INCR", KEYS[1])
+        if current == 1 then
+            redis.call("EXPIRE", KEYS[1], tonumber(ARGV[1]))
+        end
+        return current
+        """
     
     async def __call__(
         self,
         client_info: dict = Depends(log_request),
         redis: RedisManager = Depends(get_redis)  # 注入 Redis
     ):
+        from core.exceptions import AppException
+        from core.status_code import StatusCode
+        
         client_ip = client_info["client_ip"]
         current_minute = int(time.time()) // 60  # 按分钟分组
-        # 构造限流计数器 key
-        limit_key = f"rate_limit:{client_ip}:{current_minute}"
+        # 构造限流计数器 key，注意这里用 redis manager 的 make_key 包装前缀
+        limit_key = redis.make_key(f"rate_limit:{client_ip}:{current_minute}")
         
-        # 1. 自增计数器
+        try:
+            # 1. 原子化执行计数+过期（60秒自动清理）
+            current_count = await redis.redis_client.eval(
+                self.lua_script, 1, limit_key, 60
+            )
+        except Exception as e:
+            logger.error(f"Rate Limiter Redis Error: {e}")
+            # 如果 Redis 宕机或者出错，选择降级放行还是拒绝？这里选择暂时放行保证业务可用性
+            return
         
-        current_count = await redis.increment_counter(limit_key)
-        
-        # 2. 第一次计数时，设置过期时间（60秒，自动清理）
-        if current_count == 1:
-            await redis.redis_client.expire(redis.make_key(limit_key), 60)
-        
-        # 3. 检查是否超限
+        # 2. 检查是否超限
         if current_count > self.requests_per_minute:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"限流触发！每分钟最多 {self.requests_per_minute} 次请求"
+            raise AppException(
+                status_code=429,
+                code=StatusCode.TOO_MANY_REQUESTS,
+                message=f"限流触发！每分钟最多 {self.requests_per_minute} 次请求"
             )
             
 
 # 创建限流实例
 rate_limiter = RateLimiter(requests_per_minute=60)
-
-# 作业查询特定依赖
-class JobQueryParams:
-    """职位查询特定参数依赖"""
-    
-    def __init__(
-        self,
-        location: Optional[int] = Query(None, description="工作地点"),
-        experience: Optional[str] = Query(None, description="经验要求"),
-        education: Optional[str] = Query(None, description="学历要求"),
-        work_type: Optional[str] = Query(None, description="工作类型"),
-        salary_min: Optional[float] = Query(None, ge=0, description="最低薪资"),
-        salary_max: Optional[float] = Query(None, ge=0, description="最高薪资"),
-        
-        company_id: Optional[int] = Query(None, description="公司ID"),
-        industry: Optional[int] = Query(None, description="行业"),
-        industry_2: Optional[int] = Query(None, description="二级行业"),
-        major_name: Optional[str] = Query(None, description="专业名称"),
-        common: CommonQueryParams = Depends(),
-        industry_name: Optional[str] = Query(None, description="行业名称"),
-        industry_2_name: Optional[str] = Query(None, description="二级行业名称"),
-    ):
-        self.location = location
-        self.experience = experience
-        self.education = education
-        self.work_type = work_type
-        self.salary_min = salary_min
-        self.salary_max = salary_max
-        self.company_id = company_id
-        self.industry = industry
-        self.industry_2 = industry_2
-        self.common = common
-        self.industry_name = industry_name
-        self.industry_2_name = industry_2_name
-        self.major_name = major_name
-
-# 技能查询特定依赖
-class SkillQueryParams:
-    """技能查询特定参数依赖"""
-    
-    def __init__(
-        self,
-        category: Optional[str] = Query(None, description="技能分类"),
-        common: CommonQueryParams = Depends()
-    ):
-        self.category = category
-        self.common = common
-
-# 分析查询特定依赖
-class AnalysisQueryParams:
-    """分析查询特定参数依赖"""
-    
-    def __init__(
-        self,
-        analysis_type: Optional[str] = Query(None, description="分析类型"),
-        days: Optional[int] = Query(7, ge=1, le=365, description="时间范围（天）"),
-        common: CommonQueryParams = Depends()
-    ):
-        self.analysis_type = analysis_type
-        self.days = days
-        self.common = common
-
-# 导出格式依赖
-class ExportParams:
-    """导出参数依赖"""
-    
-    def __init__(
-        self,
-        format: str = Query("json", regex="^(json|csv|xlsx)$", description="导出格式"),
-        include_columns: Optional[str] = Query(None, description="包含的列（逗号分隔）")
-    ):
-        self.format = format
-        self.include_columns = include_columns.split(",") if include_columns else None
-
-# 响应头依赖
-async def add_response_headers():
-    """
-    添加通用响应头依赖
-    """
-    return {
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "X-XSS-Protection": "1; mode=block",
-        "Cache-Control": "no-cache, no-store, must-revalidate"
-    }
-
-# 数据库事务依赖
-async def with_transaction(db: AsyncSession = Depends(get_db)):
-    """
-    数据库事务依赖
-    确保在事务中执行操作
-    """
-    try:
-        # 开始事务
-        await db.begin()
-        yield db
-        # 提交事务
-        await db.commit()
-    except Exception as e:
-        # 回滚事务
-        await db.rollback()
-        logger.error(f"Transaction failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database transaction failed"
-        )

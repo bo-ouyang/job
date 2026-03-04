@@ -24,6 +24,7 @@ from .spider_boss_crawl_url import SpiderBossCrawlUrl
 from .major import Major, MajorIndustryRelation
 from .boss_stu_crawl_url import BossStuCrawlUrl
 from .system_config import SystemConfig
+from .ai_task import AiTask
 
 __all__ = [
     'Base',
@@ -66,4 +67,5 @@ __all__ = [
     'MajorIndustryRelation',
     'BossStuCrawlUrl',
     'SystemConfig',
+    'AiTask',
 ]

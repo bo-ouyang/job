@@ -1,13 +1,15 @@
+from core.status_code import StatusCode
+from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
 from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from common.databases.PostgresManager import db_manager
 from crud.message import message as crud_message
-from schemas.message import MessageCreate, MessageType
+from schemas.message_schema import MessageCreate, MessageType
 
 from crud.application import application as crud_application
 from crud.job import job as crud_job
-from schemas.application import ApplicationCreate, ApplicationWithJob
+from schemas.application_schema import ApplicationCreate, ApplicationWithJob
 from dependencies import get_current_user
 from common.databases.models.user import User
 from core.logger import sys_logger as logger
@@ -24,13 +26,13 @@ async def apply_job(
     # ... (previous checks)
     job = await crud_job.get(db, id=application_in.job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="Job not found")
 
     existing_application = await crud_application.get_by_user_job(
         db, user_id=current_user.id, job_id=application_in.job_id
     )
     if existing_application:
-        raise HTTPException(status_code=400, detail="You have already applied for this job")
+        raise AppException(status_code=400, code=StatusCode.PARAMS_ERROR, message="You have already applied for this job")
 
     application_data = application_in.dict()
     application_data["user_id"] = current_user.id

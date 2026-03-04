@@ -4,10 +4,11 @@ from common.databases.models.boss_spider_filter import BossSpiderFilter
 from common.databases.models.boss_crawl_task import BossCrawlTask
 from core.logger import sys_logger as logger
 
-from core.logger import sys_logger as logger
 import subprocess
 import sys
 import os
+import platform
+import signal
 
 
 class CrawlerService:
@@ -88,6 +89,16 @@ class CrawlerService:
                 if task:
                     task.status = 'pending'
                     task.error_msg = None
+                    if task.pid:
+                        try:
+                            if platform.system() == 'Windows':
+                                subprocess.run(['taskkill', '/F', '/T', '/PID', str(task.pid)], capture_output=True)
+                            else:
+                                os.kill(task.pid, signal.SIGTERM)
+                            logger.info(f"Killed process {task.pid} for task {task.id} (reset)")
+                        except Exception as e:
+                            logger.error(f"Failed to kill process {task.pid} for task {task.id}: {e}")
+                        task.pid = None
                     session.add(task)
             await session.commit()
         return len(task_ids)
@@ -110,6 +121,19 @@ class CrawlerService:
                     # 如果是重置为 pending，清除错误信息
                     if status == 'pending':
                         task.error_msg = None
+                    
+                    # 取消或完成任务时，如果进程还在运行则停止它
+                    if status in ('stopped', 'paused', 'pending', 'error', 'done') and task.pid:
+                        try:
+                            if platform.system() == 'Windows':
+                                subprocess.run(['taskkill', '/F', '/T', '/PID', str(task.pid)], capture_output=True)
+                            else:
+                                os.kill(task.pid, signal.SIGTERM)
+                            logger.info(f"Killed process {task.pid} for task {task.id} (status: {status})")
+                        except Exception as e:
+                            logger.error(f"Failed to kill process {task.pid} for task {task.id}: {e}")
+                        task.pid = None
+                    
                     session.add(task)
             await session.commit()
         return len(task_ids)
@@ -153,12 +177,20 @@ class CrawlerService:
         try:
             logger.info(f"Launching crawler for task {task_id} in {scrapy_project_dir}")
             # Use Popen to run in background (fire and forget)
-            subprocess.Popen(
+            process = subprocess.Popen(
                 cmd, 
                 cwd=scrapy_project_dir,
                 # shell=True # Shell=True might be needed on Windows for path resolution, but problematic for PID
             )
-            return True, "Crawler started in background"
+            
+            async with db_manager.async_session() as session:
+                update_task = await session.get(BossCrawlTask, int(task_id))
+                if update_task:
+                    update_task.pid = process.pid
+                    session.add(update_task)
+                await session.commit()
+                
+            return True, f"Crawler started in background with PID {process.pid}"
         except Exception as e:
             logger.error(f"Failed to launch crawler: {e}")
             return False, str(e)

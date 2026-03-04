@@ -1,12 +1,11 @@
-# jobCollectionWebApi/routers/industry.py
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
+from core.exceptions import AppException
+from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from dependencies import get_db
 from crud.industry import IndustryCRUD
-from schemas.industry import Industry, IndustryCreate, IndustryUpdate, IndustryTree, IndustryResponse
-from common.databases.RedisManager import redis_manager
-import json
+from schemas.industry_schema import Industry, IndustryCreate, IndustryUpdate, IndustryTree, IndustryResponse
 router = APIRouter(prefix="/industries", tags=["industries"])
 industry_crud = IndustryCRUD()
 
@@ -27,7 +26,7 @@ async def get_industry(
     """根据ID获取行业"""
     industry = await industry_crud.get_industry(db, industry_id)
     if not industry:
-        raise HTTPException(status_code=404, detail="行业不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="行业不存在")
     return industry
 
 @router.get("/code/{code}", response_model=Industry)
@@ -38,7 +37,7 @@ async def get_industry_by_code(
     """根据编码获取行业"""
     industry = await industry_crud.get_industry_by_code(db, code)
     if not industry:
-        raise HTTPException(status_code=404, detail="行业不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="行业不存在")
     return industry
 
 @router.get("/level/{level}", response_model=List[Industry])
@@ -62,7 +61,7 @@ from core.cache import cache
 @router.get("/tree/", response_model=List[IndustryTree])
 @cache(expire=604800, key_prefix="api:industries:tree:v2")
 async def get_industry_tree(
-    parent_id: Optional[int] = Query(None, description="父级ID，为空则获取所有一级行业"),
+    parent_id: Optional[int] = Query(None, gt=0, description="父级ID，为空则获取所有一级行业"),
     db: AsyncSession = Depends(get_db)
 ):
     """获取行业树形结构"""
@@ -87,7 +86,7 @@ async def update_industry(
     # 先检查行业是否存在
     existing = await industry_crud.get_industry(db, industry_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="行业不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="行业不存在")
     
     industry_data = industry.dict(exclude_unset=True)
     industry_data["code"] = existing.code  # 保持code不变
@@ -101,7 +100,7 @@ async def delete_industry(
     """删除行业"""
     industry = await industry_crud.delete_industry(db, industry_id)
     if not industry:
-        raise HTTPException(status_code=404, detail="行业不存在")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="行业不存在")
     
     return IndustryResponse(
         success=True,

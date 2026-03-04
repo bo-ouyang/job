@@ -84,7 +84,7 @@ const handleResumeUpload = async (event) => {
 
 // AI Parsing
 const parsingStatus = ref("");
-import { resumeAPI } from '@/api/resume';
+import { aiAPI } from '@/api/ai';
 
 const handleSmartParse = async (event) => {
   const file = event.target.files[0];
@@ -95,10 +95,13 @@ const handleSmartParse = async (event) => {
   formData.append("file", file);
 
   try {
-    await resumeAPI.parseResume(formData);
+    await aiAPI.parseResume(formData);
     parsingStatus.value = "parsing";
   } catch (e) {
-    if (e.code === "ECONNABORTED") {
+    if (e.response?.status === 409 || e.response?.data?.code === 40902) {
+      parsingStatus.value = "";
+      alert("当前有简历解析任务正在执行中，请等待完成后再试");
+    } else if (e.code === "ECONNABORTED") {
       parsingStatus.value = "timeout";
       alert("请求超时，解析将在后台继续，请留意消息通知");
     } else {

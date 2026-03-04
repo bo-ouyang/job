@@ -1,7 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict,field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing import Optional, List, Any
 from datetime import datetime
-from .base import TimestampSchema
+from .base_schema import TimestampSchema
 from enum import Enum
 import re
 class WorkType(str, Enum):
@@ -102,9 +102,9 @@ class JobInDB(JobBase, TimestampSchema):
         from_attributes = True
 
 # 包含关系的响应模式
-from .industry import Industry
+from .industry_schema import Industry
 try:
-    from .company import CompanyInDB, CompanySimple
+    from .company_schema import CompanyInDB, CompanySimple
 except ImportError:
      pass
 
@@ -162,3 +162,25 @@ class JobList(BaseModel):
     page: int
     size: int
     pages: int
+
+# 职位查询特定参数 (Pydantic Schema)
+class JobQueryParams(BaseModel):
+    """职位查询特定参数"""
+    location: Optional[int] = Field(None, gt=0, description="工作地点")
+    experience: Optional[str] = Field(None, max_length=50, description="经验要求")
+    education: Optional[str] = Field(None, max_length=50, description="学历要求")
+    work_type: Optional[str] = Field(None, max_length=50, description="工作类型")
+    salary_min: Optional[float] = Field(None, ge=0, description="最低薪资")
+    salary_max: Optional[float] = Field(None, ge=0, description="最高薪资")
+    company_id: Optional[int] = Field(None, gt=0, description="公司ID")
+    industry: Optional[int] = Field(None, gt=0, description="行业")
+    industry_2: Optional[int] = Field(None, gt=0, description="二级行业")
+    major_name: Optional[str] = Field(None, max_length=100, description="专业名称")
+    industry_name: Optional[str] = Field(None, max_length=100, description="行业名称")
+    industry_2_name: Optional[str] = Field(None, max_length=100, description="二级行业名称")
+
+    @model_validator(mode='after')
+    def check_salary(self) -> 'JobQueryParams':
+        if self.salary_min is not None and self.salary_max is not None and self.salary_min > self.salary_max:
+            raise ValueError('Minimum salary cannot be greater than maximum salary')
+        return self

@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from .base import CRUDBase
 from common.databases.models.resume import Resume, Education, WorkExperience, ProjectExperience
-from schemas.resume import ResumeCreate, ResumeUpdate
+from schemas.resume_schema import ResumeCreate, ResumeUpdate
 
 class CRUDResume(CRUDBase[Resume, ResumeCreate, ResumeUpdate]):
     

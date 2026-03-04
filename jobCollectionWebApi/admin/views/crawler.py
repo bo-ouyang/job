@@ -47,6 +47,7 @@ class BossCrawlTaskView(AdminRestrictedView):
         BossCrawlTask.priority, 
         BossCrawlTask.last_crawl_time, 
         BossCrawlTask.error_msg, 
+        BossCrawlTask.pid,
         BossCrawlTask.created_at
     ]
     search_builder = True
@@ -54,7 +55,8 @@ class BossCrawlTaskView(AdminRestrictedView):
     column_default_sort = [(BossCrawlTask.created_at, True)]
     
     # Fix: Hide status field in create form to use database default ('pending')
-    exclude_fields_from_create = [BossCrawlTask.status]
+    exclude_fields_from_create = [BossCrawlTask.status, BossCrawlTask.pid]
+    exclude_fields_from_edit = [BossCrawlTask.pid]
 
     @row_action(
         name="reset_task",

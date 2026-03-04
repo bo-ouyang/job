@@ -29,10 +29,5 @@ export const resumeAPI = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
-  parseResume(formData) {
-    return request.post("/resumes/parse", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-      timeout: 60000, // 60s timeout for parsing
-    });
-  },
+  // 注意: parseResume 已迁移至 @/api/ai.js → aiAPI.parseResume
 };

@@ -11,7 +11,7 @@ sys.path.append(current_dir)
 
 from services.auth_service import auth_service
 from common.databases.PostgresManager import db_manager
-from schemas.token import LoginRequest, PhoneLoginRequest
+from schemas.token_schema import LoginRequest, PhoneLoginRequest
 
 BASE_URL = "http://localhost:8000/api/v1/auth"
 

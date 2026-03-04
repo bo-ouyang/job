@@ -81,6 +81,44 @@ ai_billing_rejections = Counter(
     ["feature", "reason"],  # reason: balance / rate_limit
 )
 
+# ── AI Task Lifecycle ────────────────────────────────────────
+ai_task_created = Counter(
+    "ai_task_created_total",
+    "Total AI tasks created",
+    ["feature"],
+)
+
+ai_task_completed = Counter(
+    "ai_task_completed_total",
+    "Total AI tasks completed successfully",
+    ["feature"],
+)
+
+ai_task_failed = Counter(
+    "ai_task_failed_total",
+    "Total AI tasks failed",
+    ["feature"],
+)
+
+ai_task_rejected = Counter(
+    "ai_task_rejected_total",
+    "Total AI tasks rejected due to concurrency lock",
+    ["feature"],
+)
+
+ai_task_duration = Histogram(
+    "ai_task_duration_seconds",
+    "End-to-end AI task execution time in seconds",
+    ["feature"],
+    buckets=[1, 2, 5, 10, 20, 30, 60, 120, 300],
+)
+
+ai_task_dedup_hits = Counter(
+    "ai_task_dedup_hits_total",
+    "Total AI task deduplication cache hits (same params reuse)",
+    ["feature"],
+)
+
 # ── WebSocket ────────────────────────────────────────────────
 ws_connections_active = Gauge(
     "ws_connections_active",

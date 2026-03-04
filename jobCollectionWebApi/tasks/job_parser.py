@@ -107,8 +107,10 @@ async def _process_batch_job_parsing(limit: int = 10):
                 description = job.description
                 if not description:
                     logger.warning(f"Job ID {job.id} has no description to parse. Marking abandoned.")
-                    job.ai_parsed = 2  # Prevent looping
-                    await session.commit()
+                    async with (await db_manager.get_session()) as local_session:
+                        from sqlalchemy import update
+                        await local_session.execute(update(Job).where(Job.id == job.id).values(ai_parsed=2))
+                        await local_session.commit()
                     return
 
                 logger.info(f"Invoking LLM for Job ID {job.id}...")
@@ -120,12 +122,17 @@ async def _process_batch_job_parsing(limit: int = 10):
                             "format_instructions": parser.get_format_instructions()
                         })
 
-                        # JsonOutputParser returns a dict
-                        job.ai_parsed = 2
-                        job.ai_skills = parsed_result.get('skills', [])
-                        job.ai_benefits = parsed_result.get('benefits', [])
-                        job.ai_summary = parsed_result.get('summary', '')
-                        await session.commit()
+                        from sqlalchemy import update
+                        async with (await db_manager.get_session()) as local_session:
+                            await local_session.execute(
+                                update(Job).where(Job.id == job.id).values(
+                                    ai_parsed=2,
+                                    ai_skills=parsed_result.get('skills', []),
+                                    ai_benefits=parsed_result.get('benefits', []),
+                                    ai_summary=parsed_result.get('summary', '')
+                                )
+                            )
+                            await local_session.commit()
                         logger.info(f"Successfully updated Job ID {job.id} with AI insight.")
                         try:
                             from tasks.es_sync import sync_job_to_es
@@ -135,13 +142,17 @@ async def _process_batch_job_parsing(limit: int = 10):
                     except Exception as llm_err:
                         logger.error(f"Error parsing job {job.id}: {llm_err}")
                         # 回滚状态使其参与下一次补漏
-                        job.ai_parsed = 0
-                        await session.commit()
+                        from sqlalchemy import update
+                        async with (await db_manager.get_session()) as local_session:
+                            await local_session.execute(update(Job).where(Job.id == job.id).values(ai_parsed=0))
+                            await local_session.commit()
 
             # Pre-lock all jobs to ai_parsed=1 before concurrent processing
             for job in jobs:
                 if job.description:
                     job.ai_parsed = 1
+                    #from tasks.es_sync import sync_job_to_es
+                    # sync_job_to_es.delay(job.id)
             await session.commit()
 
             # Run all parsing concurrently (bounded by semaphore)

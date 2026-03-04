@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from common.databases.models.application import Application, ApplicationStatus
-from schemas.application import ApplicationCreate, ApplicationUpdate
+from schemas.application_schema import ApplicationCreate, ApplicationUpdate
 from .base import CRUDBase
 
 from common.databases.models.job import Job

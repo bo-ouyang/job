@@ -2,7 +2,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
 from common.databases.models.message import Message, MessageType
-from schemas.message import MessageCreate, MessageUpdate
+from schemas.message_schema import MessageCreate, MessageUpdate
 from .base import CRUDBase
 
 class CRUDMessage(CRUDBase[Message, MessageCreate, MessageUpdate]):

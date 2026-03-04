@@ -1,9 +1,10 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
+from core.status_code import StatusCode
+from core.exceptions import AppException, PermissionDeniedException
 from sqlalchemy.ext.asyncio import AsyncSession
 from common.databases.PostgresManager import db_manager
 from crud.message import message as crud_message
-from schemas.message import Message
+from schemas.message_schema import Message
 from dependencies import get_current_user
 from common.databases.models.user import User
 
@@ -45,9 +46,9 @@ async def mark_message_read(
     """
     msg = await crud_message.get(db, id=msg_id)
     if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="Message not found")
     if msg.receiver_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not your message")
+        raise PermissionDeniedException(message="Not your message")
     
     if not msg.is_read:
         msg = await crud_message.update(db, db_obj=msg, obj_in={"is_read": True})

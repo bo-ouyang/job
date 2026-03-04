@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
+from middleware.security_middleware import SecurityHeadersMiddleware, WAFMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import os
@@ -90,6 +93,23 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# CORS 中间件 (后台可以放开但安全头一定要加)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 新增：HTTP 防护头识别与框架版本隐藏中间件 (应尽早执行)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 新增：防范简单特征的 SQLi 与 XSS WAF 中间件
+app.add_middleware(WAFMiddleware)
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Admin Setup
 from admin import setup_admin

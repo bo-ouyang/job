@@ -1,11 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, status
 from core.status_code import StatusCode
-from fastapi.responses import JSONResponse
-import shutil
+from core.exceptions import AppException
 import os
 import uuid
 import time
-from typing import List
 from config import settings
 
 router = APIRouter()
@@ -35,15 +33,16 @@ async def validate_and_save_file(file: UploadFile, save_path: str, max_size: int
     # 1. Check Extension (First line of defense)
     ext = file.filename.split('.')[-1].lower()
     if ext not in settings.ALLOWED_EXTENSIONS:
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.BAD_REQUEST,
-            detail=f"不支持的文件类型. 允许的类型: {', '.join(settings.ALLOWED_EXTENSIONS)}"
+            code=StatusCode.PARAMS_ERROR,
+            message=f"不支持的文件类型. 允许的类型: {', '.join(settings.ALLOWED_EXTENSIONS)}"
         )
 
     # 2. Magic Number Validation (Read first 2KB)
     header = await file.read(2048)
     if not header:
-        raise HTTPException(status_code=StatusCode.BAD_REQUEST, detail="空文件")
+        raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="空文件")
     
     # Check signature if we have a definition for this extension
     if ext in MAGIC_NUMBERS:
@@ -59,7 +58,7 @@ async def validate_and_save_file(file: UploadFile, save_path: str, max_size: int
             if ext == 'docx' and header.startswith(b'\x50\x4B\x03\x04'):
                  pass
             else:
-                 raise HTTPException(status_code=StatusCode.BAD_REQUEST, detail="文件内容与扩展名不符")
+                 raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="文件内容与扩展名不符")
 
     # Reset cursor for writing
     await file.seek(0)
@@ -79,18 +78,19 @@ async def validate_and_save_file(file: UploadFile, save_path: str, max_size: int
                 if file_size > max_size:
                     buffer.close()
                     os.remove(save_path) # Cleanup partial file
-                    raise HTTPException(
+                    raise AppException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"文件大小超过限制 ({max_size / 1024 / 1024}MB)"
+                        code=StatusCode.BUSINESS_ERROR,
+                        message=f"文件大小超过限制 ({max_size / 1024 / 1024}MB)"
                     )
                 
                 buffer.write(chunk)
-    except HTTPException:
+    except AppException:
         raise
     except Exception as e:
          if os.path.exists(save_path):
              os.remove(save_path)
-         raise HTTPException(status_code=StatusCode.INTERNAL_SERVER_ERROR, detail=f"文件保存失败: {str(e)}")
+         raise AppException(status_code=StatusCode.INTERNAL_SERVER_ERROR, code=StatusCode.INTERNAL_SERVER_ERROR, message=f"文件保存失败: {str(e)}")
 
     return file_size
 

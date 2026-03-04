@@ -86,7 +86,7 @@ def format_job_for_es(job: Job) -> dict:
 
 async def sync_all_jobs_to_es():
     """Bulk copy jobs from Postgres to Elasticsearch"""
-    from schemas.es_mapping import JOB_INDEX_MAPPING
+    from schemas.es_mapping_schema import JOB_INDEX_MAPPING
 
     # 1. 强制删掉旧索引，利用最新 Mapping 重建
     logger.info("Initializing ES Index (Dropping old data)...")

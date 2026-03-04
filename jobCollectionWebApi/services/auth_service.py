@@ -16,8 +16,8 @@ from crud import (
     verification_code as crud_verification_code,
     user_session as crud_user_session
 )
-from schemas.user import UserCreate, UserPublic, UserUpdate
-from schemas.token import Token, LoginResponse, WechatLoginRequest, PhoneLoginRequest, LoginRequest
+from schemas.user_schema import UserCreate, UserPublic, UserUpdate
+from schemas.token_schema import Token, LoginResponse, WechatLoginRequest, PhoneLoginRequest, LoginRequest
 from config import settings
 from services.wechat_service import wechat_service
 import uuid

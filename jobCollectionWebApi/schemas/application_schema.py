@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from common.databases.models.application import ApplicationStatus
-from schemas.job import JobSimple as Job
+from schemas.job_schema import JobSimple as Job
 
 class ApplicationBase(BaseModel):
     job_id: int

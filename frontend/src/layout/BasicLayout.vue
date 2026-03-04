@@ -3,10 +3,14 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { RouterLink, RouterView } from "vue-router";
 import LoginModal from "@/components/LoginModal.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useAiTaskStore } from "@/stores/aiTask";
+import { ElNotification } from "element-plus";
+import AiTaskPanel from "@/components/AiTaskPanel.vue";
 
 import { messageAPI } from "@/api/message";
 
 const authStore = useAuthStore();
+const aiTaskStore = useAiTaskStore();
 const showLoginModal = ref(false);
 const unreadCount = ref(0);
 
@@ -50,6 +54,30 @@ const connectWebSocket = () => {
     const data = JSON.parse(event.data);
     if (data.type === "new_message") {
       unreadCount.value++;
+    }
+    // 统一 AI 任务通知 —— 写入 store
+    if (data.type === "ai_task_completed" && data.data) {
+      aiTaskStore.markCompleted(data.data.task_id, data.data, {
+        featureKey: data.data.feature_key,
+        executionTime: data.data.execution_time,
+      });
+      ElNotification({
+        title: "✅ 任务完成",
+        message: data.data.message || "您的AI任务已完成",
+        type: "success",
+        duration: 5000,
+      });
+    }
+    if (data.type === "ai_task_failed" && data.data) {
+      aiTaskStore.markFailed(data.data.task_id, data.data.error, {
+        featureKey: data.data.feature_key,
+      });
+      ElNotification({
+        title: "❌ 任务失败",
+        message: data.data.message || "您的AI任务处理失败",
+        type: "error",
+        duration: 8000,
+      });
     }
     window.dispatchEvent(new CustomEvent("ws-message", { detail: data }));
   };
@@ -114,6 +142,11 @@ const handleLogout = () => {
                 消息
                 <span v-if="unreadCount > 0" class="badge">{{ unreadCount }}</span>
               </RouterLink>
+              <span class="user-nav-link ai-bell" @click="aiTaskStore.togglePanel">
+                🤖
+                <span v-if="aiTaskStore.pendingCount > 0" class="badge pending-badge">{{ aiTaskStore.pendingCount }}</span>
+                <span v-else-if="aiTaskStore.hasUnread" class="ai-dot"></span>
+              </span>
               <RouterLink to="/my/wallet" class="user-nav-link">钱包</RouterLink>
               <span class="divider">|</span>
               <span class="username">{{ authStore.user?.username || authStore.user?.phone }}</span>
@@ -126,6 +159,7 @@ const handleLogout = () => {
     </header>
 
     <LoginModal :isOpen="showLoginModal" @close="showLoginModal = false" />
+    <AiTaskPanel />
 
     <main>
       <RouterView v-slot="{ Component }">
@@ -357,5 +391,39 @@ main {
   .wrapper { padding: 1rem; }
   .links { display: none; }
   .user-profile { gap: 0.5rem; padding: 0.4rem; }
+}
+
+.ai-bell {
+  position: relative;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: transform 0.2s;
+  user-select: none;
+}
+
+.ai-bell:hover {
+  transform: scale(1.15);
+}
+
+.pending-badge {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  animation: pulse-amber 2s infinite;
+}
+
+.ai-dot {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+@keyframes pulse-amber {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 </style>

@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.search.conn import es_manager
-from schemas.es_mapping import JOB_INDEX_MAPPING
+from schemas.es_mapping_schema import JOB_INDEX_MAPPING
 from config import settings
 from core.logger import sys_logger as logger
 

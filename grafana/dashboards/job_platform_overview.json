@@ -234,6 +234,109 @@
           "legendFormat": "{{ feature }} - {{ reason }}"
         }
       ]
+    },
+    {
+      "title": "🧠 AI 任务生命周期",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "collapsed": false
+    },
+    {
+      "title": "AI 任务创建/完成/失败 速率",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum(rate(ai_task_created_total[5m])) by (feature)",
+          "legendFormat": "Created: {{ feature }}"
+        },
+        {
+          "expr": "sum(rate(ai_task_completed_total[5m])) by (feature)",
+          "legendFormat": "Completed: {{ feature }}"
+        },
+        {
+          "expr": "sum(rate(ai_task_failed_total[5m])) by (feature)",
+          "legendFormat": "Failed: {{ feature }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "title": "AI 任务并发拒绝 (锁冲突)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum(increase(ai_task_rejected_total[1h])) by (feature)",
+          "legendFormat": "{{ feature }}"
+        }
+      ]
+    },
+    {
+      "title": "AI 任务去重命中",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 34 },
+      "targets": [
+        {
+          "expr": "sum(increase(ai_task_dedup_hits_total[1h])) by (feature)",
+          "legendFormat": "{{ feature }}"
+        }
+      ]
+    },
+    {
+      "title": "AI 任务执行耗时 (P50 / P95)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(ai_task_duration_seconds_bucket[5m])) by (le, feature))",
+          "legendFormat": "P50: {{ feature }}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(ai_task_duration_seconds_bucket[5m])) by (le, feature))",
+          "legendFormat": "P95: {{ feature }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "title": "AI 任务总量统计 (累计)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "targets": [
+        {
+          "expr": "sum(ai_task_created_total)",
+          "legendFormat": "总创建"
+        },
+        {
+          "expr": "sum(ai_task_completed_total)",
+          "legendFormat": "总完成"
+        },
+        {
+          "expr": "sum(ai_task_failed_total)",
+          "legendFormat": "总失败"
+        },
+        {
+          "expr": "sum(ai_task_rejected_total)",
+          "legendFormat": "总拒绝"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [{ "value": 0, "color": "blue" }]
+          }
+        }
+      }
     }
   ],
   "schemaVersion": 39,
@@ -244,5 +347,5 @@
   "timezone": "browser",
   "title": "Job Platform 全景监控",
   "uid": "job-platform-overview",
-  "version": 1
+  "version": 2
 }

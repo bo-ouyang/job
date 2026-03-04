@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
-from .base import TimestampSchema
+from .base_schema import TimestampSchema
 
 class AnalysisResultBase(BaseModel):
     analysis_type: str

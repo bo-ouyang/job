@@ -109,9 +109,10 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
         self.card_timeout           = float(os.getenv("BOSS_CARD_TIMEOUT",               "10.0"))
         self._pages_since_cookie_save = 0
 
-        # ── Watchdog 充底：超过 N 秒无活动则强制触发下一任务 ──────────────
+        # ── Watchdog 充底：监控 is_checking 超时，防止抓取永远卡死 ─────────────
         self.watchdog_timeout       = float(os.getenv("BOSS_WATCHDOG_TIMEOUT",           "60.0"))
         self._last_active_at        = time.time()
+        self._checking_started_at   = 0.0  # is_checking=True 的起始时刻
 
         self.logger.info(
             f"重写版详情爬虫初始化完成，账户数: {len(self.accounts)}，"
@@ -133,16 +134,27 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
             item = await self.item_queue.get()
             yield item
 
-        if not self.is_checking:
-            # Watchdog 充底：超过 watchdog_timeout 秒无活动，强制触发
-            idle_secs = time.time() - self._last_active_at
-            if idle_secs > self.watchdog_timeout and self.current_task_id is None:
+        # ═ Watchdog 充底 ══════════════════════════════════════════
+        if self.is_checking and self._checking_started_at > 0:
+            stuck_secs = time.time() - self._checking_started_at
+            if stuck_secs > self.watchdog_timeout:
                 self.logger.warning(
-                    f"Watchdog 触发: 已闲置 {idle_secs:.0f}s 无任务，强制重新领取"
+                    f"Watchdog 触发: is_checking 已持续 {stuck_secs:.0f}s，"
+                    f"强制重置并重建浏览器"
                 )
+                self.is_checking = False
+                self._checking_started_at = 0.0
                 self._last_active_at = time.time()
+                # 重建浏览器，避免旧页面状态干扰
+                try:
+                    await self._rebuild_browser()
+                except Exception as _e:
+                    self.logger.error(f"Watchdog 重建浏览器失败: {_e}")
+        # ═══════════════════════════════════════════════
 
+        if not self.is_checking:
             self.is_checking = True
+            self._checking_started_at = time.time()  # 记录开始时刻
             try:
                 await self._ensure_task_and_process_one_page()
             except CloseSpider:
@@ -151,6 +163,7 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
                 self.logger.error(f"循环处理异常: {e}")
             finally:
                 self.is_checking = False
+                self._checking_started_at = 0.0
 
         await asyncio.sleep(0.2)
         yield scrapy.Request("data:,loop", callback=self.parse_loop, dont_filter=True)
@@ -252,10 +265,11 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
         #max_pages = int(os.getenv("BOSS_MAX_PAGES_PER_TASK", "10"))
         total_count = 0
         has_more = True
+        processed_card_index = 0
         try:
             listen_ready = hasattr(self.page, "listen") and hasattr(self.page.listen, "start")
             if listen_ready:
-                self.page.listen.start(["job/list.json", "joblist.json"])
+                self.page.listen.start("search/joblist.json")
 
             self.page.get(url)
 
@@ -267,6 +281,10 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
                 
             page_num = 0
             while has_more:
+                if page_num != 0:
+                    listen_ready = hasattr(self.page, "listen") and hasattr(self.page.listen, "start")
+                    if listen_ready:
+                        self.page.listen.start("search/joblist.json")
                 page_num += 1
                 await self._scroll_to_load()
 
@@ -295,7 +313,8 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
                     self.logger.warning(f"找不到职位卡片集: {e}")
                     cards = []
 
-                for card in cards:
+                for card in cards[processed_card_index:]:
+                    processed_card_index += 1
                     try:
                         # 从卡片内任意 a 标签 href 中提取 encrypt_job_id
                         job_id_part = ''
@@ -375,13 +394,13 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
                         if job_desc:
                             await self._write_detail_to_db(job_id_part, job_desc)
                             total_count += 1
-                            self.logger.info(f"详情数据已写入 DB: {job_id_part} (长度: {len(job_desc)})")
+                            self.logger.info(f"详情数据已写入 DB: {job_id_part} (长度: {len(job_desc)}) 当前页面: {page_num} has_more: {has_more}")
                         else:
                             self.logger.warning(f"未获取到职位描述: {job_id_part}")
 
                     except Exception as e:
                         self.logger.warning(f"处理卡片点击抓取异常: {e}")
-
+                
                 if not has_more:
                     break
 
@@ -873,7 +892,7 @@ class BossDetailClickDrissionSpider(scrapy.Spider):
 
     async def _fetch_and_assign_new_task(self):
         async with (await db_manager.get_session()) as session:
-            stmt = select(BossStuCrawlUrl).where(BossStuCrawlUrl.status == "pending")
+            stmt = select(BossStuCrawlUrl).where(BossStuCrawlUrl.status == "processing")
             if self.target_task_id:
                 stmt = stmt.where(BossStuCrawlUrl.id == self.target_task_id)
             stmt = stmt.order_by(BossStuCrawlUrl.id.asc()).limit(1)

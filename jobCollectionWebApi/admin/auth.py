@@ -4,7 +4,7 @@ from starlette.responses import RedirectResponse, Response
 from services.auth_service import auth_service
 from core.security import verify_token, create_access_token
 from common.databases.PostgresManager import db_manager
-from schemas.token import LoginRequest
+from schemas.token_schema import LoginRequest
 from common.databases.models.user import UserRole
 
 class AdminAuth(AuthProvider):

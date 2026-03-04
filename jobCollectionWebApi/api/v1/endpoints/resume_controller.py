@@ -1,22 +1,19 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends
 from core.status_code import StatusCode
+from core.exceptions import AppException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from dependencies import get_db, get_current_user
 from crud import resume as crud_resume
-from schemas.resume import (
+from schemas.resume_schema import (
     ResumeDetail, ResumeCreate, ResumeUpdate, 
-    EducationCreate, WorkExperienceCreate, ProjectExperienceCreate
+    EducationCreate, WorkExperienceCreate
 )
-from common.databases.models.resume import Education, WorkExperience, ProjectExperience
-from fastapi import UploadFile, File
+from common.databases.models.resume import Education, WorkExperience
 from jobCollectionWebApi.tasks.resume_parser import parse_resume_task
-import os
-import shutil
-from config import settings
-from services.ai_access_service import ai_access_service
+
 router = APIRouter()
 
 @router.get("/me", response_model=ResumeDetail)
@@ -27,9 +24,10 @@ async def get_my_resume(
     """获取我的简历"""
     resume = await crud_resume.resume.get_by_user_id(db, user_id=current_user.id)
     if not resume:
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.NOT_FOUND, 
-            detail="您还未创建简历"
+            code=StatusCode.BUSINESS_ERROR,
+            message="您还未创建简历"
         )
     return resume
 
@@ -42,9 +40,10 @@ async def create_my_resume(
     """创建我的简历"""
     resume = await crud_resume.resume.get_by_user_id(db, user_id=current_user.id)
     if resume:
-        raise HTTPException(
+        raise AppException(
             status_code=StatusCode.BAD_REQUEST, 
-            detail="简历已存在，请使用更新接口"
+            code=StatusCode.BUSINESS_ERROR,
+            message="简历已存在，请使用更新接口"
         )
     
     return await crud_resume.resume.create_with_user(db, obj_in=resume_in, user_id=current_user.id)
@@ -58,7 +57,7 @@ async def update_my_resume(
     """更新简历基本信息"""
     resume = await crud_resume.resume.get_by_user_id(db, user_id=current_user.id)
     if not resume:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="简历不存在")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="简历不存在")
     
     return await crud_resume.resume.update(db, db_obj=resume, obj_in=resume_in)
 
@@ -74,7 +73,7 @@ async def add_education(
     user_id = current_user.id
     resume = await crud_resume.resume.get_by_user_id(db, user_id=user_id)
     if not resume:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="请先创建基础简历")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="请先创建基础简历")
     
     db_edu = Education(**edu_in.model_dump(), resume_id=resume.id)
     db.add(db_edu)
@@ -95,7 +94,7 @@ async def delete_education(
     user_id = current_user.id
     resume = await crud_resume.resume.get_by_user_id(db, user_id=user_id)
     if not resume:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="简历不存在")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="简历不存在")
     
     # Check ownership
     stmt = select(Education).where(Education.id == edu_id, Education.resume_id == resume.id)
@@ -103,7 +102,7 @@ async def delete_education(
     edu = result.scalars().first()
     
     if not edu:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="记录不存在")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="记录不存在")
         
     await db.delete(edu)
     await db.commit()
@@ -123,7 +122,7 @@ async def add_work_experience(
     user_id = current_user.id
     resume = await crud_resume.resume.get_by_user_id(db, user_id=user_id)
     if not resume:
-        raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="请先创建基础简历")
+        raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="请先创建基础简历")
     
     db_obj = WorkExperience(**work_in.model_dump(), resume_id=resume.id)
     db.add(db_obj)
@@ -139,12 +138,12 @@ async def delete_work(
     """删除工作经历"""
     user_id = current_user.id
     resume = await crud_resume.resume.get_by_user_id(db, user_id=user_id)
-    if not resume: raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="简历不存在")
+    if not resume: raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="简历不存在")
     
     stmt = select(WorkExperience).where(WorkExperience.id == work_id, WorkExperience.resume_id == resume.id)
     result = await db.execute(stmt)
     obj = result.scalars().first()
-    if not obj: raise HTTPException(status_code=StatusCode.NOT_FOUND, detail="记录不存在")
+    if not obj: raise AppException(status_code=StatusCode.NOT_FOUND, code=StatusCode.BUSINESS_ERROR, message="记录不存在")
     
     await db.delete(obj)
     await db.commit()
@@ -152,32 +151,3 @@ async def delete_work(
 
 
 
-@router.post("/parse", status_code=202)
-async def parse_resume(
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    上传简历并异步解析
-    解析完成后将通过 WebSocket 推送 type: resume_parsed 消息
-    """
-    if not file.filename.lower().endswith('.pdf'):
-         raise HTTPException(status_code=400, detail="仅支持PDF文件")
-         
-    # Save file temporarily
-    upload_dir = os.path.join(settings.UPLOAD_DIR, "temp_resumes")
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    file_path = os.path.join(upload_dir, f"{current_user.id}_{file.filename}")
-    
-    content = await file.read()
-    with open(file_path, "wb") as buffer:
-        buffer.write(content)
-        
-    # Trigger Celery Task
-    from core.metrics import celery_tasks_submitted
-    celery_tasks_submitted.labels(task_name="tasks.resume_parser.parse_resume_task", queue="realtime").inc()
-    parse_resume_task.delay(current_user.id, file_path)
-    
-    return {"message": "简历正在解析中，请留意消息通知"}

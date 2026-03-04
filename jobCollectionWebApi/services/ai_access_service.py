@@ -2,8 +2,10 @@ from dataclasses import dataclass
 import time
 from typing import Dict, List
 
-from fastapi import HTTPException, status
+from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
+from core.exceptions import AppException, ExternalServiceException
+from core.status_code import StatusCode
 
 from common.databases.RedisManager import redis_manager
 from common.databases.models.product import Product
@@ -88,7 +90,7 @@ class AIAccessService:
     def _get_policy(self, feature_key: str) -> AIFeaturePolicy:
         policy = self._policy_map.get(feature_key)
         if not policy:
-            raise HTTPException(status_code=500, detail=f"Unknown AI feature: {feature_key}")
+            raise AppException(status_code=500, code=StatusCode.BUSINESS_ERROR, message=f"Unknown AI feature: {feature_key}")
         return policy
 
     async def _enforce_rate_limit(self, user_id: int, policy: AIFeaturePolicy) -> None:
@@ -103,14 +105,15 @@ class AIAccessService:
                 await redis_manager.redis_client.expire(redis_manager.make_key(limit_key), 70)
 
             if current_count > policy.requests_per_minute:
-                raise HTTPException(
+                raise AppException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=(
+                    code=StatusCode.TOO_MANY_REQUESTS,
+                    message=(
                         f"Rate limit exceeded for {policy.feature_key}. "
                         f"Max {policy.requests_per_minute} requests per minute."
                     ),
                 )
-        except HTTPException:
+        except AppException:
             raise
         except Exception as exc:
             logger.warning(f"AI rate limiter degraded for {policy.feature_key}: {exc}")
@@ -124,9 +127,8 @@ class AIAccessService:
             return max(float(product.price), 0.0)
 
         if settings.AI_BILLING_REQUIRE_PRODUCT:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Billing product is not configured: {policy.product_code}",
+            raise ExternalServiceException(
+                message=f"Billing product is not configured: {policy.product_code}"
             )
 
         return max(float(policy.default_price), 0.0)
@@ -143,9 +145,10 @@ class AIAccessService:
         balance = float(wallet.balance) if wallet else 0.0
         if balance < price:
             ai_billing_rejections.labels(feature=feature_key, reason="balance").inc()
-            raise HTTPException(
+            raise AppException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=(
+                code=StatusCode.BUSINESS_ERROR,
+                message=(
                     f"Insufficient wallet balance for {policy.description}. "
                     f"Required: {price:.2f}, current: {balance:.2f}"
                 ),
@@ -177,9 +180,10 @@ class AIAccessService:
         if not success:
             ai_billing_rejections.labels(feature=feature_key, reason="wallet_error").inc()
             await db.rollback()
-            raise HTTPException(
+            raise AppException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"Wallet charge failed for {policy.description}",
+                code=StatusCode.BUSINESS_ERROR,
+                message=f"Wallet charge failed for {policy.description}",
             )
         
         # Record metrics on success

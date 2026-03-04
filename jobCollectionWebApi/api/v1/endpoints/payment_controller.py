@@ -2,7 +2,9 @@
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from core.exceptions import AppException, ExternalServiceException, PermissionDeniedException
+from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from wechatpayv3 import WeChatPay, WeChatPayType
@@ -15,7 +17,7 @@ from crud import wallet as crud_wallet
 from common.databases.models.payment import PaymentOrder, PaymentStatus, PaymentMethod
 from common.databases.RedisManager import redis_manager
 from core.logger import sys_logger as logger
-from schemas.payment import (
+from schemas.payment_schema import (
     PaymentOrderCreate, 
     PaymentOrderResponse, 
     PaymentNotifyResponse,
@@ -69,11 +71,11 @@ if settings.WECHAT_APP_ID:
 # --- Helpers ---
 
 def generate_order_no() -> str:
-    """鐢熸垚鍞竴璁㈠崟鍙? PAY + YYYYMMDDHHMMSS + Random"""
+    """生成唯一订单流水号: PAY + 年月日时分秒 + 随机混淆码"""
     return f"PAY{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
 
 async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transaction_id: str):
-    """澶勭悊鏀粯鎴愬姛閫昏緫 (甯﹀垎甯冨紡閿?"""
+    """处理支付成功回调逻辑本体 (携带原生 Redis 分布式互斥锁防止并发重复发货)"""
     # 1. First Check
     if order.status == PaymentStatus.PAID:
         logger.info(f"Order {order.order_no} already paid. Skipping.")
@@ -82,11 +84,11 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
     # 2. Acquire Lock
     lock_key = f"lock:payment_callback:{order.order_no}"
     try:
-        # 浣跨敤 redis-py 鐨?Lock 瀵硅薄
+        # 使用 redis-py 原生 Lock 对象构建极简高效的分布式锁锁紧逻辑
         async with redis_manager.redis_client.lock(
             redis_manager.make_key(lock_key), 
-            timeout=30, # 閿佹寔鏈夋椂闂?
-            blocking_timeout=5 # 绛夊緟閿佹椂闂?
+            timeout=30, # 强制锁持有的最长物理时间(秒)，防止死锁风险
+            blocking_timeout=5 # 等待其他线程释放锁的最大轮询心跳阻塞时间(秒)
         ):
             # 3. Double Check (Refresh from DB inside lock)
             await db.refresh(order)
@@ -100,15 +102,15 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
             order.transaction_id = transaction_id
             
             # --- 鑷姩鍙戣揣閫昏緫 ---
-            # 妫€鏌ユ槸鍚︽槸浣欓鍏呭€?
+            # 阶段拦截：深度检查是否属于中心虚拟钱包的充值业务，从而进行资金累加
             should_commit = True 
             try:
-                # 灏濊瘯浠庡揩鐓ц幏鍙栧晢鍝佷俊鎭紝濡傛灉娌℃湁蹇収鍒欐煡璇㈡暟鎹簱(鍙€?
+                # 为了性能优先从订单当时快照解构商品类型，如果没有快照则退化至查询只读库 (可选策略)
                 product_code = ""
                 if order.product_snapshot:
                     product_code = order.product_snapshot.get("code", "")
                 
-                # 绠€鍗曞垽鏂? code 浠?wallet_topup 寮€澶达紝鎴栬€?product_type 鏄?wallet_topup
+                # 无硬编码关联判断: 不论是 Code 满足还是直接 Type 满足，一律触发 wallet_topup (充值流水) 事件
                 is_topup = False
                 if product_code and product_code.startswith("wallet_topup"):
                     is_topup = True
@@ -124,11 +126,11 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
                         source=f"Top-up: {order.order_no}",
                         order_no=order.order_no
                     )
-                # 鍏朵粬浜у搧绫诲瀷鐨勫彂璐ч€昏緫鍙互鍦ㄨ繖閲屾墿灞?
+                # [可扩展区] 未来如果您加入了 VIP会员、无限次简历AI包，则发货代码在此处接力。
             except Exception as e:
                 logger.error(f"Failed to deliver product for order {order.order_no}: {e}")
-                # 濡傛灉鍙戣揣澶辫触锛屾槸鍚﹀洖婊氱姸鎬侊紵鎴栬€呮爣璁颁负 'paid_but_delivery_failed'锛?
-                # 杩欓噷鏆備笖鎶涘嚭寮傚父鍥炴粴鏁翠釜浜嬪姟锛屼緷闈犲洖璋冮噸璇?
+                # 异常状态保护: 思考如果给用户加钱/加权限失败了，是否允许订单继续成功？我们采取最严格的事务强一致要求。
+                # 在这种危急场景下，强制抛出外层 Exception 破坏这个 DB commit()，使得返回平台错误，以此触发微信/支付宝回调在 15s 后再次执行重试。
                 should_commit = False
                 raise e
             
@@ -141,7 +143,7 @@ async def handle_payment_success(db: AsyncSession, order: PaymentOrder, transact
             
     except Exception as e:
         logger.error(f"Error handling payment success for {order.order_no}: {e}")
-        # 濡傛灉鑾峰彇閿佸け璐ユ垨鎵ц鍑洪敊锛屾姏鍑哄紓甯镐互渚夸笂灞傚喅瀹氭槸鍚﹂噸璇曪紙瀵逛簬鍥炶皟锛岄€氬父杩斿洖閿欒璁╃涓夋柟閲嶈瘯锛?
+        # 最后一道防线: 如果拿到锁失败或者在发货中直接报错了，这说明系统处于极度高压状态。依然利用重试机制！
         raise e
 
 from dependencies import get_current_admin_user
@@ -159,15 +161,15 @@ async def refund_order(
     """
     order = await crud_payment.payment_order.get_by_order_no(db, order_no)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="Order not found")
         
     if order.status != PaymentStatus.PAID:
-        raise HTTPException(status_code=400, detail=f"Order status is {order.status}, cannot refund")
+        raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message=f"Order status is {order.status}, cannot refund")
         
-    # 1. 閽卞寘閫€娆?
+    # 渠道1: 本站生态原生虚拟钱包退回策略
     if order.payment_method == "wallet": # PaymentMethod.WALLET
         try:
-            # 鍘熻矾閫€鍥炰綑棰?
+            # 采用“源路返还法则”，为用户生成一笔资金正向加项的变更记录。
             await crud_wallet.wallet.add_balance(
                 db, 
                 user_id=order.user_id, 
@@ -182,19 +184,19 @@ async def refund_order(
             return {"message": "Wallet refund successful"}
         except Exception as e:
             logger.error(f"Wallet refund failed: {e}")
-            raise HTTPException(status_code=500, detail="Wallet refund failed")
+            raise AppException(status_code=500, code=StatusCode.INTERNAL_SERVER_ERROR, message="Wallet refund failed")
 
-    # 2. 鏀粯瀹濋€€娆?
+    # 渠道2: 蚂蚁金服支付宝退款策略
     elif order.payment_method == PaymentMethod.ALIPAY:
         if not alipay_client:
-             raise HTTPException(status_code=500, detail="Alipay not configured")
+             raise ExternalServiceException(message="Alipay not configured")
         
         try:
-            # 璋冪敤閫€娆炬帴鍙?
+            # 对外封装调用 Alipay Python 服务侧的高级逆向贸易退款 HTTP API
             result = alipay_client.api_alipay_trade_refund(
                 out_trade_no=order_no,
                 refund_amount=order.amount,
-                out_request_no=f"REF_{order_no}" # 閮ㄥ垎閫€娆鹃渶瑕侊紝鍏ㄩ閫€娆惧叾瀹炲彲閫?
+                out_request_no=f"REF_{order_no}" # Out_Request_No 用于标识部分退货退款批次标识；如果是单纯的整单全额，实际为可选校验。
             )
             if result.get("code") == "10000":
                 order.status = PaymentStatus.REFUNDED
@@ -203,18 +205,18 @@ async def refund_order(
                 return {"message": "Alipay refund successful", "alipay_response": result}
             else:
                 logger.error(f"Alipay refund failed: {result}")
-                raise HTTPException(status_code=400, detail=f"Alipay refund failed: {result.get('sub_msg')}")
+                raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message=f"Alipay refund failed: {result.get('sub_msg')}")
         except Exception as e:
             logger.error(f"Alipay refund exception: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise AppException(status_code=500, code=StatusCode.INTERNAL_SERVER_ERROR, message=str(e))
 
-    # 3. 寰俊閫€娆?
+    # 渠道3: 腾讯微信全托管退款策略
     elif order.payment_method == PaymentMethod.WECHAT:
         if not wechat_client:
-             raise HTTPException(status_code=500, detail="WeChat Pay not configured")
+             raise ExternalServiceException(message="WeChat Pay not configured")
         
         try:
-            # 寰俊閫€娆鹃渶瑕佽瘉涔?
+            # 安全要求: 微信官方要求必须向服务器配置 TLS P12 双向验证客户端私钥证书（即 settings 中需携带）。
             # SDK helper might need raw request for refund if not wrapped
             # wechatpayv3 legacy/native might differ. Assuming standard usage:
             result = wechat_client.refund(
@@ -231,14 +233,14 @@ async def refund_order(
                 return {"message": "WeChat refund initiated", "wechat_response": result}
             else:
                  logger.error(f"WeChat refund failed: {result}")
-                 raise HTTPException(status_code=400, detail="WeChat refund failed")
+                 raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="WeChat refund failed")
 
         except Exception as e:
             logger.error(f"WeChat refund exception: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise AppException(status_code=500, code=StatusCode.INTERNAL_SERVER_ERROR, message=str(e))
             
     else:
-        raise HTTPException(status_code=400, detail="Unsupported payment method for auto refund")
+        raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Unsupported payment method for auto refund")
 
 
 
@@ -250,29 +252,29 @@ async def create_payment(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """鍒涘缓鏀粯璁㈠崟"""
-    # 0. 闃叉姈妫€鏌? 闃叉3绉掑唴閲嶅鐐瑰嚮 (Redis Lock)
-    # 閿侀敭: lock:create_order:{user_id}:{product_id_or_type}:{amount}
+    """统一支付聚合订单发起引擎"""
+    # 阶段0 - 重复提单限流: 拦截高速网压下用户疯狂点击确认按钮。通过 Redis 层短生命周期 TTL 锁机制直接干预。
+    # 设定多维度雪崩唯一串联标识符 Redis Hash Key (防止同一人同时并发下同一个东西)
     lock_key = f"lock:create_order:{current_user.id}:{order_in.product_id or order_in.product_type}:{order_in.amount}"
     
-    # 灏濊瘯鑾峰彇闈為樆濉為攣锛屽鏋滆幏鍙栧け璐ヨ鏄庤姹傝繃蹇?
+    # 这里极客地使用 nx=True 请求单次排他权限。得不到就直接打回前端！
     lock_redis_key = redis_manager.make_key(lock_key)
     lock_token = uuid.uuid4().hex
     acquired = await redis_manager.redis_client.set(lock_redis_key, lock_token, nx=True, ex=3)
     if not acquired:
-        raise HTTPException(status_code=429, detail="Too many requests, please try again later")
+        raise AppException(status_code=429, code=StatusCode.TOO_MANY_REQUESTS, message="Too many requests, please try again later")
         
     try:
-        # 0.1 楠岃瘉鍙傛暟涓庤幏鍙栦环鏍?
+        # 阶段0.1 - 数据库层面真实账单金额锁定
         final_amount = order_in.amount
         product_snapshot = None
         
         if order_in.product_id:
             product = await crud_product.product.get(db, id=order_in.product_id)
             if not product or not product.is_active:
-                 raise HTTPException(status_code=400, detail="Invalid or inactive product")
+                 raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Invalid or inactive product")
             final_amount = product.price
-            # 璁板綍蹇収
+            # 为订单附加 Immutable 静态快照体，当未来商品涨价时该订单历史永远能被正确审计与开票
             product_snapshot = {
                 "name": product.name,
                 "code": product.code,
@@ -280,19 +282,19 @@ async def create_payment(
                 "original_price": product.original_price
             }
     
-        # 寮哄埗閲戦鏍￠獙: 濡傛灉鏄畝鍘嗗垎鏋愮瓑鍥哄畾浠锋牸鏈嶅姟锛屽繀椤婚€氳繃 product_id 鑾峰彇浠锋牸
+        # 安全防御墙: 防止前端随意用 0.01 元进行金额篡改来薅羊毛。如果是系统内置功能必定取库内官方价。
         elif order_in.product_type == "resume_analysis":
-             raise HTTPException(status_code=400, detail="Product ID required for resume analysis")
+             raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Product ID required for resume analysis")
              
         elif not final_amount or final_amount <= 0:
-             raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+             raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Amount must be greater than 0")
              
-        # 1. 鐢熸垚璁㈠崟
+        # 阶段1 - 持久化到关系型数据库中保存流转基础
         order_no = generate_order_no()
         
-        # 鎵嬪姩鏋勯€?PaymentOrder 瀵硅薄浠ユ敮鎸?product_id (濡傛灉 crud_payment 鏈洿鏂版敮鎸?obj_in 鍖呭惈 product_id)
-        # 鎴栬€呮洿鏂?crud_payment.create_order
-        # 杩欓噷鎴戜滑鐩存帴浣跨敤 DB 鎿嶄綔姣旇緝鐏垫椿
+        # 此处不依赖 Pydantic 间接转换，直接构造原生 ORM PaymentOrder 实例，为高并发提供更高灵活性支持。
+        
+        
         db_order = PaymentOrder(
             order_no=order_no,
             user_id=current_user.id,
@@ -314,31 +316,31 @@ async def create_payment(
             status=PaymentStatus.PENDING
         )
         
-        # 2. 璋冪敤鏀粯鎺ュ彛
+        # 阶段2 - 触发对应代理工厂类并透传云端支付网关
         if order_in.payment_method == PaymentMethod.ALIPAY:
             if not alipay_client:
-                raise HTTPException(status_code=500, detail="Alipay not configured")
+                raise ExternalServiceException(message="Alipay not configured")
             
-            # 鐢佃剳缃戠珯鏀粯
+            # 指令化构建支付宝 PC 端“Page Pay”跳转参数串
             order_string = alipay_client.api_alipay_trade_page_pay(
                 out_trade_no=order_no,
                 total_amount=float(order_in.amount),
                 subject=f"Job Analysis - {order_in.product_type}",
-                return_url="http://localhost:3000/payment/success", # 鍓嶇鍥炶皟椤甸潰
+                return_url="http://localhost:3000/payment/success", # 用户在浏览器用手机扫码完成后，重定向返回 Vue/React 前端的渲染落地页地址（必须公网访问）
                 notify_url=f"{settings.PAYMENT_NOTIFY_BASE_URL}/alipay"
             )
-            # 鎷兼帴缃戝叧鍦板潃
+            # 沙箱与正式生产环境的快速动态切换路由
             gateway = "https://openapi-sandbox.dl.alipaydev.com/gateway.do" if settings.ALIPAY_DEBUG else "https://openapi.alipay.com/gateway.do"
             response.pay_url = f"{gateway}?{order_string}"
             
         elif order_in.payment_method == PaymentMethod.WECHAT:
             if not wechat_client:
-                raise HTTPException(status_code=500, detail="WeChat Pay not configured")
+                raise ExternalServiceException(message="WeChat Pay not configured")
                 
             code, message = wechat_client.pay(
                 description=f"Job Analysis - {order_in.product_type}",
                 out_trade_no=order_no,
-                amount={'total': int(order_in.amount * 100)}, # 鍒?
+                amount={'total': int(order_in.amount * 100)}, # [重中之重] 微信平台的金额要求必须全为分（没有小数点）。因此把元强转并抹去浮点带来的风险。
                 payer={'openid': current_user.wechat_info.openid} if current_user.wechat_info else None
             )
             
@@ -347,15 +349,15 @@ async def create_payment(
                  response.qr_code_url = result.get('code_url')
             else:
                  logger.error(f"WeChat Pay Error: {message}")
-                 raise HTTPException(status_code=500, detail="WeChat Pay failed")
+                 raise ExternalServiceException(message="WeChat Pay failed")
     
         elif order_in.payment_method == "wallet": # PaymentMethod.WALLET (use string to avoid import circle if any)
-            # 閽卞寘鏀粯閫昏緫
+            # --- 原生生态自闭环：虚拟小金库直击扣费 ---
             wallet = await crud_wallet.wallet.get_by_user(db, current_user.id)
             if not wallet or wallet.balance < final_amount:
-                raise HTTPException(status_code=400, detail="Insufficient wallet balance")
+                raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Insufficient wallet balance")
                 
-            # 鎵ｆ
+            # 使用 DB 行悲观锁机制严格扣减个人资金流水
             success = await crud_wallet.wallet.consume_balance(
                 db, 
                 user_id=current_user.id, 
@@ -365,14 +367,14 @@ async def create_payment(
             )
             
             if success:
-                # 鏇存柊璁㈠崟鐘舵€佷负宸叉敮浠?
+                # 只有扣减正确，才就地直接翻转本订单到 Paid 的完结生命周期
                 order = await crud_payment.payment_order.get_by_order_no(db, order_no) # Re-fetch to be safe
                 if order:
                     await handle_payment_success(db, order, transaction_id=f"WALLET_{uuid.uuid4().hex}")
                     response.status = PaymentStatus.PAID
                     response.pay_params = {"message": "Payment successful"}
             else:
-                 raise HTTPException(status_code=400, detail="Wallet payment failed")
+                 raise AppException(status_code=400, code=StatusCode.BUSINESS_ERROR, message="Wallet payment failed")
 
     finally:
         # 閲婃斁閿?(铏界劧鏈塗TL锛屼絾鏈€濂戒富鍔ㄩ噴鏀惧鏋滄湭 crash)
@@ -396,29 +398,29 @@ async def check_order_status(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """鏌ヨ璁㈠崟鐘舵€?"""
+    """高频轮询探测器: 查询云端实际是否支付成功"""
     order = await crud_payment.payment_order.get_by_order_no(db, order_no)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise AppException(status_code=404, code=StatusCode.BUSINESS_ERROR, message="Order not found")
         
-    # 鏉冮檺妫€鏌?
+    # 数据隔离保护: 没有 Admin Role 的人只有权查询 Owner 为直接自身的交易详单
     if order.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise PermissionDeniedException(message="Not authorized")
         
-    # 濡傛灉杩樻槸 Pending锛屽彲浠ヤ富鍔ㄥ幓绗笁鏂规煡涓€涓?(Draft implementation)
+    # todo: (预留扩展能力) 若此时查出还是 Pending，可以直接由服务端反向再向支付宝/微信通过订单轮询来一次校准。
     # ...
     
     return order
 
 @router.post("/notify/alipay")
 async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """鏀粯瀹濆紓姝ラ€氱煡"""
+    """重要核心: 支付宝支付成功云端异步回调 Webhook"""
     data = await request.form()
     data_dict = dict(data)
     
     signature = data_dict.pop("sign")
     
-    # 楠岃瘉绛惧悕
+    # 终极防线: 取使用阿里提供的支付宝 RS256 公钥体系暴力拦截一切没有带有正确摘要签名的 Hack Attack。
     if alipay_client and alipay_client.verify(data_dict, signature):
         trade_status = data_dict.get("trade_status")
         out_trade_no = data_dict.get("out_trade_no")
@@ -427,7 +429,7 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         if trade_status in ["TRADE_SUCCESS", "TRADE_FINISHED"]:
             order = await crud_payment.payment_order.get_by_order_no(db, out_trade_no)
             if order:
-                # 鏍￠獙閲戦
+                # 反作弊逻辑: 防止订单价格被攻击者在传输中间篡改。检查总交易落袋额度是否恒等于这单最初标价。
                 total_amount = float(data_dict.get("total_amount", 0))
                 if abs(total_amount - order.amount) > 0.01:
                     logger.critical(f"Amount mismatch for order {out_trade_no}: expected {order.amount}, got {total_amount}")
@@ -441,7 +443,7 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/notify/wechat")
 async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """寰俊鏀粯寮傛閫氱煡"""
+    """重要核心: 腾讯微信支付 V3 AEAD_AES_256_GCM 异步回调接收终端"""
     headers = request.headers
     body = await request.body()
     
@@ -463,15 +465,15 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
                 transaction_id = decoded_data.get('transaction_id')
                 
                 amount_data = decoded_data.get('amount', {})
-                total_fee = amount_data.get('total', 0) # 鍒?
+                total_fee = amount_data.get('total', 0) # [重中之重] 微信平台的金额要求必须全为分（没有小数点）。因此把元强转并抹去浮点带来的风险。
 
                 order = await crud_payment.payment_order.get_by_order_no(db, out_trade_no)
                 if order:
-                     # 鏍￠獙閲戦
+                     # 反作弊逻辑: 防止订单价格被攻击者在传输中间篡改。检查总交易落袋额度是否恒等于这单最初标价。
                     expected_fee = int(order.amount * 100)
                     if total_fee != expected_fee:
                         logger.critical(f"Amount mismatch for Wechat order {out_trade_no}: expected {expected_fee}, got {total_fee}")
-                        # 搴旇杩斿洖澶辫触锛岃寰俊閲嶈瘯(鎴栬€呬汉宸ュ鐞?
+                        # 若发现微信侧的扣款数额不对，不能姑息直接返回失败 500！这样系统将会把这一单强行变为死信单走客服体系。
                         return {"code": "FAIL", "message": "Amount mismatch"}
 
                     await handle_payment_success(db, order, transaction_id)

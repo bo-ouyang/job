@@ -21,3 +21,25 @@ class StatusCode(IntEnum):
     BAD_GATEWAY = 502
     SERVICE_UNAVAILABLE = 503
     GATEWAY_TIMEOUT = 504
+
+    # 业务侧自定义错误码 (5 digits)
+    # 通用业务错误
+    BUSINESS_ERROR = 40000
+    PARAMS_ERROR = 40001
+    
+    # 认证与授权 (401xx, 403xx)
+    TOKEN_EXPIRED = 40101
+    AUTH_FAILED = 40102
+    PERMISSION_DENIED = 40301
+    
+    # 用户相关 (404xx, 409xx)
+    USER_NOT_FOUND = 40401
+    USER_ALREADY_EXISTS = 40901
+    USER_DISABLED = 40302
+    
+    # AI 任务相关 (409xx)
+    AI_TASK_RUNNING = 40902       # 同一功能已有任务在执行中
+
+    # 爬虫/第三方调用错误 (500xx)
+    EXTERNAL_SERVICE_ERROR = 50001
+    SPIDER_TASK_ERROR = 50002

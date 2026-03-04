@@ -2,6 +2,7 @@
 import { onMounted, ref, reactive } from "vue";
 import * as echarts from "echarts";
 import { analysisAPI } from '@/api/analysis';
+import { useAiTaskStore } from '@/stores/aiTask';
 
 const chartContainer = ref(null);
 const salaryChartContainer = ref(null);
@@ -214,7 +215,7 @@ const currentAnalysisData = ref(null);
 const aiAdvice = ref("");
 const loadingAI = ref(false);
 
-import api from "@/utils/request";
+import { aiAPI } from "@/api/ai";
 import { pollTaskResult } from "@/utils/pollTask";
 
 const fetchAIAdvice = async () => {
@@ -243,9 +244,7 @@ const fetchAIAdvice = async () => {
     console.log("AI Payload:", payload);
 
     // Step 1: Submit async task
-    const res = await api.post("/analysis/ai/advice", payload, {
-      timeout: 10000,
-    });
+    const res = await aiAPI.getAIAdvice(payload);
     const taskId = res.data?.task_id;
     if (!taskId) {
       // Fallback: old sync response (if backend hasn't updated)
@@ -253,23 +252,42 @@ const fetchAIAdvice = async () => {
       return;
     }
 
-    // Step 2: Poll for result
-    const result = await pollTaskResult("/analysis/ai/task", taskId, {
+    // Step 2: Register in store and poll for result
+    aiTaskStore.addTask(taskId, 'career_advice', {
+      majorName: payload.major_name,
+    });
+    const result = await aiTaskStore.pollAndUpdate(taskId, {
       interval: 2000,
       timeout: 120000,
     });
-    aiAdvice.value = result?.advice || result || "未能获取建议";
+    aiAdvice.value = result?.advice || result?.result_data || result || "未能获取建议";
   } catch (e) {
     console.error("AI Advice failed", e);
-    aiAdvice.value = e.message || "无法获取建议，请稍后再试。";
+    // 409: AI task already running
+    if (e.response?.status === 409 || e.response?.data?.code === 40902) {
+      aiAdvice.value = "当前有AI分析任务正在执行中，请等待完成后再试。";
+    } else {
+      aiAdvice.value = e.message || "无法获取建议，请稍后再试。";
+    }
   } finally {
     loadingAI.value = false;
   }
 };
 
+const aiTaskStore = useAiTaskStore();
+
 onMounted(() => {
   fetchPresets();
   initCharts();
+
+  // 恢复上次 AI 建议结果（跨页面持久化）
+  const lastResult = aiTaskStore.getLatestResult('career_advice');
+  if (lastResult && lastResult.result) {
+    const raw = lastResult.result?.advice || lastResult.result?.result_data || '';
+    if (raw) {
+      aiAdvice.value = raw;
+    }
+  }
 });
 </script>
 

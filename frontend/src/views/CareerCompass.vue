@@ -1,6 +1,8 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue';
+import { ref, onMounted, computed, nextTick, watch } from 'vue';
 import { analysisAPI } from '../api/analysis';
+import { aiAPI } from '../api/ai';
+import { useAiTaskStore } from '@/stores/aiTask';
 import { commonAPI } from '../api/common';
 import { ElMessage } from 'element-plus';
 import { marked } from 'marked';
@@ -33,10 +35,21 @@ const salaryChartRef = ref(null);
 const industryChartRef = ref(null);
 const skillChartRef = ref(null);
 
+const aiTaskStore = useAiTaskStore();
+
 onMounted(async () => {
   await fetchPresets();
   initCharts();
   window.addEventListener('resize', handleResize);
+
+  // 恢复上次结果（跨页面持久化）
+  const lastResult = aiTaskStore.getLatestResult('career_compass');
+  if (lastResult && lastResult.result) {
+    const raw = lastResult.result?.report || lastResult.result?.result_data || '';
+    if (raw) {
+      reportMarkdown.value = DOMPurify.sanitize(marked.parse(raw));
+    }
+  }
 });
 
 const handleResize = () => {
@@ -257,7 +270,13 @@ const handleAnalyze = async () => {
     skillCloudData.value = skillRes.data || [];
 
     // 3. Fetch AI Diagnostic Report (async via Celery)
-    const reportRes = await analysisAPI.getCareerCompass(majorName.value, industry1, industry2, industry1Name, industry2Name);
+    const reportRes = await aiAPI.getCareerCompass({
+      major_name: majorName.value,
+      target_industry: industry1,
+      target_industry_2: industry2,
+      target_industry_name: industry1Name,
+      target_industry_2_name: industry2Name,
+    });
     const responseData = reportRes.data;
 
     // 💡 Performance Optimization: Use stats already returned by career-compass to avoid extra /stats call
@@ -267,12 +286,16 @@ const handleAnalyze = async () => {
 
     let reportRaw;
     if (responseData?.task_id) {
-      // Async path: poll for result
-      const result = await pollTaskResult('/analysis/ai/task', responseData.task_id, {
+      // 注册到 store 以支持跨页面持久化
+      aiTaskStore.addTask(responseData.task_id, 'career_compass', {
+        majorName: majorName.value,
+      });
+      // Async path: poll for result via store
+      const result = await aiTaskStore.pollAndUpdate(responseData.task_id, {
         interval: 2000,
         timeout: 120000,
       });
-      reportRaw = result?.report || result || '未能生成报告。';
+      reportRaw = result?.report || result?.result_data || result || '未能生成报告。';
     } else {
       // Cache hit: immediate report
       reportRaw = responseData?.report || '未能生成报告。';
@@ -283,7 +306,13 @@ const handleAnalyze = async () => {
 
   } catch (error) {
     console.error("Analyze error:", error);
-    ElMessage.error(error.message || '生成罗盘报告时发生错误');
+    // 409: AI task already running
+    if (error.response?.status === 409 || error.response?.data?.code === 40902) {
+      const runningTaskId = error.response?.data?.data?.task_id;
+      ElMessage.warning(`当前有分析任务正在执行中，请等待完成后再提交${runningTaskId ? '（任务ID: ' + runningTaskId + '）' : ''}`);
+    } else {
+      ElMessage.error(error.message || '生成罗盘报告时发生错误');
+    }
   } finally {
     loading.value = false;
     submitting.value = false;
