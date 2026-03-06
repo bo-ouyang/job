@@ -1,4 +1,4 @@
-from starlette_admin.contrib.sqla import Admin
+﻿from starlette_admin.contrib.sqla import Admin
 from starlette_admin import I18nConfig
 import os
 from .auth import AdminAuth
@@ -7,7 +7,8 @@ from .views import (
     FavoriteJobView, IndustryView, SkillsView, 
     AdminLogView, TaskLogView, 
     BossSpiderFilterView, BossCrawlTaskView,
-    ProxyView, ProductView, SystemConfigView
+    ProxyView, ProductView, SystemConfigView,
+    PaymentOrderView, WalletAdminView
 )
 from common.databases.models.user import User
 from common.databases.models.job import Job
@@ -36,11 +37,11 @@ def setup_admin(app, engine):
 
     admin = Admin(
         engine, 
-        title="招聘平台后台管理",
+        title="鎷涜仒骞冲彴鍚庡彴绠＄悊",
         base_url="/admin",
         auth_provider=AdminAuth(),
         i18n_config=I18nConfig(default_locale="zh_CN"),
-        index_view=HomeView(label="主页", icon="fa fa-home", path="/", template_path="admin/dashboard.html"),
+        index_view=HomeView(label="涓婚〉", icon="fa fa-home", path="/", template_path="admin/dashboard.html"),
         templates_dir=templates_dir,
         middlewares=[] 
     )
@@ -50,18 +51,22 @@ def setup_admin(app, engine):
     admin.add_view(CompanyView(Company))
     admin.add_view(ResumeView(Resume))
     admin.add_view(FavoriteJobView(FavoriteJob))
-    admin.add_view(IndustryView(Industry, label="行业分类"))
+    admin.add_view(IndustryView(Industry, label="琛屼笟鍒嗙被"))
     admin.add_view(SkillsView(Skills, label="技能标签"))
     
-    admin.add_view(ProductView(Product, label="AI服务价格", icon="fa fa-tags"))
-    admin.add_view(SystemConfigView(SystemConfig, label="系统配置", icon="fa fa-sliders-h"))
+    admin.add_view(ProductView(Product, label="AI鏈嶅姟浠锋牸", icon="fa fa-tags"))
+    admin.add_view(SystemConfigView(SystemConfig, label="绯荤粺閰嶇疆", icon="fa fa-sliders-h"))
+    admin.add_view(PaymentOrderView(PaymentOrder, label="支付订单", icon="fa fa-credit-card"))
+    admin.add_view(WalletAdminView(UserWallet, label="钱包管理", icon="fa fa-wallet"))
 
     # Crawler Module
     admin.add_view(BossSpiderFilterView(BossSpiderFilter, icon="fa fa-filter"))
     admin.add_view(BossCrawlTaskView(BossCrawlTask, icon="fa fa-spider"))
     admin.add_view(ProxyView(Proxy, icon="fa fa-globe"))
     
-    admin.add_view(AdminLogView(AdminLog, label="操作日志", icon="fa fa-history"))
-    admin.add_view(TaskLogView(TaskLog, label="任务日志", icon="fa fa-tasks"))
+    admin.add_view(AdminLogView(AdminLog, label="鎿嶄綔鏃ュ織", icon="fa fa-history"))
+    admin.add_view(TaskLogView(TaskLog, label="浠诲姟鏃ュ織", icon="fa fa-tasks"))
     
     admin.mount_to(app)
+
+

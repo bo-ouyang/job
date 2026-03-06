@@ -2,15 +2,13 @@ from typing import List, Optional,Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func, and_, desc, String
 import json
-import asyncio
 from collections import Counter
 from common.databases.models.job import Job
 #from common.databases.models.skills import Skills
 from common.databases.models.company import Company
 from common.databases.models.industry import Industry
 from sqlalchemy.orm import selectinload, defer
-
-from jobCollectionWebApi.schemas.job import JobCreate, JobUpdate
+from jobCollectionWebApi.schemas.job_schema import JobCreate, JobUpdate
 from .base import CRUDBase
 from sqlalchemy.orm import selectinload, aliased
 from common.databases.models.industry import Industry
@@ -410,13 +408,13 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         major_criteria = []
 
         if major_name:
-            major_criteria.append(Job.major_name.ilike(f"{major_name}%"))
+            major_criteria.append(Job.major_name.ilike(f"%{major_name}%"))
 
         if keywords:
             keyword_filters = []
             for kw in keywords:
-                keyword_filters.append(Job.title.ilike(f"{kw}%"))
-                keyword_filters.append(Job.description.ilike(f"{kw}%"))
+                keyword_filters.append(Job.title.ilike(f"%{kw}%"))
+                keyword_filters.append(Job.description.ilike(f"%{kw}%"))
             major_criteria.append(or_(*keyword_filters))
             
         if industry_codes:

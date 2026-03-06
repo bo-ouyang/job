@@ -1,7 +1,6 @@
 from typing import List, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.auth_service import auth_service
-from common.databases.models.user import User
 from core.logger import sys_logger as logger
 from core.metrics import ws_connections_active
 import json

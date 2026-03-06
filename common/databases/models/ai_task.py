@@ -20,7 +20,7 @@ class AiTask(Base):
     execution_time = Column(Float, nullable=True)        # 执行耗时(秒)
     created_at     = Column(DateTime, server_default=func.now())
     completed_at   = Column(DateTime, nullable=True)
-
+    analysis_input = Column(JSONB, nullable=True)
     __table_args__ = (
         Index('idx_ai_task_user_feature', 'user_id', 'feature_key'),
         Index('idx_ai_task_user_status', 'user_id', 'status'),

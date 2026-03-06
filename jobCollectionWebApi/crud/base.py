@@ -1,4 +1,4 @@
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 from pydantic import BaseModel
@@ -42,7 +42,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         db: AsyncSession, 
         *, 
         db_obj: ModelType, 
-        obj_in: UpdateSchemaType | Dict[str, Any]
+        obj_in: Union[UpdateSchemaType, Dict[str, Any]]
     ) -> ModelType:
         """更新记录"""
         if isinstance(obj_in, dict):
@@ -56,6 +56,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         
         db.add(db_obj)
         await db.flush()
+        await db.commit()
         await db.refresh(db_obj)
         return db_obj
     

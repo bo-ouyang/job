@@ -1,6 +1,6 @@
-from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
+from core.exceptions import AppException
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud import company as crud_company

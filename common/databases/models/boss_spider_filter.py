@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, func,SmallInteger, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, func,SmallInteger, BigInteger, Index
 from common.databases.models.base import Base
 from common.utils.snowflake import generate_id
 
@@ -8,6 +8,9 @@ class BossSpiderFilter(Base):
     用于生成爬取任务的配置模板
     """
     __tablename__ = 'boss_spider_filter'
+    __table_args__ = (
+        Index("idx_boss_filter_active_name", "is_active", "filter_name"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     filter_name = Column(String(255), nullable=True, comment='筛选条件 (e.g. city)')

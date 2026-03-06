@@ -23,6 +23,19 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Asia/Shanghai",
     enable_utc=True,
+    
+    # ── Redis Connection Robustness (Fix WinError 10054) ────
+    broker_connection_retry_on_startup=True,
+    broker_transport_options={
+        "visibility_timeout": 3600 * 24, # 24 hours
+        "max_connections": 100,
+        "socket_timeout": 30.0,
+        "socket_connect_timeout": 30.0,
+        "socket_keepalive": True,
+        "health_check_interval": 30, # Ping Redis every 30s
+    },
+    redis_backend_health_check_interval=30,
+    worker_cancel_long_running_tasks_on_connection_loss=True,
 
     # ── Queue routing ──────────────────────────────────
     task_default_queue="batch",  # Fallback queue for unrouted tasks
@@ -58,9 +71,9 @@ celery_app.conf.update(
             'task': 'jobCollectionWebApi.tasks.job_parser.process_job_parsing_task',
             'schedule': 60, # 每隔1分钟捞取一次
         },
-        'cleanup-stale-ai-tasks-every-5-minutes': {
+        'cleanup-stale-ai-tasks-every-10-minutes': {
             'task': 'tasks.ai_task_cleanup.cleanup_stale_ai_tasks',
-            'schedule': 300, # 每5分钟清理一次僵死AI任务
+            'schedule': 600, # 每10分钟清理一次僵死AI任务
         },
     }
 )

@@ -444,3 +444,15 @@
   - AI 任务去重命中 (stat)
   - AI 任务执行耗时 P50/P95 (timeseries)
   - AI 任务总量统计-累计 (stat，含四项指标)
+
+## 16. 最近更新 (2026-03-06)
+
+### 钱包、支付通知与数据库迁移治理
+
+- 注册链路增强：`crud/user.py` 在普通注册与微信注册后自动创建钱包，初始余额默认 10。
+- 充值通知补齐：`payment_controller.py` 在支付成功后新增站内消息写入，并尝试 WebSocket 实时推送给用户。
+- 模型索引治理：为 `common/databases/models` 下全部模型补充 `__table_args__`，新增组合索引以优化常见查询路径。
+- Alembic 正式接入：新增 `alembic.ini`、`alembic/env.py`、`alembic/script.py.mako` 与 `alembic/versions/` 目录。
+- 首个迁移脚本：`alembic/versions/20260306_01_add_model_indexes.py`，用于落库本次新增索引（增量迁移）。
+- 依赖更新：`requirements.txt` 与 `jobCollectionWebApi/requirements.txt` 新增 `alembic>=1.13.2`。
+- 文档更新：`README.md` 新增「Database Migration (Alembic)」执行步骤与注意事项。

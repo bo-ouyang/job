@@ -106,13 +106,44 @@ def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started
     except Exception:
         pass
 
+    message_text = "您的简历解析已完成"
+    message_id = None
+
+    # 存入消息系统 (供消息中心展示)
+    try:
+        from crud.message import message as crud_message
+        from schemas.message_schema import MessageCreate
+        from common.databases.models.message import MessageType
+        from common.databases.PostgresManager import db_manager
+
+        async def _create_msg():
+            async with db_manager.async_session() as db:
+                import json
+                action_param = json.dumps({"task_id": celery_task_id, "feature_key": "resume_parse"})
+                new_msg = await crud_message.create(
+                    db,
+                    obj_in=MessageCreate(
+                        title="✅ 简历智能解析完成",
+                        content=f"{message_text}，耗时 {execution_time}秒。",
+                        type=MessageType.SYSTEM,
+                        receiver_id=user_id,
+                        #action_param=action_param,
+                    )
+                )
+                await db.commit()
+                return new_msg.id
+        message_id = loop.run_until_complete(_create_msg())
+    except Exception as exc:
+        logger.error(f"Save message failed: {exc}")
+
     # 统一 WS 通知
     _publish_ws(user_id, "ai_task_completed", {
         "task_id": celery_task_id,
         "feature_key": "resume_parse",
         "status": "completed",
         "execution_time": execution_time,
-        "message": "您的简历解析已完成",
+        "message": message_text,
+        "message_id": message_id,
     })
 
 
@@ -143,13 +174,44 @@ def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_
     except Exception:
         pass
 
+    message_text = "您的简历解析失败"
+    message_id = None
+
+    # 存入消息系统
+    try:
+        from crud.message import message as crud_message
+        from schemas.message_schema import MessageCreate
+        from common.databases.models.message import MessageType
+        from common.databases.PostgresManager import db_manager
+
+        async def _create_msg():
+            async with db_manager.async_session() as db:
+                import json
+                action_param = json.dumps({"task_id": celery_task_id, "feature_key": "resume_parse"})
+                new_msg = await crud_message.create(
+                    db,
+                    obj_in=MessageCreate(
+                        title="❌ 简历智能解析失败",
+                        content=f"{message_text}。原因: {error_message}",
+                        type=MessageType.SYSTEM,
+                        receiver_id=user_id,
+                        #action_param=action_param,
+                    )
+                )
+                await db.commit()
+                return new_msg.id
+        message_id = loop.run_until_complete(_create_msg())
+    except Exception as exc:
+        logger.error(f"Save message failed: {exc}")
+
     # 统一 WS 通知
     _publish_ws(user_id, "ai_task_failed", {
         "task_id": celery_task_id,
         "feature_key": "resume_parse",
         "status": "failed",
         "error": error_message,
-        "message": "您的简历解析处理失败",
+        "message": message_text,
+        "message_id": message_id,
     })
 
 

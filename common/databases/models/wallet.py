@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, BigInteger
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, BigInteger, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from common.databases.models.base import Base
@@ -17,6 +17,10 @@ class WalletStatus(str, enum.Enum):
 
 class UserWallet(Base):
     __tablename__ = "user_wallets"
+    __table_args__ = (
+        Index("idx_wallet_user_status", "user_id", "status"),
+        Index("idx_wallet_status_updated", "status", "updated_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, ForeignKey("users.id"), unique=True, nullable=False)
@@ -36,6 +40,10 @@ class UserWallet(Base):
 
 class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
+    __table_args__ = (
+        Index("idx_wallet_tx_wallet_created", "wallet_id", "created_at"),
+        Index("idx_wallet_tx_wallet_type_created", "wallet_id", "transaction_type", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     wallet_id = Column(BigInteger, ForeignKey("user_wallets.id"), nullable=False)

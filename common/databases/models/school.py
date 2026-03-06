@@ -1,6 +1,6 @@
 
 from sqlalchemy import (
-    String, Integer, BigInteger
+    String, Integer, BigInteger, Index
 )
 from sqlalchemy.orm import (
     Mapped, mapped_column, relationship
@@ -10,6 +10,9 @@ from common.utils.snowflake import generate_id
 
 class School(Base):
     __tablename__ = "schools"
+    __table_args__ = (
+        Index("idx_schools_name", "name"),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, default=generate_id

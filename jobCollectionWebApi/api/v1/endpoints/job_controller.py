@@ -198,18 +198,18 @@ async def ai_search_jobs(
 
 
 
-@router.get("/skills/{skill_names}", response_model=List[JobInDB])
-async def read_jobs_by_skills(
-    skill_names: str = Query(..., min_length=1, max_length=200, description="Comma separated skill names"),
-    db: AsyncSession = Depends(get_db),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-):
-    """根据技能获取职位"""
-    skills_list = [name.strip() for name in skill_names.split(",")]
-    return await crud_job.get_by_skills(
-        db, skill_names=skills_list, skip=skip, limit=limit
-    )
+# @router.get("/skills/{skill_names}", response_model=List[JobInDB])
+# async def read_jobs_by_skills(
+#     skill_names: str = Query(..., min_length=1, max_length=200, description="Comma separated skill names"),
+#     db: AsyncSession = Depends(get_db),
+#     skip: int = Query(0, ge=0),
+#     limit: int = Query(50, ge=1, le=100),
+# ):
+#     """根据技能获取职位"""
+#     skills_list = [name.strip() for name in skill_names.split(",")]
+#     return await crud_job.get_by_skills(
+#         db, skill_names=skills_list, skip=skip, limit=limit
+#     )
 
 
 # 公开接口（不需要认证）

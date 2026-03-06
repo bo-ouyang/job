@@ -1,10 +1,14 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, BigInteger
+from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, BigInteger, Index
 from sqlalchemy.sql import func
 from common.databases.models.base import Base
 from common.utils.snowflake import generate_id
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (
+        Index("idx_products_category_active", "category", "is_active"),
+        Index("idx_products_active_created", "is_active", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     name = Column(String(100), nullable=False, index=True, comment="商品名称")

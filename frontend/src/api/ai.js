@@ -13,7 +13,7 @@ export const aiAPI = {
    * @returns {Promise} - { task_id, status }
    */
   getAIAdvice(payload) {
-    return api.post("/ai/advice", payload, { timeout: 10000 });
+    return api.post("/ai/advice", payload, { timeout: 60000 });
   },
 
   /**
@@ -22,7 +22,7 @@ export const aiAPI = {
    * @returns {Promise} - { task_id, status, es_stats } 或 { report, es_stats, cached }
    */
   getCareerCompass(params) {
-    return api.post("/ai/career-compass", params);
+    return api.post("/ai/career-compass", params, { timeout: 60000 });
   },
 
   /**
@@ -33,7 +33,7 @@ export const aiAPI = {
   parseResume(formData) {
     return api.post("/ai/parse-resume", formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 30000,
+      timeout: 60000,
     });
   },
 

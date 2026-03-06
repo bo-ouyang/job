@@ -3,7 +3,11 @@ import api from "@/utils/request";
 export const analysisAPI = {
   // 获取职位宏观统计数据
   getJobStats(params) {
-    return api.get("/analysis/stats", { params });
+    const finalParams = { ...(params || {}) };
+    if (!finalParams.q && finalParams.keyword) {
+      finalParams.q = finalParams.keyword;
+    }
+    return api.get("/analysis/stats", { params: finalParams });
   },
 
   // 获取技能需求词云数据

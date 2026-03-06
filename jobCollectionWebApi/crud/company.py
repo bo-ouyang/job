@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import defer
 from common.databases.models.company import Company
-from jobCollectionWebApi.schemas.company import CompanyCreate, CompanyUpdate
+from jobCollectionWebApi.schemas.company_schema import CompanyCreate, CompanyUpdate
 from .base import CRUDBase
 
 class CRUDCompany(CRUDBase[Company, CompanyCreate, CompanyUpdate]):

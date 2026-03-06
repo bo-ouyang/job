@@ -10,7 +10,11 @@ from core.logger import sys_logger as logger
 async def _sync_job_logic(job_id: int):
     """Core async logic for syncing job"""
     try:
-        async with db_manager.async_session() as session:
+        # Celery workers do not run FastAPI lifespan, so DB manager must be
+        # initialized explicitly before using sessions.
+        await db_manager.initialize()
+        session_obj = await db_manager.get_session()
+        async with session_obj as session:
             job = await crud_job.get_with_relations(session, job_id)
             if not job:
                 logger.warning(f"Job {job_id} not found in PostgreSQL. It might have been deleted.")

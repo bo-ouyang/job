@@ -7,6 +7,8 @@ from crud.message import message as crud_message
 from schemas.message_schema import Message
 from dependencies import get_current_user
 from common.databases.models.user import User
+from typing import List
+from typing import Any
 
 router = APIRouter()
 

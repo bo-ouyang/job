@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, BigInteger
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, BigInteger, Index
 from sqlalchemy.orm import relationship
 from .base import Base
 from common.utils.snowflake import generate_id
@@ -16,6 +16,8 @@ class Industry(Base):
     
     __table_args__ = (
         UniqueConstraint('code', name='uq_industry_code'),
+        Index("idx_industry_parent_level", "parent_id", "level"),
+        Index("idx_industry_name_first_char", "name", "first_char"),
     )
 
     # 行业编码（BOSS直聘的code字段）

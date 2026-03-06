@@ -20,7 +20,7 @@ class ESManager:
             self.es = AsyncElasticsearch(
                 es_url,
                 basic_auth=auth,
-                verify_certs=False  # 开发环境关闭证书校验
+                #verify_certs=False  # 开发环境关闭证书校验
             )
             
     async def close(self):

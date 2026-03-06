@@ -18,7 +18,14 @@ security = HTTPBearer()
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """获取数据库会话依赖"""
     async for session in db_manager.get_db():
-        yield session
+        try:
+            # Auto-commit successful requests, rollback failed requests.
+            # This prevents "flush without commit" data loss patterns.
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
@@ -100,7 +107,7 @@ class SearchParams:
         self,
         q: Optional[str] = Query(None, max_length=100, description="搜索关键词"),
         sort: Optional[str] = Query(None, max_length=50, description="排序字段"),
-        order: Optional[str] = Query("desc", regex="^(asc|desc)$", description="排序方向")
+        order: Optional[str] = Query("desc", pattern="^(asc|desc)$", description="排序方向")
     ):
         self.q = q
         self.sort = sort

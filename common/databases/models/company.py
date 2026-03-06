@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Text, BigInteger, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -7,6 +7,10 @@ from common.utils.snowflake import generate_id
 class Company(Base):
     """公司信息表"""
     __tablename__ = 'company'
+    __table_args__ = (
+        Index("idx_company_industry_location", "industry", "location"),
+        Index("idx_company_created_at", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     source_id = Column(String(50), nullable=True, unique=True, default='', comment="Boss直聘 encryptBrandId") 

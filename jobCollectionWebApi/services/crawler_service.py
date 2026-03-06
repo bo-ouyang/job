@@ -169,7 +169,7 @@ class CrawlerService:
                 
         cmd = [
             sys.executable, 
-            "-m", "scrapy", "crawl", "boss_list", 
+            "-m", "scrapy", "crawl", "boss_list_drission", 
             "-a", f"task_id={task_id}",
             "-a", f"task_url={task_url}"
         ]

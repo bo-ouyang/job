@@ -1,9 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { messageAPI } from '@/api/message';
+import { useAiTaskStore } from '@/stores/aiTask';
 
 const messages = ref([]);
 const loading = ref(true);
+const router = useRouter();
+const aiTaskStore = useAiTaskStore();
 
 const fetchMessages = async () => {
     try {
@@ -23,6 +27,35 @@ const markAsRead = async (msg) => {
         msg.is_read = true;
     } catch (e) {
         console.error(e);
+    }
+};
+
+const parseActionParam = (param) => {
+    if (!param) return null;
+    if (typeof param === "object") return param;
+    try {
+        return JSON.parse(param);
+    } catch (e) {
+        return null;
+    }
+};
+
+const routeForFeature = (featureKey) => {
+    if (featureKey === "career_compass") return "/career-compass";
+    if (featureKey === "career_advice") return "/major-analysis";
+    if (featureKey === "resume_parse") return "/my/resume";
+    return null;
+};
+
+const handleMessageClick = async (msg) => {
+    await markAsRead(msg);
+    const action = parseActionParam(msg.action_param);
+    if (action?.task_id) {
+        await aiTaskStore.fetchTaskById(action.task_id, action.feature_key);
+        const target = routeForFeature(action.feature_key);
+        if (target) {
+            router.push({ path: target, query: { task_id: action.task_id, feature_key: action.feature_key } });
+        }
     }
 };
 
@@ -61,7 +94,7 @@ onMounted(fetchMessages);
                 :key="msg.id" 
                 class="msg-card" 
                 :class="{ 'unread': !msg.is_read }"
-                @click="markAsRead(msg)"
+                @click="handleMessageClick(msg)"
             >
                 <div class="icon-col">
                     <div class="icon" :class="msg.type">

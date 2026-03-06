@@ -1,15 +1,17 @@
 <script setup>
-import { onMounted, ref, reactive } from "vue";
+defineOptions({ name: "MajorAnalysis" });
+import { onMounted, onActivated, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import * as echarts from "echarts";
-import { analysisAPI } from '@/api/analysis';
-import { useAiTaskStore } from '@/stores/aiTask';
+import { analysisAPI } from "@/api/analysis";
+import { useAiTaskStore } from "@/stores/aiTask";
+import { aiAPI } from "@/api/ai";
 
 const chartContainer = ref(null);
 const salaryChartContainer = ref(null);
 const industryChartContainer = ref(null);
 const loading = ref(false);
 
-// Preset Majors (Hierarchical)
 const presets = ref([]);
 const categoryOptions = ref([]);
 const majorOptions = ref([]);
@@ -19,17 +21,51 @@ const selectedPreset = ref("");
 const customKeywords = ref("");
 const location = ref("");
 
-// Charts
 let skillsChart = null;
 let salaryChart = null;
 let industryChart = null;
+let resizeHandler = null;
+
+const currentAnalysisData = ref(null);
+const aiAdvice = ref("");
+const loadingAI = ref(false);
+
+const aiTaskStore = useAiTaskStore();
+const route = useRoute();
+
+const getRouteTaskId = () => {
+  const raw = route.query.task_id;
+  return Array.isArray(raw) ? raw[0] : raw;
+};
+
+const getKeywordsFromText = (text) => {
+  return (text || "")
+    .split(/[,，]/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+};
+
+const syncCategoryByMajor = (majorName) => {
+  if (!majorName) return;
+  const hitCategory = presets.value.find((cat) =>
+    (cat.majors || []).some((m) => m.major_name === majorName),
+  );
+  if (!hitCategory) return;
+
+  selectedCategory.value = hitCategory.name;
+  majorOptions.value = hitCategory.majors.map((m) => ({
+    name: m.major_name,
+    keywords: m.keywords,
+    hot: m.hot_index > 500,
+    hotIndex: m.hot_index,
+  }));
+};
 
 const fetchPresets = async () => {
   try {
     const res = await analysisAPI.getMajorPresets();
-    // Structure: [{name: 'Category', majors: [...]}, ...]
-    presets.value = res.data;
-    categoryOptions.value = res.data.map((c) => c.name);
+    presets.value = res.data || [];
+    categoryOptions.value = presets.value.map((c) => c.name);
   } catch (e) {
     console.error("Failed to fetch presets", e);
   }
@@ -40,13 +76,9 @@ const handleCategoryChange = () => {
   majorOptions.value = [];
 
   if (selectedCategory.value) {
-    const category = presets.value.find(
-      (c) => c.name === selectedCategory.value,
-    );
+    const category = presets.value.find((c) => c.name === selectedCategory.value);
     if (category) {
       majorOptions.value = category.majors.map((m) => ({
-        name: m.major_name,
-        keywords: m.keywords,
         name: m.major_name,
         keywords: m.keywords,
         hot: m.hot_index > 500,
@@ -54,17 +86,43 @@ const handleCategoryChange = () => {
       }));
     }
   }
+  aiAdvice.value = "";
 };
 
 const handlePresetChange = () => {
   if (selectedPreset.value) {
-    const major = majorOptions.value.find(
-      (m) => m.name === selectedPreset.value,
-    );
+    const major = majorOptions.value.find((m) => m.name === selectedPreset.value);
     if (major) {
       customKeywords.value = major.keywords;
-      fetchAnalysis();
     }
+  }
+  aiAdvice.value = "";
+};
+
+const updateCharts = (data) => {
+  if (!data) return;
+  currentAnalysisData.value = data;
+
+  if (skillsChart) {
+    const skillsData = Array.isArray(data.skills) ? data.skills : [];
+    const names = skillsData.map((i) => i.name);
+    const values = skillsData.map((i) => i.value);
+    skillsChart.setOption({
+      yAxis: { data: names.reverse() },
+      series: [{ data: values.reverse() }],
+    });
+  }
+
+  if (salaryChart) {
+    salaryChart.setOption({
+      series: [{ data: Array.isArray(data.salary) ? data.salary : [] }],
+    });
+  }
+
+  if (industryChart) {
+    industryChart.setOption({
+      series: [{ data: Array.isArray(data.industries) ? data.industries : [] }],
+    });
   }
 };
 
@@ -72,15 +130,13 @@ const fetchAnalysis = async () => {
   if (!customKeywords.value) return;
 
   loading.value = true;
+  aiAdvice.value = "";
+
   try {
-    const keywordsList = customKeywords.value
-      .split(/[,，]/)
-      .map((k) => k.trim())
-      .filter((k) => k);
     const payload = {
-      keywords: keywordsList,
+      keywords: getKeywordsFromText(customKeywords.value),
       location: location.value || null,
-      major_name: selectedPreset.value || null, // Send selected preset name if any
+      major_name: selectedPreset.value || null,
     };
 
     const res = await analysisAPI.analyzeMajor(payload);
@@ -93,36 +149,7 @@ const fetchAnalysis = async () => {
   }
 };
 
-const updateCharts = (data) => {
-  currentAnalysisData.value = data;
-  // 1. Skills
-  if (skillsChart) {
-    const skillsData = data.skills;
-    const names = skillsData.map((i) => i.name);
-    const values = skillsData.map((i) => i.value);
-    skillsChart.setOption({
-      yAxis: { data: names.reverse() },
-      series: [{ data: values.reverse() }],
-    });
-  }
-
-  // 2. Salary
-  if (salaryChart) {
-    salaryChart.setOption({
-      series: [{ data: data.salary }],
-    });
-  }
-
-  // 3. Industry
-  if (industryChart) {
-    industryChart.setOption({
-      series: [{ data: data.industries }],
-    });
-  }
-};
-
 const initCharts = () => {
-  // Skills
   skillsChart = echarts.init(chartContainer.value);
   skillsChart.setOption({
     title: {
@@ -153,7 +180,6 @@ const initCharts = () => {
     ],
   });
 
-  // Salary
   salaryChart = echarts.init(salaryChartContainer.value);
   salaryChart.setOption({
     title: {
@@ -176,7 +202,6 @@ const initCharts = () => {
     ],
   });
 
-  // Industry
   industryChart = echarts.init(industryChartContainer.value);
   industryChart.setOption({
     title: {
@@ -203,20 +228,13 @@ const initCharts = () => {
     ],
   });
 
-  window.addEventListener("resize", () => {
-    skillsChart.resize();
-    salaryChart.resize();
-    industryChart.resize();
-  });
+  resizeHandler = () => {
+    skillsChart?.resize();
+    salaryChart?.resize();
+    industryChart?.resize();
+  };
+  window.addEventListener("resize", resizeHandler);
 };
-
-// AI Advisor
-const currentAnalysisData = ref(null);
-const aiAdvice = ref("");
-const loadingAI = ref(false);
-
-import { aiAPI } from "@/api/ai";
-import { pollTaskResult } from "@/utils/pollTask";
 
 const fetchAIAdvice = async () => {
   if (!currentAnalysisData.value || !customKeywords.value) return;
@@ -224,38 +242,48 @@ const fetchAIAdvice = async () => {
   loadingAI.value = true;
   try {
     let topSkills = [];
-    if (currentAnalysisData.value && currentAnalysisData.value.skills) {
-      topSkills = currentAnalysisData.value.skills
-        .slice(0, 10)
-        .map((s) => s.name);
+    if (currentAnalysisData.value?.skills) {
+      topSkills = currentAnalysisData.value.skills.slice(0, 10).map((s) => s.name);
     }
-
-    // Fallback: Use input keywords if analysis didn't find specific skills
-    if (topSkills.length === 0 && customKeywords.value) {
-      topSkills = customKeywords.value.split(/[,，\s]+/).slice(0, 5);
+    if (topSkills.length === 0) {
+      topSkills = getKeywordsFromText(customKeywords.value).slice(0, 5);
     }
 
     const payload = {
-      major_name:
-        selectedPreset.value || customKeywords.value.split(/[,，\s]+/)[0],
+      major_name: selectedPreset.value || getKeywordsFromText(customKeywords.value)[0],
       skills: topSkills,
     };
 
-    console.log("AI Payload:", payload);
+    const analysisParams = {
+      keywords: getKeywordsFromText(customKeywords.value),
+      major_name: selectedPreset.value || null,
+      location: location.value || null,
+    };
 
-    // Step 1: Submit async task
-    const res = await aiAPI.getAIAdvice(payload);
+    const res = await aiAPI.getAIAdvice({
+      ...payload,
+      analysis_params: analysisParams,
+      analysis_result: currentAnalysisData.value || null,
+    });
+
     const taskId = res.data?.task_id;
     if (!taskId) {
-      // Fallback: old sync response (if backend hasn't updated)
       aiAdvice.value = typeof res.data === "string" ? res.data : JSON.stringify(res.data);
       return;
     }
 
-    // Step 2: Register in store and poll for result
-    aiTaskStore.addTask(taskId, 'career_advice', {
-      majorName: payload.major_name,
+    aiTaskStore.addTask(taskId, "career_advice", {
+      request_params: {
+        major_name: payload.major_name,
+        skills: payload.skills,
+        analysis_params: analysisParams,
+      },
+      analysis_input: {
+        analysis_result: currentAnalysisData.value || null,
+        analysis_params: analysisParams,
+      },
     });
+
     const result = await aiTaskStore.pollAndUpdate(taskId, {
       interval: 2000,
       timeout: 120000,
@@ -263,9 +291,8 @@ const fetchAIAdvice = async () => {
     aiAdvice.value = result?.advice || result?.result_data || result || "未能获取建议";
   } catch (e) {
     console.error("AI Advice failed", e);
-    // 409: AI task already running
     if (e.response?.status === 409 || e.response?.data?.code === 40902) {
-      aiAdvice.value = "当前有AI分析任务正在执行中，请等待完成后再试。";
+      aiAdvice.value = "当前有 AI 分析任务正在执行中，请等待完成后再试。";
     } else {
       aiAdvice.value = e.message || "无法获取建议，请稍后再试。";
     }
@@ -274,27 +301,131 @@ const fetchAIAdvice = async () => {
   }
 };
 
-const aiTaskStore = useAiTaskStore();
+const rebuildAnalysisFromParams = async (analysisParams, fallbackSkills) => {
+  const keywords = Array.isArray(analysisParams?.keywords)
+    ? analysisParams.keywords
+    : typeof analysisParams?.keywords === "string"
+      ? getKeywordsFromText(analysisParams.keywords)
+      : Array.isArray(fallbackSkills)
+        ? fallbackSkills
+        : typeof fallbackSkills === "string"
+          ? getKeywordsFromText(fallbackSkills)
+          : [];
 
-onMounted(() => {
-  fetchPresets();
+  if (keywords.length === 0) return false;
+
+  try {
+    const payload = {
+      keywords,
+      location: analysisParams?.location || null,
+      major_name: analysisParams?.major_name || null,
+    };
+    const res = await analysisAPI.analyzeMajor(payload);
+    if (res?.data) {
+      updateCharts(res.data);
+      return true;
+    }
+  } catch (e) {
+    console.error("Failed to rebuild analysis data", e);
+  }
+  return false;
+};
+
+const applyTaskResult = async (task) => {
+  if (!task || !task.result) return false;
+
+  const result = task.result;
+  const rawAdvice = result?.advice || result?.result_data || "";
+  if (rawAdvice) {
+    aiAdvice.value = rawAdvice;
+  }
+
+  const analysisInput = result.analysis_input || {};
+  const analysisResult = result.analysis_result || analysisInput.analysis_result;
+  if (analysisResult) {
+    updateCharts(analysisResult);
+  }
+
+  const params = result.request_params || {};
+  const analysisParams = analysisInput.analysis_params || params.analysis_params || {};
+
+  if (analysisParams.major_name) {
+    syncCategoryByMajor(analysisParams.major_name);
+    selectedPreset.value = analysisParams.major_name;
+  }
+  if (analysisParams.location) {
+    location.value = analysisParams.location;
+  }
+  if (Array.isArray(analysisParams.keywords)) {
+    customKeywords.value = analysisParams.keywords.join(", ");
+  } else if (typeof analysisParams.keywords === "string") {
+    customKeywords.value = analysisParams.keywords;
+  }
+
+  if (!analysisResult) {
+    await rebuildAnalysisFromParams(analysisParams, params.skills);
+  }
+
+  return Boolean(rawAdvice || analysisResult || currentAnalysisData.value);
+};
+
+const loadTaskResult = async (taskId) => {
+  if (!taskId) return false;
+  await aiTaskStore.fetchTaskById(taskId, route.query.feature_key || "career_advice");
+  const task = aiTaskStore.getTask(taskId);
+  if (!task || task.featureKey !== "career_advice") return false;
+  return applyTaskResult(task);
+};
+
+const applyLatestCompletedResult = async () => {
+  const lastResult = aiTaskStore.getLatestResult("career_advice");
+  if (!lastResult) return false;
+  return applyTaskResult(lastResult);
+};
+
+onMounted(async () => {
+  await fetchPresets();
   initCharts();
 
-  // 恢复上次 AI 建议结果（跨页面持久化）
-  const lastResult = aiTaskStore.getLatestResult('career_advice');
-  if (lastResult && lastResult.result) {
-    const raw = lastResult.result?.advice || lastResult.result?.result_data || '';
-    if (raw) {
-      aiAdvice.value = raw;
-    }
+  let loaded = await loadTaskResult(getRouteTaskId());
+  if (!loaded) {
+    loaded = await applyLatestCompletedResult();
+  }
+  if (!loaded) {
+    await aiTaskStore.fetchHistory();
+    await applyLatestCompletedResult();
   }
 });
+
+onActivated(async () => {
+  const taskId = getRouteTaskId();
+  if (!taskId) return;
+  await loadTaskResult(taskId);
+});
+
+onUnmounted(() => {
+  if (resizeHandler) {
+    window.removeEventListener("resize", resizeHandler);
+  }
+  skillsChart?.dispose();
+  salaryChart?.dispose();
+  industryChart?.dispose();
+});
+
+watch(
+  () => route.query.task_id,
+  async () => {
+    const taskId = getRouteTaskId();
+    if (!taskId) return;
+    await loadTaskResult(taskId);
+  },
+);
 </script>
 
 <template>
   <div class="major-analysis-view">
     <div class="header">
-      <h2>🎓 大学校专业技能分析</h2>
+      <h2>大学专业技能分析</h2>
       <p>输入你的专业或关键词，洞察就业前景与技能需求</p>
     </div>
 
@@ -311,11 +442,7 @@ onMounted(() => {
 
       <div class="input-group">
         <label>具体专业</label>
-        <select
-          v-model="selectedPreset"
-          @change="handlePresetChange"
-          :disabled="!selectedCategory"
-        >
+        <select v-model="selectedPreset" @change="handlePresetChange" :disabled="!selectedCategory">
           <option value="">-- 请选择专业 --</option>
           <option v-for="p in majorOptions" :key="p.name" :value="p.name">
             {{ p.name }} {{ p.hot ? "🔥" : "" }} ({{ p.hotIndex }})
@@ -324,16 +451,13 @@ onMounted(() => {
       </div>
 
       <div class="input-group flex-2">
-        <label>分析关键词 (可手动修改，逗号分隔)</label>
-        <input
-          v-model="customKeywords"
-          placeholder="例如: Java, Python, 后端"
-        />
+        <label>分析关键词（可手动修改，逗号分隔）</label>
+        <input v-model="customKeywords" placeholder="例如：Java, Python, 后端" />
       </div>
 
       <div class="input-group">
         <label>意向城市</label>
-        <input v-model="location" placeholder="例如: 上海" />
+        <input v-model="location" placeholder="例如：上海" />
       </div>
 
       <div class="action-group">
@@ -343,8 +467,8 @@ onMounted(() => {
           :disabled="loading"
           :class="{ 'is-loading': loading }"
         >
-          <span v-if="loading">📡 数据洞察中...</span>
-          <span v-else>🔮 生成职业罗盘</span>
+          <span v-if="loading">数据分析中...</span>
+          <span v-else>生成分析图谱</span>
         </button>
       </div>
     </div>
@@ -355,16 +479,11 @@ onMounted(() => {
       <div class="chart-card" ref="industryChartContainer"></div>
     </div>
 
-    <!-- AI Advisor Section -->
     <div class="ai-section" v-if="currentAnalysisData">
       <div class="chart-card ai-card">
         <div class="ai-header">
-          <h3>🤖 AI 职业发展向导</h3>
-          <button
-            v-if="!aiAdvice && !loadingAI"
-            class="ai-btn"
-            @click="fetchAIAdvice"
-          >
+          <h3>AI 职业发展向导</h3>
+          <button v-if="!aiAdvice && !loadingAI" class="ai-btn" @click="fetchAIAdvice">
             生成职业建议
           </button>
         </div>
@@ -419,7 +538,7 @@ onMounted(() => {
   font-size: 1.1rem;
 }
 
-/* 筛选项控制台 */
+/* Controls */
 .control-panel {
   background: var(--color-glass-bg);
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -536,7 +655,7 @@ onMounted(() => {
   animation: loading-sweep 1.5s infinite linear;
 }
 
-/* 毛玻璃图表网格 */
+/* Charts */
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -584,7 +703,7 @@ onMounted(() => {
   height: 100%;
 }
 
-/* AI 指导模块 */
+/* AI section */
 .ai-section {
   margin-top: 3rem;
 }
@@ -596,7 +715,7 @@ onMounted(() => {
     hsla(222, 47%, 16%, 0.8) 0%,
     hsla(222, 47%, 11%, 0.9) 100%
   );
-  border: 1px solid rgba(139, 92, 246, 0.4); /* Purple tint for AI */
+  border: 1px solid rgba(139, 92, 246, 0.4);
   position: relative;
   padding: 2.5rem;
 }
@@ -672,7 +791,7 @@ onMounted(() => {
   gap: 10px;
 }
 
-/* 简单的 Spinner 动画 */
+/* Spinner */
 .loader {
   width: 20px;
   height: 20px;

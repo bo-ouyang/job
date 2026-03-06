@@ -166,6 +166,7 @@ class JobList(BaseModel):
 # 职位查询特定参数 (Pydantic Schema)
 class JobQueryParams(BaseModel):
     """职位查询特定参数"""
+    q: Optional[str] = Field(None, max_length=100, description="搜索关键词")
     location: Optional[int] = Field(None, gt=0, description="工作地点")
     experience: Optional[str] = Field(None, max_length=50, description="经验要求")
     education: Optional[str] = Field(None, max_length=50, description="学历要求")

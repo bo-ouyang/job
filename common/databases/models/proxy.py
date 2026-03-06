@@ -1,9 +1,13 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Index
 from sqlalchemy.sql import func
 from .base import Base
 
 class Proxy(Base):
     __tablename__ = 'proxies'
+    __table_args__ = (
+        Index("idx_proxies_active_score", "is_active", "score"),
+        Index("idx_proxies_protocol_active", "protocol", "is_active"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     ip = Column(String(50), nullable=False)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Boolean, DateTime, BigInteger
+from sqlalchemy import Column, String, Text, Boolean, DateTime, BigInteger, Index
 from sqlalchemy.sql import func
 
 from common.databases.models.base import Base
@@ -7,6 +7,9 @@ from common.utils.snowflake import generate_id
 
 class SystemConfig(Base):
     __tablename__ = "system_configs"
+    __table_args__ = (
+        Index("idx_system_cfg_category_active", "category", "is_active"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     key = Column(String(120), unique=True, nullable=False, index=True, comment="Config key")

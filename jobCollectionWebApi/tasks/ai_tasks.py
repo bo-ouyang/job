@@ -102,13 +102,45 @@ def _mark_task_completed(
     except Exception:
         pass
 
+    message_text = f"您的{_feature_display(feature_key)}已完成"
+    message_id = None
+
+    # 存入消息系统 (供消息中心展示)
+    try:
+        from crud.message import message as crud_message
+        from schemas.message_schema import MessageCreate
+        from common.databases.models.message import MessageType
+        from common.databases.PostgresManager import db_manager
+
+        async def _create_msg():
+            async with db_manager.async_session() as db:
+                import json
+                # Build an action_param dictionary so that the frontend knows where to route when the message is clicked
+                action_param = json.dumps({"task_id": celery_task_id, "feature_key": feature_key})
+                new_msg = await crud_message.create(
+                    db,
+                    obj_in=MessageCreate(
+                        title=f"✅ {_feature_display(feature_key)}完成",
+                        content=f"{message_text}，耗时 {execution_time}秒。",
+                        type=MessageType.SYSTEM,
+                        receiver_id=user_id,
+                        #action_param=action_param,
+                    )
+                )
+                await db.commit()
+                return new_msg.id
+        message_id = loop.run_until_complete(_create_msg())
+    except Exception as exc:
+        logger.error(f"Save message failed: {exc}")
+
     # 统一 WS 通知: ai_task_completed
     _publish_result(user_id, "ai_task_completed", {
         "task_id": celery_task_id,
         "feature_key": feature_key,
         "status": "completed",
         "execution_time": execution_time,
-        "message": f"您的{_feature_display(feature_key)}已完成",
+        "message": message_text,
+        "message_id": message_id,
     })
 
 
@@ -146,13 +178,44 @@ def _mark_task_failed(
     except Exception:
         pass
 
+    message_text = f"您的{_feature_display(feature_key)}处理失败"
+    message_id = None
+
+    # 存入消息系统
+    try:
+        from crud.message import message as crud_message
+        from schemas.message_schema import MessageCreate
+        from common.databases.models.message import MessageType
+        from common.databases.PostgresManager import db_manager
+
+        async def _create_msg():
+            async with db_manager.async_session() as db:
+                import json
+                action_param = json.dumps({"task_id": celery_task_id, "feature_key": feature_key})
+                new_msg = await crud_message.create(
+                    db,
+                    obj_in=MessageCreate(
+                        title=f"❌ {_feature_display(feature_key)}失败",
+                        content=f"{message_text}。原因: {error_message}",
+                        type=MessageType.SYSTEM,
+                        receiver_id=user_id,
+                        action_param=action_param,
+                    )
+                )
+                await db.commit()
+                return new_msg.id
+        message_id = loop.run_until_complete(_create_msg())
+    except Exception as exc:
+        logger.error(f"Save message failed: {exc}")
+
     # 统一 WS 通知: ai_task_failed
     _publish_result(user_id, "ai_task_failed", {
         "task_id": celery_task_id,
         "feature_key": feature_key,
         "status": "failed",
         "error": error_message,
-        "message": f"您的{_feature_display(feature_key)}处理失败",
+        "message": message_text,
+        "message_id": message_id,
     })
 
 
@@ -214,6 +277,7 @@ def career_advice_task(
     skills: list,
     engine: str = "auto",
     charge_amount: float = 0,
+    analysis_result: dict = None,
 ):
     """Celery task: generate career advice asynchronously."""
     loop = _get_event_loop()
@@ -228,8 +292,13 @@ def career_advice_task(
             "task_id": self.request.id,
             "advice": result,
         })
+        # 将建议与分析结果一起落库，便于前端历史恢复图表
+        result_payload = json.dumps({
+            "advice": result,
+            "analysis_result": analysis_result,
+        }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
-        _mark_task_completed(user_id, "career_advice", self.request.id, result, started_at, request_params)
+        _mark_task_completed(user_id, "career_advice", self.request.id, result_payload, started_at, request_params)
         return {"status": "success", "advice": result}
     except Exception as exc:
         logger.error(f"career_advice_task failed: {exc}")
@@ -286,6 +355,7 @@ def career_compass_task(
     major_name: str,
     es_stats: dict,
     charge_amount: float = 0,
+    skill_cloud_data: list = None,
 ):
     """Celery task: generate career compass report asynchronously."""
     loop = _get_event_loop()
@@ -300,8 +370,14 @@ def career_compass_task(
             "task_id": self.request.id,
             "report": result,
         })
+        # 将报告与统计一起落库，便于前端历史恢复图表
+        result_payload = json.dumps({
+            "report": result,
+            "es_stats": es_stats,
+            "skill_cloud_data": skill_cloud_data,
+        }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
-        _mark_task_completed(user_id, "career_compass", self.request.id, result, started_at, request_params)
+        _mark_task_completed(user_id, "career_compass", self.request.id, result_payload, started_at, request_params)
         return {"status": "success", "report": result}
     except Exception as exc:
         logger.error(f"career_compass_task failed: {exc}")

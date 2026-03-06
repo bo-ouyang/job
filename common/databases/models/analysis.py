@@ -25,6 +25,9 @@ class AnalysisResult(Base):
 class UserQuery(Base):
     """用户查询记录表 (专门记录搜索行为)"""
     __tablename__ = 'user_query'
+    __table_args__ = (
+        Index("idx_user_query_user_type_created", "user_id", "query_type", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     query_type = Column(String(50), nullable=False, index=True) # e.g. "job_search"
@@ -41,6 +44,10 @@ class UserQuery(Base):
 class APILog(Base):
     """全局接口日志表 (记录 QPS, 耗时, 访问量)"""
     __tablename__ = 'api_logs'
+    __table_args__ = (
+        Index("idx_api_logs_path_status_created", "path", "status_code", "created_at"),
+        Index("idx_api_logs_user_created", "user_id", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     path = Column(String(255), index=True)
@@ -58,6 +65,10 @@ class APILog(Base):
 class TaskLog(Base):
     """Celery 任务日志表"""
     __tablename__ = 'task_logs'
+    __table_args__ = (
+        Index("idx_task_logs_name_status_created", "task_name", "status", "created_at"),
+        Index("idx_task_logs_task_status_created", "task_id", "status", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     task_id = Column(String(50), nullable=False, index=True)

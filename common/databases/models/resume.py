@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Date, BigInteger
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Date, BigInteger, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .base import Base
@@ -8,6 +8,9 @@ from common.utils.snowflake import generate_id
 class Resume(Base):
     """简历主表"""
     __tablename__ = "resumes"
+    __table_args__ = (
+        Index("idx_resumes_user_created", "user_id", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, unique=True, comment="关联用户ID")
@@ -43,6 +46,9 @@ class Resume(Base):
 class Education(Base):
     """教育经历"""
     __tablename__ = "resume_educations"
+    __table_args__ = (
+        Index("idx_resume_edu_resume_start", "resume_id", "start_date"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     resume_id = Column(BigInteger, ForeignKey("resumes.id"), nullable=False)
@@ -61,6 +67,9 @@ class Education(Base):
 class WorkExperience(Base):
     """工作经历"""
     __tablename__ = "resume_works"
+    __table_args__ = (
+        Index("idx_resume_work_resume_start", "resume_id", "start_date"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     resume_id = Column(BigInteger, ForeignKey("resumes.id"), nullable=False)
@@ -80,6 +89,9 @@ class WorkExperience(Base):
 class ProjectExperience(Base):
     """项目经历"""
     __tablename__ = "resume_projects"
+    __table_args__ = (
+        Index("idx_resume_proj_resume_start", "resume_id", "start_date"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     resume_id = Column(BigInteger, ForeignKey("resumes.id"), nullable=False)

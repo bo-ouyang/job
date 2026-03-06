@@ -2,7 +2,6 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from common.databases.models.wallet import UserWallet, WalletTransaction, TransactionType, WalletStatus
-from common.databases.models.payment import PaymentOrder, PaymentStatus
 from .base import CRUDBase
 from pydantic import BaseModel
 
@@ -18,8 +17,13 @@ class CRUDWallet(CRUDBase[UserWallet, WalletCreate, WalletUpdate]):
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
         
-    async def create_wallet(self, db: AsyncSession, user_id: int) -> UserWallet:
-        db_obj = UserWallet(user_id=user_id)
+    async def create_wallet(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        initial_balance: float = 0.0,
+    ) -> UserWallet:
+        db_obj = UserWallet(user_id=user_id, balance=initial_balance)
         db.add(db_obj)
         await db.flush()
         return db_obj
@@ -105,5 +109,14 @@ class CRUDWallet(CRUDBase[UserWallet, WalletCreate, WalletUpdate]):
         )
         result = await db.execute(stmt)
         return result.scalars().all()
+
+    async def count_transactions(self, db: AsyncSession, user_id: int) -> int:
+        stmt = (
+            select(WalletTransaction)
+            .join(UserWallet)
+            .where(UserWallet.user_id == user_id)
+        )
+        result = await db.execute(stmt)
+        return len(result.scalars().all())
 
 wallet = CRUDWallet(UserWallet)

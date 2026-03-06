@@ -1,32 +1,40 @@
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue';
-import { analysisAPI } from '../api/analysis';
-import { aiAPI } from '../api/ai';
-import { useAiTaskStore } from '@/stores/aiTask';
-import { commonAPI } from '../api/common';
-import { ElMessage } from 'element-plus';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import * as echarts from 'echarts';
-import 'echarts-wordcloud';
+defineOptions({ name: "CareerCompass" });
+import {
+  ref,
+  onMounted,
+  onActivated,
+  onUnmounted,
+  nextTick,
+  watch,
+} from "vue";
+import { useRoute } from "vue-router";
+import { analysisAPI } from "../api/analysis";
+import { aiAPI } from "../api/ai";
+import { useAiTaskStore } from "@/stores/aiTask";
+import { ElMessage } from "element-plus";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+import * as echarts from "echarts";
+import "echarts-wordcloud";
 
-// State
 const loading = ref(false);
 const submitting = ref(false);
-const selectedCategory = ref('');
-const majorName = ref('');
-const targetIndustry = ref(''); // Optional
-const reportMarkdown = ref('');
+const selectedCategory = ref("");
+const majorName = ref("");
+const targetIndustry = ref([]);
+const reportMarkdown = ref("");
 
 const majorPresets = ref([]);
 const categoryOptions = ref([]);
 const majorOptions = ref([]);
 const industryOptions = ref([]);
+const targetIndustryLoading = ref(false);
+const restoringForm = ref(false);
 
 const statsData = ref({ salary: [], skills: [], industries: [] });
 const skillCloudData = ref([]);
 
-// Charts
 let salaryChartInstance = null;
 let industryChartInstance = null;
 let skillChartInstance = null;
@@ -36,21 +44,25 @@ const industryChartRef = ref(null);
 const skillChartRef = ref(null);
 
 const aiTaskStore = useAiTaskStore();
+const route = useRoute();
 
-onMounted(async () => {
-  await fetchPresets();
-  initCharts();
-  window.addEventListener('resize', handleResize);
+const getRouteTaskId = () => {
+  const taskId = route.query.task_id;
+  return Array.isArray(taskId) ? taskId[0] : taskId;
+};
 
-  // 恢复上次结果（跨页面持久化）
-  const lastResult = aiTaskStore.getLatestResult('career_compass');
-  if (lastResult && lastResult.result) {
-    const raw = lastResult.result?.report || lastResult.result?.result_data || '';
-    if (raw) {
-      reportMarkdown.value = DOMPurify.sanitize(marked.parse(raw));
-    }
-  }
-});
+const getTaskParams = (task) => {
+  const result = task?.result || {};
+  const params =
+    result.request_params || task?.extraData?.request_params || task?.extraData || {};
+  return {
+    major: params.major_name || params.majorName || "",
+    industry1: params.target_industry ?? params.industry1 ?? null,
+    industry2: params.target_industry_2 ?? params.industry2 ?? null,
+    industry1Name: params.target_industry_name ?? null,
+    industry2Name: params.target_industry_2_name ?? null,
+  };
+};
 
 const handleResize = () => {
   salaryChartInstance?.resize();
@@ -62,77 +74,181 @@ const fetchPresets = async () => {
   try {
     const res = await analysisAPI.getMajorPresets();
     majorPresets.value = res.data || [];
-    categoryOptions.value = majorPresets.value.map(c => c.name);
+    categoryOptions.value = majorPresets.value.map((c) => c.name);
   } catch (error) {
     console.error("Failed to load major presets", error);
   }
 };
 
-const handleCategoryChange = () => {
-  majorName.value = '';
-  majorOptions.value = [];
-  targetIndustry.value = '';
-  industryOptions.value = [];
-  
-  if (selectedCategory.value) {
-    const category = majorPresets.value.find(c => c.name === selectedCategory.value);
-    if (category) {
-      majorOptions.value = category.majors.map(m => ({
-        name: m.major_name,
-        hotIndex: m.hot_index
-      }));
-    }
-  }
-};
-
-import { watch } from 'vue';
-
-const targetIndustryLoading = ref(false);
-
-const fetchMajorIndustries = async (major) => {
+const fetchMajorIndustries = async (major, preserveSelection = false) => {
   if (!major) {
     industryOptions.value = [];
-    targetIndustry.value = '';
+    if (!preserveSelection) targetIndustry.value = [];
     return;
   }
-  
+
   targetIndustryLoading.value = true;
   try {
     const res = await analysisAPI.getMajorIndustries(major);
     const treeData = res.data || [];
-    
-    industryOptions.value = treeData.map(l0 => {
+    industryOptions.value = treeData.map((l0) => {
       const parent = {
         value: l0.code,
         label: l0.name,
-        children: []
+        children: [],
       };
-      
       if (l0.children && l0.children.length > 0) {
-        parent.children = l0.children.map(l1 => ({
+        parent.children = l0.children.map((l1) => ({
           value: l1.code,
-          label: l1.name
+          label: l1.name,
         }));
       } else {
         delete parent.children;
       }
-      
       return parent;
     });
-    
-    // Auto-clear selected target if new options don't contain it, or just always clear
-    targetIndustry.value = '';
-    
+    if (!preserveSelection) {
+      targetIndustry.value = [];
+    }
   } catch (error) {
-    console.error("Failed to load major specific industries tree", error);
-    ElMessage.error('无法获取该专业匹配的行业数据');
+    console.error("Failed to load major-specific industries tree", error);
+    ElMessage.error("加载行业选项失败");
     industryOptions.value = [];
   } finally {
     targetIndustryLoading.value = false;
   }
 };
 
+const applyTaskResult = async (task) => {
+  if (!task || !task.result) return false;
+
+  const raw = task.result?.report || task.result?.result_data || "";
+  if (raw) {
+    const reportText = typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+    reportMarkdown.value = DOMPurify.sanitize(marked.parse(reportText));
+  }
+
+  const params = getTaskParams(task);
+  if (params.major) {
+    restoringForm.value = true;
+    majorName.value = params.major;
+    await fetchMajorIndustries(params.major, true);
+    restoringForm.value = false;
+  }
+
+  const selectedIndustry = [];
+  if (params.industry1 !== null && params.industry1 !== undefined) {
+    selectedIndustry.push(params.industry1);
+  }
+  if (params.industry2 !== null && params.industry2 !== undefined) {
+    selectedIndustry.push(params.industry2);
+  }
+  targetIndustry.value = selectedIndustry;
+
+  const result = task.result || {};
+  const restoredStats = result.es_stats || result.analysis_input?.es_stats;
+  const restoredSkillCloud =
+    result.skillCloudData ||
+    result.skill_cloud_data ||
+    result.analysis_input?.skill_cloud_data ||
+    result.analysis_input?.skillCloudData;
+
+  if (restoredStats) {
+    statsData.value = restoredStats;
+  }
+  if (Array.isArray(restoredSkillCloud) && restoredSkillCloud.length > 0) {
+    skillCloudData.value = restoredSkillCloud;
+  }
+
+  if (
+    restoredStats ||
+    (Array.isArray(restoredSkillCloud) && restoredSkillCloud.length > 0)
+  ) {
+    nextTick(() => {
+      updateCharts();
+    });
+    return true;
+  }
+
+  if (majorName.value) {
+    try {
+      const [statsRes, skillRes] = await Promise.all([
+        analysisAPI.getJobStats({
+          q: majorName.value,
+          major_name: majorName.value,
+          industry: params.industry1,
+          industry_2: params.industry2,
+        }),
+        analysisAPI.getSkillCloud(
+          majorName.value,
+          params.industry1,
+          params.industry2,
+          params.industry1Name,
+          params.industry2Name,
+        ),
+      ]);
+      if (statsRes?.data) {
+        statsData.value = statsRes.data;
+      }
+      if (skillRes?.data) {
+        skillCloudData.value = skillRes.data;
+      }
+      nextTick(() => {
+        updateCharts();
+      });
+    } catch (e) {
+      console.error("Failed to restore fallback stats", e);
+    }
+  }
+  return Boolean(raw);
+};
+
+const applyLatestCompletedResult = async () => {
+  const lastResult = aiTaskStore.getLatestResult("career_compass");
+  if (!lastResult) return false;
+  return applyTaskResult(lastResult);
+};
+
+const restoreFromRouteOrLatest = async () => {
+  const routeTaskId = getRouteTaskId();
+  if (routeTaskId) {
+    await aiTaskStore.fetchTaskById(
+      routeTaskId,
+      route.query.feature_key || "career_compass",
+    );
+    const task = aiTaskStore.getTask(routeTaskId);
+    if (await applyTaskResult(task)) {
+      return;
+    }
+  }
+
+  if (await applyLatestCompletedResult()) {
+    return;
+  }
+
+  await aiTaskStore.fetchHistory();
+  await applyLatestCompletedResult();
+};
+
+const handleCategoryChange = () => {
+  majorName.value = "";
+  majorOptions.value = [];
+  targetIndustry.value = [];
+  industryOptions.value = [];
+
+  if (selectedCategory.value) {
+    const category = majorPresets.value.find((c) => c.name === selectedCategory.value);
+    if (category) {
+      majorOptions.value = category.majors.map((m) => ({
+        name: m.major_name,
+        hotIndex: m.hot_index,
+      }));
+    }
+  }
+};
+
 watch(majorName, (newVal) => {
+  if (restoringForm.value) return;
   fetchMajorIndustries(newVal);
 });
 
@@ -154,107 +270,106 @@ const initCharts = () => {
 const updateCharts = () => {
   if (!statsData.value) return;
 
-  // 1. Salary Distribution (Bar / Funnel like)
   const salaryOptions = {
-    title: { text: '薪资漏斗透视', left: 'center', textStyle: { color: '#333' } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: { type: 'category', data: statsData.value.salary.map(item => item.name) },
-    yAxis: { type: 'value', name: '需求量(个)' },
+    title: { text: "薪资区间分布", left: "center", textStyle: { color: "#333" } },
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    grid: { left: "3%", right: "4%", bottom: "3%", containLabel: true },
+    xAxis: {
+      type: "category",
+      data: (statsData.value.salary || []).map((item) => item.name),
+    },
+    yAxis: { type: "value", name: "岗位数" },
     series: [
       {
-        name: '招聘机会',
-        type: 'bar',
-        data: statsData.value.salary.map(item => item.value),
-        itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] }
-      }
-    ]
+        name: "岗位数量",
+        type: "bar",
+        data: (statsData.value.salary || []).map((item) => item.value),
+        itemStyle: { color: "#409EFF", borderRadius: [4, 4, 0, 0] },
+      },
+    ],
   };
   salaryChartInstance?.setOption(salaryOptions);
 
-  // 2. Industry Distribution (Pie)
-  const industryOptions = {
-    title: { text: '核心落地行业', left: 'center' },
-    tooltip: { trigger: 'item' },
-    legend: { orient: 'vertical', left: 'left' },
+  const industryOptionsConfig = {
+    title: { text: "行业分布占比", left: "center" },
+    tooltip: { trigger: "item" },
+    legend: { orient: "vertical", left: "left" },
     series: [
       {
-        name: '行业占比',
-        type: 'pie',
-        radius: ['40%', '70%'],
+        name: "行业分布",
+        type: "pie",
+        radius: ["40%", "70%"],
         avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 },
-        label: { show: false, position: 'center' },
-        emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold' } },
+        itemStyle: { borderRadius: 10, borderColor: "#fff", borderWidth: 2 },
+        label: { show: false, position: "center" },
+        emphasis: { label: { show: true, fontSize: 18, fontWeight: "bold" } },
         labelLine: { show: false },
-        data: statsData.value.industries
-      }
-    ]
+        data: statsData.value.industries || [],
+      },
+    ],
   };
-  industryChartInstance?.setOption(industryOptions);
+  industryChartInstance?.setOption(industryOptionsConfig);
 
-  // 3. Skill Cloud
-  if (skillCloudData.value.length > 0) {
+  if (Array.isArray(skillCloudData.value) && skillCloudData.value.length > 0) {
     const skillOptions = {
-      title: { text: '硬核心技能图谱', left: 'center' },
+      title: { text: "核心技能词云", left: "center" },
       tooltip: { show: true },
-      series: [{
-        type: 'wordCloud',
-        shape: 'circle',
-        keepAspect: false,
-        left: 'center', top: 'center', width: '90%', height: '90%',
-        sizeRange: [12, 50],
-        rotationRange: [-45, 45],
-        rotationStep: 45,
-        gridSize: 8,
-        drawOutOfBound: false,
-        layoutAnimation: true,
-        textStyle: {
-          fontFamily: 'sans-serif',
-          fontWeight: 'bold',
-          color: function () {
-            return 'rgb(' + [
-              Math.round(Math.random() * 160),
-              Math.round(Math.random() * 160),
-              Math.round(Math.random() * 160)
-            ].join(',') + ')';
-          }
+      series: [
+        {
+          type: "wordCloud",
+          shape: "circle",
+          keepAspect: false,
+          left: "center",
+          top: "center",
+          width: "90%",
+          height: "90%",
+          sizeRange: [12, 50],
+          rotationRange: [-45, 45],
+          rotationStep: 45,
+          gridSize: 8,
+          drawOutOfBound: false,
+          layoutAnimation: true,
+          textStyle: {
+            fontFamily: "sans-serif",
+            fontWeight: "bold",
+            color() {
+              return `rgb(${Math.round(Math.random() * 160)},${Math.round(Math.random() * 160)},${Math.round(Math.random() * 160)})`;
+            },
+          },
+          emphasis: {
+            focus: "self",
+            textStyle: { textShadowBlur: 10, textShadowColor: "#333" },
+          },
+          data: skillCloudData.value,
         },
-        emphasis: { focus: 'self', textStyle: { textShadowBlur: 10, textShadowColor: '#333' } },
-        data: skillCloudData.value
-      }]
+      ],
     };
     skillChartInstance?.setOption(skillOptions);
   }
 };
 
-import { pollTaskResult } from '@/utils/pollTask';
-
 const handleAnalyze = async () => {
   if (!majorName.value) {
-    ElMessage.warning('请输入或选择您在读的具体专业');
-    return;
-  }
-  
-  if (!targetIndustry.value || targetIndustry.value.length === 0) {
-    ElMessage.warning('请选择向往的行业方向');
+    ElMessage.warning("请先选择具体专业后再分析。");
     return;
   }
 
-  // extract the level 0 and level 1 selected in cascader
-  const industry1 = Array.isArray(targetIndustry.value) && targetIndustry.value.length > 0 
-    ? targetIndustry.value[0] : null;
-  const industry2 = Array.isArray(targetIndustry.value) && targetIndustry.value.length > 1 
-    ? targetIndustry.value[1] : null;
-    
+  if (!Array.isArray(targetIndustry.value) || targetIndustry.value.length === 0) {
+    ElMessage.warning("请先选择目标行业后再分析。");
+    return;
+  }
+
+  const industry1 = targetIndustry.value[0] ?? null;
+  const industry2 = targetIndustry.value[1] ?? null;
+
   let industry1Name = null;
   let industry2Name = null;
   if (industry1) {
-    const l0 = industryOptions.value.find(item => item.value === industry1);
+    const l0 = industryOptions.value.find((item) => item.value === industry1);
     if (l0) {
       industry1Name = l0.label;
       if (industry2 && l0.children) {
-        const l1 = l0.children.find(child => child.value === industry2);
+        const l1 = l0.children.find((child) => child.value === industry2);
         if (l1) industry2Name = l1.label;
       }
     }
@@ -262,61 +377,72 @@ const handleAnalyze = async () => {
 
   loading.value = true;
   submitting.value = true;
-  reportMarkdown.value = '';
+  reportMarkdown.value = "";
 
   try {
-    // 1. Fetch Skill Cloud (fast, stays sync)
-    const skillRes = await analysisAPI.getSkillCloud(majorName.value, industry1, industry2, industry1Name, industry2Name, 30);
+    const skillRes = await analysisAPI.getSkillCloud(
+      majorName.value,
+      industry1,
+      industry2,
+      industry1Name,
+      industry2Name,
+      30,
+    );
     skillCloudData.value = skillRes.data || [];
 
-    // 3. Fetch AI Diagnostic Report (async via Celery)
-    const reportRes = await aiAPI.getCareerCompass({
+    const requestParams = {
       major_name: majorName.value,
       target_industry: industry1,
       target_industry_2: industry2,
       target_industry_name: industry1Name,
       target_industry_2_name: industry2Name,
+    };
+
+    const reportRes = await aiAPI.getCareerCompass({
+      ...requestParams,
+      skill_cloud_data: skillCloudData.value,
     });
     const responseData = reportRes.data;
 
-    // 💡 Performance Optimization: Use stats already returned by career-compass to avoid extra /stats call
     if (responseData?.es_stats) {
       statsData.value = responseData.es_stats;
+      nextTick(() => {
+        updateCharts();
+      });
     }
 
     let reportRaw;
     if (responseData?.task_id) {
-      // 注册到 store 以支持跨页面持久化
-      aiTaskStore.addTask(responseData.task_id, 'career_compass', {
-        majorName: majorName.value,
+      aiTaskStore.addTask(responseData.task_id, "career_compass", {
+        request_params: requestParams,
+        es_stats: responseData?.es_stats || statsData.value,
+        skill_cloud_data: skillCloudData.value,
       });
-      // Async path: poll for result via store
       const result = await aiTaskStore.pollAndUpdate(responseData.task_id, {
         interval: 2000,
         timeout: 120000,
       });
-      reportRaw = result?.report || result?.result_data || result || '未能生成报告。';
+      reportRaw =
+        result?.report || result?.result_data || result || "未获取到报告内容。";
     } else {
-      // Cache hit: immediate report
-      reportRaw = responseData?.report || '未能生成报告。';
+      reportRaw = responseData?.report || "未获取到报告内容。";
     }
-    
-    // Parse Markdown securely
-    reportMarkdown.value = DOMPurify.sanitize(marked.parse(reportRaw));
-
+    const reportText =
+      typeof reportRaw === "string" ? reportRaw : JSON.stringify(reportRaw, null, 2);
+    reportMarkdown.value = DOMPurify.sanitize(marked.parse(reportText));
   } catch (error) {
     console.error("Analyze error:", error);
-    // 409: AI task already running
     if (error.response?.status === 409 || error.response?.data?.code === 40902) {
       const runningTaskId = error.response?.data?.data?.task_id;
-      ElMessage.warning(`当前有分析任务正在执行中，请等待完成后再提交${runningTaskId ? '（任务ID: ' + runningTaskId + '）' : ''}`);
+      ElMessage.warning(
+        `当前已有任务正在执行，请等待完成后再重试${runningTaskId ? `（任务ID: ${runningTaskId}）` : ""}`,
+      );
     } else {
-      ElMessage.error(error.message || '生成罗盘报告时发生错误');
+      ElMessage.error(error.message || "生成职业导航报告失败，请稍后重试。");
     }
   } finally {
     loading.value = false;
     submitting.value = false;
-    
     nextTick(() => {
       initCharts();
       updateCharts();
@@ -324,18 +450,50 @@ const handleAnalyze = async () => {
   }
 };
 
+onMounted(async () => {
+  await fetchPresets();
+  initCharts();
+  window.addEventListener("resize", handleResize);
+  await restoreFromRouteOrLatest();
+});
+
+onActivated(async () => {
+  const taskId = getRouteTaskId();
+  if (!taskId) return;
+  await aiTaskStore.fetchTaskById(taskId, route.query.feature_key || "career_compass");
+  const task = aiTaskStore.getTask(taskId);
+  await applyTaskResult(task);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleResize);
+  salaryChartInstance?.dispose();
+  industryChartInstance?.dispose();
+  skillChartInstance?.dispose();
+});
+
+watch(
+  () => route.query.task_id,
+  async () => {
+    const taskId = getRouteTaskId();
+    if (!taskId) return;
+    await aiTaskStore.fetchTaskById(taskId, route.query.feature_key || "career_compass");
+    const task = aiTaskStore.getTask(taskId);
+    await applyTaskResult(task);
+  },
+);
 </script>
 
 <template>
   <div class="career-compass-container">
     <div class="header-section">
-      <h1 class="page-title">🧭 职业导航罗盘</h1>
-      <p class="subtitle">打通校园到职场的信息差，基于 10w+ 真实岗位数据驱动的职业生涯诊断评测。</p>
-      
+      <h1 class="page-title">职业导航罗盘</h1>
+      <p class="subtitle">基于真实岗位数据，展示专业到行业的趋势并生成 AI 报告。</p>
+
       <div class="search-box">
         <el-select
           v-model="selectedCategory"
-          placeholder="🎯 专业大类"
+          placeholder="专业大类"
           size="large"
           class="category-select"
           @change="handleCategoryChange"
@@ -366,7 +524,7 @@ const handleAnalyze = async () => {
           >
             <span style="float: left">{{ item.name }}</span>
             <span style="float: right; color: #8492a6; font-size: 13px">
-              🔥 热度 {{ item.hotIndex }}
+              热度 {{ item.hotIndex }}
             </span>
           </el-option>
         </el-select>
@@ -375,7 +533,7 @@ const handleAnalyze = async () => {
           v-model="targetIndustry"
           :options="industryOptions"
           :props="{ expandTrigger: 'hover' }"
-          :placeholder="industryOptions.length === 0 ? '👈 请先选择具体专业' : '🏢 向往行业 (必填)'"
+          :placeholder="industryOptions.length === 0 ? '请先选择具体专业' : '向往行业（必填）'"
           size="large"
           class="target-input"
           clearable
@@ -383,33 +541,29 @@ const handleAnalyze = async () => {
           :disabled="industryOptions.length === 0 || targetIndustryLoading"
           v-loading="targetIndustryLoading"
         ></el-cascader>
-        
-        <el-button 
-          type="primary" 
-          size="large" 
-          @click="handleAnalyze" 
+
+        <el-button
+          type="primary"
+          size="large"
+          @click="handleAnalyze"
           :loading="submitting"
           :disabled="!majorName || !targetIndustry || targetIndustry.length === 0"
           color="#1e3a8a"
           dark
         >
-          🚀 启动数据罗盘
+          启动数据罗盘
         </el-button>
       </div>
     </div>
 
-    <!-- Results Section -->
-    <div class="content-section" v-loading="loading" element-loading-text="AI导师正在研读大盘数据...">
-      
-      <!-- Placeholder when empty -->
+    <div class="content-section" v-loading="loading" element-loading-text="AI 正在分析中...">
       <div v-if="!reportMarkdown && !loading" class="empty-state">
-        <el-empty description="输入您的专业，揭示真实的职业图景" />
+        <el-empty description="输入你的专业，查看职业趋势与 AI 建议" />
       </div>
 
       <div class="dashboard-grid" v-else-if="!loading">
-        <!-- Left: BI Dashboard -->
         <div class="bi-dashboard-panel">
-          <h2 class="section-heading">📊 宏观市场透视仪</h2>
+          <h2 class="section-heading">市场数据看板</h2>
           <div class="chart-card">
             <div ref="salaryChartRef" class="echart-container"></div>
           </div>
@@ -423,9 +577,8 @@ const handleAnalyze = async () => {
           </div>
         </div>
 
-        <!-- Right: AI Diagnostic Report -->
         <div class="ai-report-panel">
-          <h2 class="section-heading">🧠 AI 专属诊断报告</h2>
+          <h2 class="section-heading">AI 诊断报告</h2>
           <el-card class="markdown-body-card" shadow="hover">
             <div class="markdown-container" v-html="reportMarkdown"></div>
           </el-card>
@@ -552,7 +705,8 @@ const handleAnalyze = async () => {
 }
 
 .markdown-container {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   line-height: 1.6;
   color: #334155;
   padding: 12px;
@@ -581,7 +735,7 @@ const handleAnalyze = async () => {
 
 .markdown-container :deep(strong) {
   color: #0f172a;
-  background: #fef08a; /* Soft highlighter yellow */
+  background: #fef08a;
   padding: 0 4px;
   border-radius: 2px;
 }

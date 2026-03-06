@@ -1,17 +1,14 @@
 import jwt
 from datetime import datetime, timedelta
 from typing import Any, Union, Optional
-from passlib.context import CryptContext
 from jwt import PyJWTError
 import secrets
 import hashlib
 import hmac
+import bcrypt
 
 from jobCollectionWebApi.config import settings
 from common.databases.RedisManager import redis_manager
-
-# 密码加密上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_access_token(
     subject: Union[str, Any], 
@@ -86,11 +83,27 @@ async def is_token_blacklisted(token: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     """生成密码哈希"""
-    return pwd_context.hash(password)
+    encoded = password.encode("utf-8")
+    if len(encoded) > 72:
+        # bcrypt cannot handle strings > 72 bytes long. Truncate safely.
+        encoded = encoded[:72]
+    # bcrypt.hashpw returns bytes, decode to string for DB storage
+    return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码"""
-    return pwd_context.verify(plain_password, hashed_password)
+    encoded = plain_password.encode("utf-8")
+    if len(encoded) > 72:
+        encoded = encoded[:72]
+    
+    try:
+        # bcrypt.checkpw expects both arguments to be bytes
+        hashed_bytes = hashed_password.encode("utf-8")
+        return bcrypt.checkpw(encoded, hashed_bytes)
+    except Exception as e:
+        import logging
+        logging.getLogger().error(f"Password verification error: {e}")
+        return False
 
 def generate_verification_code(length: int = 6) -> str:
     """生成验证码"""

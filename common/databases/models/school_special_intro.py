@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    String, Integer, Text, ForeignKey, JSON, BigInteger
+    String, Integer, Text, ForeignKey, JSON, BigInteger, Index
 )
 from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship
@@ -17,6 +17,10 @@ from .base import Base
 
 class SchoolSpecialIntro(Base):
     __tablename__ = "school_special_intro"
+    __table_args__ = (
+        Index("idx_school_intro_school_special", "school_id", "special_id"),
+        Index("idx_school_intro_status_label", "status", "label"),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger,

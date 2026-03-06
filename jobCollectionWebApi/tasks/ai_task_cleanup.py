@@ -15,7 +15,7 @@ from celery import shared_task
 from core.logger import sys_logger as logger
 
 
-STALE_THRESHOLD_MINUTES = 5
+STALE_THRESHOLD_MINUTES = 10
 
 
 def _get_event_loop():

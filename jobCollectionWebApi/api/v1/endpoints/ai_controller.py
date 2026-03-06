@@ -33,28 +33,42 @@ import os
 router = APIRouter()
 
 
+def _decode_result_data(raw_result_data):
+    """Best-effort decode task result_data to structured payload."""
+    if isinstance(raw_result_data, dict):
+        return raw_result_data
+    if isinstance(raw_result_data, str):
+        text = raw_result_data.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                return json.loads(text)
+            except Exception:
+                return None
+    return None
+
+
 # ═══════════════════════════════════════════════════
 # POST /advice — AI 职业建议
 # ═══════════════════════════════════════════════════
+"""
+    获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)
 
+    【并发限制】同一用户同一时间只能执行一个 career_advice 任务。
+    """
 @router.post("/advice")
 async def get_ai_advice(
     req: AIAdviceRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    获取 AI 职业建议 (异步版: 提交 Celery 任务, 通过轮询或 WebSocket 获取结果)
-
-    【并发限制】同一用户同一时间只能执行一个 career_advice 任务。
-    """
+    
     feature_key = "career_advice"
 
     # 1. 功能开关
     if not settings.AI_ENABLED:
         raise ExternalServiceException(message="AI service is disabled")
 
-    # 2. 并发锁检查
+    # 2. 并发锁检查 检查是否有任务正在进行
     running_task_id = await crud_ai_task.get_active_task_id(current_user.id, feature_key)
     if running_task_id:
         from core.metrics import ai_task_rejected
@@ -67,7 +81,13 @@ async def get_ai_advice(
         )
 
     # 2.5 去重缓存检查
-    request_params = {"major_name": req.major_name, "skills": req.skills, "engine": req.engine}
+    request_params = {
+        "major_name": req.major_name,
+        "skills": req.skills,
+        "engine": req.engine,
+    }
+    if req.analysis_params:
+        request_params["analysis_params"] = req.analysis_params
     dedup = await crud_ai_task.check_dedup(feature_key, request_params)
     if dedup:
         from core.metrics import ai_task_dedup_hits
@@ -93,6 +113,7 @@ async def get_ai_advice(
         skills=req.skills,
         engine=req.engine or "auto",
         charge_amount=charge_amount,
+        analysis_result=req.analysis_result,
     )
 
     # 5. 写入 AiTask 记录 + 设置 Redis 活跃锁
@@ -102,6 +123,10 @@ async def get_ai_advice(
         celery_task_id=task.id,
         feature_key=feature_key,
         request_params=request_params,
+        analysis_input={
+            "analysis_result": req.analysis_result,
+            "analysis_params": req.analysis_params,
+        },
     )
     await db.commit()
     ai_task_created.labels(feature=feature_key).inc()
@@ -204,6 +229,7 @@ async def get_career_compass(
             major_name=req.major_name,
             es_stats=es_stats,
             charge_amount=charge_amount,
+            skill_cloud_data=req.skill_cloud_data,
         )
 
         # 7. 写入 AiTask 记录
@@ -216,6 +242,17 @@ async def get_career_compass(
                 "major_name": req.major_name,
                 "target_industry": req.target_industry,
                 "target_industry_name": req.target_industry_name,
+                "target_industry_2": req.target_industry_2,
+                "target_industry_2_name": req.target_industry_2_name,
+            },
+            analysis_input={
+                "major_name": req.major_name,
+                "es_stats": es_stats,
+                "skill_cloud_data": req.skill_cloud_data,
+                "target_industry": req.target_industry,
+                "target_industry_name": req.target_industry_name,
+                "target_industry_2": req.target_industry_2,
+                "target_industry_2_name": req.target_industry_2_name,
             },
         )
         await db.commit()
@@ -319,7 +356,13 @@ async def get_ai_task_result(
     if task_data:
         status = task_data.get("status", "unknown")
         if status == "completed":
-            return {"task_id": task_id, "status": "completed", "result": task_data}
+            decoded = _decode_result_data(task_data.get("result_data"))
+            if decoded:
+                merged_result = {**task_data, **decoded}
+                merged_result["result_payload"] = decoded
+            else:
+                merged_result = task_data
+            return {"task_id": task_id, "status": "completed", "result": merged_result}
         elif status == "failed":
             return {"task_id": task_id, "status": "failed", "error": task_data.get("error_message")}
         # pending/processing — 继续检查 Celery 状态
@@ -349,7 +392,7 @@ async def get_ai_task_result(
 async def get_ai_task_history(
     feature_key: str = None,
     page: int = 1,
-    page_size: int = 20,
+    page_size: int = 10,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):

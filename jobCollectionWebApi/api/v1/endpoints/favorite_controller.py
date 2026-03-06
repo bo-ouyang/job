@@ -1,5 +1,5 @@
-from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
-from fastapi import APIRouter, Depends, HTTPException, Query
+from core.exceptions import AppException
+from fastapi import APIRouter, Depends, Query
 from core.status_code import StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete

@@ -9,6 +9,7 @@ class AiTaskCreate(BaseModel):
     celery_task_id: str
     feature_key: str
     request_params: Optional[Dict[str, Any]] = None
+    analysis_input: Optional[Dict[str, Any]] = None
 
 
 class AiTaskInDB(BaseModel):
@@ -19,6 +20,7 @@ class AiTaskInDB(BaseModel):
     feature_key: str
     status: str
     request_params: Optional[Dict[str, Any]] = None
+    analysis_input: Optional[Dict[str, Any]] = None
     result_data: Optional[str] = None
     error_message: Optional[str] = None
     execution_time: Optional[float] = None
@@ -34,9 +36,13 @@ class AiTaskBrief(BaseModel):
     celery_task_id: str
     feature_key: str
     status: str
+    result_data: Optional[str] = None
+    analysis_input: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_time: Optional[float] = None
+    request_params: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

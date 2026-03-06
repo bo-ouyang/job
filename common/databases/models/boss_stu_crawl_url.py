@@ -1,10 +1,14 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, BigInteger
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, BigInteger, Index
 from sqlalchemy.sql import func
 from .base import Base
 from common.utils.snowflake import generate_id
 
 class BossStuCrawlUrl(Base):
     __tablename__ = 'boss_stu_crawl_urls'
+    __table_args__ = (
+        Index("idx_boss_stu_major_status", "major_name", "status"),
+        Index("idx_boss_stu_status_created", "status", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     url = Column(String(255), nullable=False, comment='完整的爬取URL')

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, BigInteger, JSON
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, BigInteger, JSON, Index
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from .base import Base
@@ -11,6 +11,10 @@ class Major(Base):
     支持 专业大类-具体专业 多级结构
     """
     __tablename__ = 'majors'
+    __table_args__ = (
+        Index("idx_majors_parent_level", "parent_id", "level"),
+        Index("idx_majors_name_code", "name", "code"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     
@@ -39,6 +43,10 @@ class MajorIndustryRelation(Base):
     一个专业对应多个行业(JSON数据code)
     """
     __tablename__ = 'major_industry_relations'
+    __table_args__ = (
+        Index("idx_major_ind_rel_major_score", "major_id", "relevance_score"),
+        Index("idx_major_ind_rel_name", "major_name"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     

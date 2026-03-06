@@ -72,7 +72,19 @@ const router = createRouter({
           component: () => import("@/views/MessageCenter.vue"),
           meta: { requiresAuth: true },
         },
+        {
+          path: "my/wallet",
+          name: "my-wallet",
+          component: () => import("@/views/WalletView.vue"),
+          meta: { requiresAuth: true },
+        },
       ],
+    },
+    {
+      path: "/payment/success",
+      name: "payment-success",
+      component: () => import("@/views/WalletView.vue"),
+      meta: { requiresAuth: true },
     },
     {
       path: "/analysis",

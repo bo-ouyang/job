@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { authAPI } from "@/api/auth";
+import router from "@/router";
 
 export const useAuthStore = defineStore("auth", () => {
   // State
@@ -83,6 +84,18 @@ export const useAuthStore = defineStore("auth", () => {
       localStorage.removeItem("token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("user");
+      // Explicitly clear AI Task persisted state
+      localStorage.removeItem("aiTask");
+      try {
+        const aiTaskStore = (await import("@/stores/aiTask")).useAiTaskStore();
+        aiTaskStore.$reset();
+      } catch (e) {
+        console.error("Failed to reset aiTask store:", e);
+      }
+      // Force redirect to login page cleanly via router
+      if (window.location.pathname !== "/login") {
+        router.push("/login");
+      }
     }
   };
 

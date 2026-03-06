@@ -1,4 +1,5 @@
 import axios from "axios";
+import router from "@/router";
 
 const service = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1",
@@ -111,10 +112,30 @@ service.interceptors.response.use(
       });
     }
 
+    // Handle 403 Forbidden (Usually means user is not logged in but tries to access protected resource)
+    if (response && response.status === 403) {
+      if (window.location.pathname !== "/login") {
+        import("element-plus")
+          .then(({ ElMessage }) => {
+            ElMessage.warning("请先登录后使用此功能");
+          })
+          .catch(() => {
+            alert("请先登录后使用此功能");
+          });
+
+        // Small delay to let the user see the message before redirect
+        setTimeout(() => {
+          router.push({
+            path: "/login",
+            query: { redirect: window.location.pathname },
+          });
+        }, 1000);
+      }
+    }
+
     if (response && response.status === 402) {
       const detail =
-        response?.data?.detail ||
-        "余额不足，请先充值后继续使用该 AI 功能";
+        response?.data?.detail || "余额不足，请先充值后继续使用该 AI 功能";
       window.dispatchEvent(
         new CustomEvent("billing-required", { detail: { message: detail } }),
       );
@@ -128,14 +149,29 @@ service.interceptors.response.use(
   },
 );
 
-function handleLogout() {
+async function handleLogout() {
   localStorage.removeItem("token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("user");
 
+  // Clear persistent AI Task store
+  try {
+    const aiTaskStore = (await import("@/stores/aiTask")).useAiTaskStore();
+    aiTaskStore.$reset();
+  } catch (e) {
+    /* ignore */
+  }
+
   // Force redirect to login page and refresh to clear Pinia state
   if (window.location.pathname !== "/login") {
-    window.location.href = "/login";
+    // We intentionally avoid window.location.href or window.location.reload()
+    // because that causes a hard page request to the server, which results
+    // in a 404 Nginx error if try_files is not properly configured.
+    // Instead, we use Vue router to navigate safely as an SPA.
+    router.push({
+      path: "/login",
+      query: { redirect: window.location.pathname },
+    });
   }
 }
 

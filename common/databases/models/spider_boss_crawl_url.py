@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, func, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Text, func, BigInteger, Index
 from common.databases.models.base import Base
 from common.utils.snowflake import generate_id
 
@@ -7,6 +7,10 @@ class SpiderBossCrawlUrl(Base):
     Boss直聘爬虫URL管理表
     """
     __tablename__ = 'spider_boss_crawl_url'
+    __table_args__ = (
+        Index("idx_spider_boss_city_ind_page", "city_code", "industry_code", "page"),
+        Index("idx_spider_boss_status_created", "status", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     url = Column(String(255), unique=True, nullable=False, index=True, comment='爬取URL')

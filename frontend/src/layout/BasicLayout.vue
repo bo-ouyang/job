@@ -1,89 +1,86 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { RouterLink, RouterView } from "vue-router";
-import LoginModal from "@/components/LoginModal.vue";
-import { useAuthStore } from "@/stores/auth";
-import { useAiTaskStore } from "@/stores/aiTask";
 import { ElNotification } from "element-plus";
-import AiTaskPanel from "@/components/AiTaskPanel.vue";
 
+import LoginModal from "@/components/LoginModal.vue";
+import AiTaskPanel from "@/components/AiTaskPanel.vue";
 import { messageAPI } from "@/api/message";
+import { useAiTaskStore } from "@/stores/aiTask";
+import { useAuthStore } from "@/stores/auth";
 
 const authStore = useAuthStore();
 const aiTaskStore = useAiTaskStore();
 const showLoginModal = ref(false);
 const unreadCount = ref(0);
 
+let interval = null;
+let ws = null;
+let reconnectInterval = null;
+
 const fetchUnreadCount = async () => {
   if (!authStore.isAuthenticated) return;
   try {
     const res = await messageAPI.getUnreadCount();
-    unreadCount.value = res.data;
-  } catch (e) {
-    console.error("Failed to fetch unread count", e);
+    unreadCount.value = Number(res.data || 0);
+  } catch (error) {
+    console.error("Failed to fetch unread count", error);
   }
 };
-
-let interval;
-let ws;
-let reconnectInterval;
 
 const connectWebSocket = () => {
   const token = localStorage.getItem("token");
   if (!token) return;
 
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
-  
-  // Create an absolute URL if baseUrl is relative (like /api/v1)
-  let fullUrl = baseUrl;
-  if (baseUrl.startsWith('/')) {
-    fullUrl = window.location.origin + baseUrl;
-  }
-  
+  const fullUrl = baseUrl.startsWith("/") ? `${window.location.origin}${baseUrl}` : baseUrl;
   const wsUrl = fullUrl.replace(/^http/, "ws") + `/ws/${token}`;
 
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    console.log("WS Connected");
-    if (reconnectInterval) clearInterval(reconnectInterval);
+    if (reconnectInterval) {
+      clearInterval(reconnectInterval);
+      reconnectInterval = null;
+    }
   };
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
+
     if (data.type === "new_message") {
-      unreadCount.value++;
+      unreadCount.value += 1;
     }
-    // 统一 AI 任务通知 —— 写入 store
+
     if (data.type === "ai_task_completed" && data.data) {
       aiTaskStore.markCompleted(data.data.task_id, data.data, {
         featureKey: data.data.feature_key,
         executionTime: data.data.execution_time,
       });
       ElNotification({
-        title: "✅ 任务完成",
-        message: data.data.message || "您的AI任务已完成",
+        title: "Task Completed",
+        message: data.data.message || "Your AI task has completed.",
         type: "success",
         duration: 5000,
       });
     }
+
     if (data.type === "ai_task_failed" && data.data) {
       aiTaskStore.markFailed(data.data.task_id, data.data.error, {
         featureKey: data.data.feature_key,
       });
       ElNotification({
-        title: "❌ 任务失败",
-        message: data.data.message || "您的AI任务处理失败",
+        title: "Task Failed",
+        message: data.data.message || "Your AI task has failed.",
         type: "error",
         duration: 8000,
       });
     }
+
     window.dispatchEvent(new CustomEvent("ws-message", { detail: data }));
   };
 
   ws.onclose = () => {
-    console.log("WS Disconnected");
     if (!reconnectInterval) {
       reconnectInterval = setInterval(() => {
         if (authStore.isAuthenticated) connectWebSocket();
@@ -91,30 +88,33 @@ const connectWebSocket = () => {
     }
   };
 
-  ws.onerror = (err) => {
-    console.error("WS Error", err);
-    ws.close();
+  ws.onerror = () => {
+    if (ws) ws.close();
   };
+};
+
+const handleLogout = () => {
+  if (confirm("Confirm logout?")) {
+    authStore.logout();
+    unreadCount.value = 0;
+  }
 };
 
 onMounted(() => {
   fetchUnreadCount();
   interval = setInterval(fetchUnreadCount, 30000);
-  if (authStore.isAuthenticated) connectWebSocket();
+
+  if (authStore.isAuthenticated) {
+    connectWebSocket();
+    aiTaskStore.fetchHistory();
+  }
 });
 
 onUnmounted(() => {
-  clearInterval(interval);
+  if (interval) clearInterval(interval);
   if (reconnectInterval) clearInterval(reconnectInterval);
   if (ws) ws.close();
 });
-
-const handleLogout = () => {
-  if (confirm("确定要退出登录吗？")) {
-    authStore.logout();
-    unreadCount.value = 0;
-  }
-};
 </script>
 
 <template>
@@ -123,12 +123,12 @@ const handleLogout = () => {
       <div class="wrapper">
         <nav>
           <div class="logo">
-            <span class="logo-icon">🚀</span>
             <span class="logo-text">JobInsights</span>
           </div>
+
           <div class="links">
             <RouterLink to="/">首页</RouterLink>
-            <RouterLink to="/career-compass" class="nav-highlight">职业导航罗盘</RouterLink>
+            <RouterLink to="/career-compass">职业导航罗盘</RouterLink>
             <RouterLink to="/major-analysis">专业分析</RouterLink>
             <RouterLink to="/jobs">职位市场</RouterLink>
             <RouterLink to="/companies">公司列表</RouterLink>
@@ -143,8 +143,10 @@ const handleLogout = () => {
                 <span v-if="unreadCount > 0" class="badge">{{ unreadCount }}</span>
               </RouterLink>
               <span class="user-nav-link ai-bell" @click="aiTaskStore.togglePanel">
-                🤖
-                <span v-if="aiTaskStore.pendingCount > 0" class="badge pending-badge">{{ aiTaskStore.pendingCount }}</span>
+                AI
+                <span v-if="aiTaskStore.pendingCount > 0" class="badge pending-badge">
+                  {{ aiTaskStore.pendingCount }}
+                </span>
                 <span v-else-if="aiTaskStore.hasUnread" class="ai-dot"></span>
               </span>
               <RouterLink to="/my/wallet" class="user-nav-link">钱包</RouterLink>
@@ -162,9 +164,11 @@ const handleLogout = () => {
     <AiTaskPanel />
 
     <main>
-      <RouterView v-slot="{ Component }">
+      <RouterView v-slot="{ Component, route }">
         <transition name="fade" mode="out-in">
-          <component :is="Component" />
+          <keep-alive include="CareerCompass,MajorAnalysis">
+            <component :is="Component" :key="route.path" />
+          </keep-alive>
         </transition>
       </RouterView>
     </main>
@@ -179,68 +183,36 @@ header {
   z-index: 1000;
   background: var(--color-glass-bg);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-  transition: all var(--transition-normal);
 }
 
 .wrapper {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 1rem 3rem;
+  padding: 1rem 2rem;
 }
 
 nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 1.6rem;
+.logo-text {
+  font-size: 1.4rem;
   font-weight: 800;
-  color: var(--color-heading);
-  letter-spacing: -0.03em;
-  user-select: none;
-  cursor: pointer;
-  transition: transform var(--transition-fast);
-}
-
-.logo:hover {
-  transform: scale(1.02);
-}
-
-.logo-icon {
-  filter: drop-shadow(0 0 10px rgba(14, 165, 233, 0.4));
 }
 
 .links {
   display: flex;
-  gap: 2.5rem;
+  gap: 1.2rem;
 }
 
 nav a {
   color: var(--color-text-mute);
   text-decoration: none;
   font-weight: 500;
-  font-size: 0.95rem;
-  transition: color var(--transition-fast);
-  position: relative;
-  padding: 0.5rem 0;
-}
-
-nav a.nav-highlight {
-  color: #3b82f6;
-  font-weight: 600;
-}
-
-nav a.nav-highlight::before {
-  content: "✨";
-  margin-right: 4px;
 }
 
 nav a:hover,
@@ -248,116 +220,39 @@ nav a.router-link-active {
   color: var(--color-heading);
 }
 
-nav a::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
-  transition: width var(--transition-normal);
-  border-radius: 2px;
-  opacity: 0;
-}
-
-nav a:hover::after,
-nav a.router-link-active::after {
-  width: 100%;
-  opacity: 1;
-}
-
 .auth-action {
-  margin-left: 2rem;
   display: flex;
   align-items: center;
-}
-
-.login-btn {
-  background: hsla(var(--color-primary-h), var(--color-primary-s), var(--color-primary-l), 0.15);
-  color: var(--color-primary);
-  border: 1px solid hsla(var(--color-primary-h), var(--color-primary-s), var(--color-primary-l), 0.3);
-  padding: 0.5rem 1.5rem;
-  border-radius: var(--radius-huge);
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: all var(--transition-normal);
-  backdrop-filter: blur(4px);
-  box-shadow: 0 0 15px transparent;
-}
-
-.login-btn:hover {
-  background: var(--color-primary);
-  color: #fff;
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-1px);
 }
 
 .user-profile {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 0.4rem 0.5rem 0.4rem 1.25rem;
-  border-radius: var(--radius-huge);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.username {
-  color: var(--color-heading);
-  font-weight: 600;
-  font-size: 0.9rem;
+  gap: 0.8rem;
 }
 
 .user-nav-link {
   color: var(--color-text-mute);
   text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: 500;
-  transition: color var(--transition-fast);
-}
-
-.user-nav-link:hover {
-  color: var(--color-heading);
 }
 
 .divider {
-  color: rgba(255, 255, 255, 0.1);
-  user-select: none;
+  color: rgba(255, 255, 255, 0.2);
 }
 
-.logout-btn {
-  border-color: transparent;
-  background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
-  font-size: 0.8rem;
-  padding: 0.4rem 1rem;
-  border-radius: var(--radius-huge);
+.username {
+  color: var(--color-heading);
   font-weight: 600;
-  transition: all var(--transition-fast);
 }
 
-.logout-btn:hover {
-  background: #ef4444;
-  color: white;
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
-}
-
-main {
-  padding-top: 90px;
-  min-height: 100vh;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.4s ease, transform 0.4s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
+.login-btn,
+.logout-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: var(--color-heading);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
 }
 
 .msg-link {
@@ -366,64 +261,46 @@ main {
 
 .badge {
   position: absolute;
-  top: -6px;
-  right: -10px;
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: white;
+  top: -8px;
+  right: -12px;
+  background: #ef4444;
+  color: #fff;
   font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.1rem 0.4rem;
-  border-radius: 12px;
-  min-width: 18px;
-  text-align: center;
-  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-}
-
-@media (max-width: 768px) {
-  .wrapper { padding: 1rem; }
-  .links { display: none; }
-  .user-profile { gap: 0.5rem; padding: 0.4rem; }
+  border-radius: 999px;
+  padding: 0 0.35rem;
 }
 
 .ai-bell {
   position: relative;
   cursor: pointer;
-  font-size: 1.1rem;
-  transition: transform 0.2s;
-  user-select: none;
-}
-
-.ai-bell:hover {
-  transform: scale(1.15);
 }
 
 .pending-badge {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  animation: pulse-amber 2s infinite;
+  right: -16px;
 }
 
 .ai-dot {
   position: absolute;
   top: -2px;
-  right: -4px;
-  width: 7px;
-  height: 7px;
+  right: -8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #3b82f6;
-  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+  background: #22c55e;
 }
 
-@keyframes pulse-amber {
-  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+main {
+  padding-top: 88px;
+  min-height: 100vh;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

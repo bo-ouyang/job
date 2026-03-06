@@ -17,11 +17,13 @@ from schemas.analysis_schema import (
 )
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
-from dependencies import JobQueryParams, get_db
+from dependencies import get_db
 from crud.major import major as crud_major
 from services.analysis_service import analysis_service
 from common.databases.RedisManager import redis_manager
 from crud import industry as crud_industry
+from schemas.job_schema import JobQueryParams
+from dependencies import get_current_user
 router = APIRouter()
 
 
@@ -44,39 +46,49 @@ async def _safe_increment_counter(key: str, amount: int = 1) -> None:
 
 @router.get("/stats")
 async def get_job_statistics(
+    keyword: str = None,
     industry_name: str = None,
     industry_2_name: str = None,
     job_params: JobQueryParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
     """获取职位统计数据 (集成 ES 聚合与 Redis 缓存)"""
+    search_keyword = keyword or job_params.q
+
+    # 如果是无任何筛选条件的全局统计（首页需要的情况）
+    if not any([
+        search_keyword,
+        job_params.location,
+        job_params.experience,
+        job_params.education,
+        job_params.industry,
+        job_params.industry_2,
+    ]):
+        try:
+            return await analysis_service.get_home_stats()
+        except Exception as e:
+            logger.error(f"ES home stats failed: {e}")
+            # 如果首页查挂了，继续往下走 DB fallback 逻辑
+            pass
+
     try:
-        return await analysis_service.get_job_stats(
-            keyword=job_params.common.search.q,
+        return await analysis_service.get_faceted_job_stats(
+            keyword=search_keyword,
             location=job_params.location,
             experience=job_params.experience,
-            education=job_params.education,
             industry=job_params.industry,
-            industry_2=job_params.industry_2,
-            industry_name=industry_name,
-            industry_2_name=industry_2_name,
-            salary_min=job_params.salary_min,
-            salary_max=job_params.salary_max,
-            major_name=job_params.major_name,
+            industry_2=job_params.industry_2
         )
     except Exception as e:
         logger.error(f"ES stats failed, falling back to DB: {e}")
         # 降级：从数据库获取统计 (支持筛选)
         return await crud_job.get_statistics_from_db(
             db, 
-            keyword=job_params.common.search.q,
+            keyword=search_keyword,
             location=job_params.location,
             experience=job_params.experience,
-            education=job_params.education,
             industry=job_params.industry,
-            industry_2=job_params.industry_2,
-            salary_min=job_params.salary_min,
-            salary_max=job_params.salary_max
+            industry_2=job_params.industry_2
         )
 
 @router.get("/skill-cloud")
@@ -85,6 +97,7 @@ async def get_skill_cloud(
     industry: int = None,
     industry_name: str = None,
     limit: int = 20,
+    current_user: dict = Depends(get_current_user),
 ):
     """获取技能词云数据 (基于 ES 聚合)"""
     if not keyword and not industry:

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, BigInteger, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -16,6 +16,10 @@ class ApplicationStatus(str, enum.Enum):
 class Application(Base):
     """职位投递申请表"""
     __tablename__ = 'applications'
+    __table_args__ = (
+        Index("idx_app_user_status_created", "user_id", "status", "created_at"),
+        Index("idx_app_job_status_created", "job_id", "status", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)

@@ -1,11 +1,11 @@
 from core.status_code import StatusCode
-from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
-from fastapi import APIRouter, Depends, HTTPException, Query
+from core.exceptions import AppException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import List
 from dependencies import get_db
 from crud.city import CityCRUD
-from schemas.city_schema import City, CityCreate, CityUpdate
+from schemas.city_schema import City
 router = APIRouter(tags=["cities"])
 city_crud = CityCRUD()
 

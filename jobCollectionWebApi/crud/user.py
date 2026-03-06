@@ -2,7 +2,8 @@ from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from common.databases.models.user import User, VerificationCode, UserSession, UserRole, UserStatus, UserWechat
-from jobCollectionWebApi.schemas.user import UserCreate, UserUpdate, UserAdminUpdate
+from jobCollectionWebApi.schemas.user_schema import UserCreate, UserUpdate
+from .wallet import wallet as crud_wallet
 from .base import CRUDBase
 from jobCollectionWebApi.core.security import get_password_hash, verify_password, generate_session_token
 from datetime import datetime, timedelta
@@ -71,7 +72,10 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             )
             db.add(db_wechat)
             await db.flush()
-        
+
+        # 注册成功后初始化钱包，默认赠送 10
+        await crud_wallet.create_wallet(db, user_id=db_obj.id, initial_balance=10.0)
+
         return db_obj
     
     async def create_with_wechat(self, db: AsyncSession, wechat_info: dict) -> User:
@@ -95,7 +99,10 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             avatar=wechat_info.get("avatar")
         )
         db.add(db_wechat)
-        
+
+        # 微信注册用户同样初始化钱包，默认赠送 10
+        await crud_wallet.create_wallet(db, user_id=db_user.id, initial_balance=10.0)
+
         await db.flush()
         await db.refresh(db_user)
         return db_user

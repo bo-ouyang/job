@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, Float, Boolean, ForeignKey, \
-Table, BigInteger
+Table, BigInteger, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
@@ -17,6 +17,11 @@ from common.utils.snowflake import generate_id
 class Job(Base):
     """职位信息表"""
     __tablename__ = 'jobs'
+    __table_args__ = (
+        Index("idx_jobs_city_industry_active", "city_code", "industry_code", "is_active"),
+        Index("idx_jobs_company_active_created", "company_id", "is_active", "created_at"),
+        Index("idx_jobs_ai_parsed_created", "ai_parsed", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     title = Column(String(255), nullable=False, index=True)

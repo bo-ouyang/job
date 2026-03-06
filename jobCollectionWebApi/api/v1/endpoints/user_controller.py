@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from core.exceptions import UserNotFoundException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dependencies import get_db, get_current_user, get_current_admin_user
+from dependencies import get_db, get_current_user
 from crud import user as crud_user
 from schemas.user_schema import UserPublic, UserList, UserDetail, UserUpdate, UserAdminUpdate, UserRole, UserStatus
 from dependencies import CommonQueryParams

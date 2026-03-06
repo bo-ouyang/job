@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.sql import text
 from common.databases.models.skills import Skills
 #from models.job import job_skills
-from jobCollectionWebApi.schemas.skill import SkillCreate, SkillUpdate, SkillFrequency
+from jobCollectionWebApi.schemas.skill_schema import SkillCreate, SkillUpdate, SkillFrequency
 from .base import CRUDBase
 
 class CRUDSkill(CRUDBase[Skills, SkillCreate, SkillUpdate]):

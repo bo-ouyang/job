@@ -27,6 +27,8 @@ class AnalysisResultList(BaseModel):
     size: int
     pages: int
 
+
+
 class UserQueryBase(BaseModel):
     query_type: str
     parameters: Optional[Dict[str, Any]] = None
@@ -86,6 +88,8 @@ class AIAdviceRequest(BaseModel):
         default="auto",
         description="AI engine selection: auto | classic | langgraph"
     )
+    analysis_params: Optional[Dict[str, Any]] = None
+    analysis_result: Optional[Dict[str, Any]] = None
 
 class CareerCompassRequest(BaseModel):
     major_name: str
@@ -93,6 +97,7 @@ class CareerCompassRequest(BaseModel):
     target_industry_2: Optional[int] = None
     target_industry_name: Optional[str] = None
     target_industry_2_name: Optional[str] = None
+    skill_cloud_data: Optional[List[Dict[str, Any]]] = None
 
 class APILogInDB(APILogBase, TimestampSchema):
     id: int

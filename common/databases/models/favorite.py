@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, UniqueConstraint, BigInteger
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, UniqueConstraint, BigInteger, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -18,6 +18,7 @@ class FavoriteJob(Base):
     
     __table_args__ = (
         UniqueConstraint('user_id', 'job_id', name='uq_user_job_favorite'),
+        Index("idx_favorite_user_created", "user_id", "created_at"),
     )
 
 class FollowCompany(Base):
@@ -34,4 +35,5 @@ class FollowCompany(Base):
     
     __table_args__ = (
         UniqueConstraint('user_id', 'company_id', name='uq_user_company_follow'),
+        Index("idx_follow_user_created", "user_id", "created_at"),
     )

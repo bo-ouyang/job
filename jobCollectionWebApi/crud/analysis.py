@@ -2,7 +2,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from common.databases.models.analysis import AnalysisResult, UserQuery, APILog, TaskLog
-from jobCollectionWebApi.schemas.analysis import (
+from jobCollectionWebApi.schemas.analysis_schema import (
     AnalysisResultCreate, AnalysisResultUpdate, 
     UserQueryCreate, APILogCreate,
     TaskLogCreate, TaskLogUpdate

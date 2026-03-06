@@ -5,8 +5,20 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 current_dir = os.path.dirname(os.path.abspath(__file__))  # Job/jobCollectionWebApi/
 project_root = os.path.dirname(current_dir) # Job/
-env_path = os.path.join(project_root, ".env")  # Job/.env
-load_dotenv(dotenv_path=env_path, override=True)  # override=True：覆盖系统环境变量
+# 读取环境变量：支持根据系统设置的 ENVIRONMENT 变量加载不同的 .env 文件
+# 例如：系统配置了 export ENVIRONMENT=production，则优先尝试加载 .env.production
+env_state = os.getenv("ENVIRONMENT", "")
+specific_env_path = os.path.join(project_root, f".env.{env_state}") if env_state else None
+default_env_path = os.path.join(project_root, ".env")
+
+if specific_env_path and os.path.exists(specific_env_path):
+    load_dotenv(dotenv_path=specific_env_path, override=True)
+    print(f"✅ Loaded environment variables from: {specific_env_path}")
+elif os.path.exists(default_env_path):
+    load_dotenv(dotenv_path=default_env_path, override=True)
+    print(f"✅ Loaded default environment variables from: {default_env_path}")
+else:
+    print("⚠️ No .env file found, relying on system environment variables.")
 
 class Settings(BaseSettings):
     """应用配置"""
@@ -21,16 +33,17 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "求职技能分析平台"
     
     # CORS 配置
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://localhost:8081", 
-        "http://127.0.0.1:8081",
-        "http://localhost:8082",
-        "http://127.0.0.1:8082"
-    ]
+    BACKEND_CORS_ORIGINS_STR: str = os.getenv(
+        'BACKEND_CORS_ORIGINS', 
+        'http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081,http://localhost:8082,http://127.0.0.1:8082'
+    )
+    
+    @property
+    def BACKEND_CORS_ORIGINS(self) -> List[str]:
+        """将 CORS Origins 字符串转换为列表"""
+        if self.BACKEND_CORS_ORIGINS_STR.strip() == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS_STR.split(',') if origin.strip()]
     
     
     

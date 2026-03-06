@@ -91,3 +91,31 @@ docker-compose up -d prometheus grafana
 
 ---
 *Developed with ❤️ and Python.*
+
+## Database Migration (Alembic)
+
+> Alembic scripts are in `alembic/versions`.
+
+```bash
+# 1) Install dependencies (must include alembic)
+pip install -r requirements.txt
+
+# 2) Inspect migration state
+alembic current
+alembic heads
+
+# 3) Upgrade to latest
+alembic upgrade head
+
+# 4) Rollback one step (if needed)
+alembic downgrade -1
+```
+
+New migration in this update:
+
+- `alembic/versions/20260306_01_add_model_indexes.py`
+
+Notes:
+
+- This is an incremental index migration and assumes tables already exist.
+- For a brand new empty database, initialize schema first, then run `alembic upgrade head`.

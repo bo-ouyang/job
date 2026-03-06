@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Enum, JSON, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Enum, JSON, ForeignKey, BigInteger, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .base import Base
@@ -21,6 +21,10 @@ class UserStatus(str, enum.Enum):
 class UserWechat(Base):
     """微信用户信息表"""
     __tablename__ = 'user_wechats'
+    __table_args__ = (
+        Index("idx_user_wechats_user_openid", "user_id", "openid"),
+        Index("idx_user_wechats_union_created", "unionid", "created_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, ForeignKey('users.id'), unique=True, nullable=False)
@@ -40,6 +44,10 @@ class UserWechat(Base):
 class User(Base):
     """用户表"""
     __tablename__ = 'users'
+    __table_args__ = (
+        Index("idx_users_role_status_created", "role", "status", "created_at"),
+        Index("idx_users_status_last_login", "status", "last_login_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     
@@ -111,6 +119,10 @@ class User(Base):
 class VerificationCode(Base):
     """验证码表（用于手机验证）"""
     __tablename__ = 'verification_codes'
+    __table_args__ = (
+        Index("idx_verif_phone_type_used", "phone", "code_type", "is_used"),
+        Index("idx_verif_expires_at", "expires_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     phone = Column(String(20), nullable=False, index=True)
@@ -126,6 +138,10 @@ class VerificationCode(Base):
 class UserSession(Base):
     """用户会话表"""
     __tablename__ = 'user_sessions'
+    __table_args__ = (
+        Index("idx_user_sess_user_active_exp", "user_id", "is_active", "expires_at"),
+        Index("idx_user_sess_active_last", "is_active", "last_activity_at"),
+    )
     
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     user_id = Column(BigInteger, index=True, nullable=True) # 移除 unique=True，类型改为 Integer

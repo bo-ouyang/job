@@ -98,6 +98,7 @@ async def create_task(
     celery_task_id: str,
     feature_key: str,
     request_params: dict = None,
+    analysis_input: dict = None,
 ) -> AiTask:
     """
     创建 AI 任务记录 + 设置 Redis 活跃锁。
@@ -110,6 +111,7 @@ async def create_task(
         feature_key=feature_key,
         status="pending",
         request_params=request_params,
+        analysis_input=analysis_input,
     )
     db.add(task)
     await db.flush()
@@ -175,7 +177,27 @@ async def get_task_result(
         key = redis_manager.make_key(_result_key(celery_task_id))
         cached = await redis_manager.redis_client.get(key)
         if cached:
-            return json.loads(cached)
+            data = json.loads(cached)
+            # If request_params missing (Redis cache), merge from PG
+            if not data.get("request_params") or data.get("analysis_input") is None:
+                if db is None:
+                    from common.databases.PostgresManager import db_manager
+                    async with await db_manager.get_session() as pg_db:
+                        pg_data = await _pg_get_task_result(pg_db, celery_task_id)
+                else:
+                    pg_data = await _pg_get_task_result(db, celery_task_id)
+                if pg_data:
+                    data = {**pg_data, **data}
+                    # Best-effort refresh Redis cache with merged data
+                    try:
+                        await redis_manager.redis_client.setex(
+                            key,
+                            RESULT_TTL,
+                            json.dumps(data, ensure_ascii=False),
+                        )
+                    except Exception:
+                        pass
+            return data
     except Exception as exc:
         logger.warning(f"Redis get_task_result degraded: {exc}")
 
@@ -199,6 +221,8 @@ async def _pg_get_task_result(db: AsyncSession, celery_task_id: str) -> Optional
         "status": task.status,
         "result_data": task.result_data,
         "error_message": task.error_message,
+        "request_params": task.request_params,
+        "analysis_input": task.analysis_input,
         "execution_time": task.execution_time,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,

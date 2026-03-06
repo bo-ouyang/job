@@ -1,5 +1,5 @@
 import asyncio
-from celery import shared_task
+from celery import shared_task, current_app
 #from celery.utils.log import get_task_logger
 from sqlalchemy import select
 from typing import List
@@ -135,8 +135,9 @@ async def _process_batch_job_parsing(limit: int = 10):
                             await local_session.commit()
                         logger.info(f"Successfully updated Job ID {job.id} with AI insight.")
                         try:
-                            from tasks.es_sync import sync_job_to_es
-                            sync_job_to_es.delay(job.id)
+                            # Dispatch by task name to avoid package import path issues
+                            # (e.g. "No module named 'tasks'" in production workers).
+                            current_app.send_task("sync_job_to_es", args=[job.id])
                         except Exception as e:
                             logger.warning(f"Failed to dispatch Celery sync task for new job {job.id}: {e}")
                     except Exception as llm_err:
@@ -166,7 +167,11 @@ async def _process_batch_job_parsing(limit: int = 10):
         raise
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    name="jobCollectionWebApi.tasks.job_parser.process_job_parsing_task",
+)
 def process_job_parsing_task(self, *args, **kwargs):
     """
     Celery task wrapper for AI batch parsing.

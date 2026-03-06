@@ -11,3 +11,4 @@ from .crawler import BossSpiderFilterView, BossCrawlTaskView
 from .proxy import ProxyView
 from .product import ProductView
 from .system_config import SystemConfigView
+from .payment import PaymentOrderView, WalletAdminView

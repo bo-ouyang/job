@@ -4,7 +4,6 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from common.databases.models.major import Major, MajorIndustryRelation
-from common.databases.models.industry import Industry
 from .base import CRUDBase
 from schemas.analysis_schema import MajorInDB
 

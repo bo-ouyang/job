@@ -1,5 +1,5 @@
 # models/city.py
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Text, BigInteger
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Text, BigInteger, Index
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.ext.declarative import declarative_base
 from common.utils.snowflake import generate_id
@@ -12,6 +12,10 @@ class City(Base):
     支持省-市-区县三级结构
     """
     __tablename__ = 'cities'
+    __table_args__ = (
+        Index("idx_cities_parent_level", "parent_id", "level"),
+        Index("idx_cities_name_pinyin", "name", "pinyin"),
+    )
     # 主键
     id = Column(BigInteger, primary_key=True, default=generate_id)
 

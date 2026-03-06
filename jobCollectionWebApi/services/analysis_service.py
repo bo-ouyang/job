@@ -13,7 +13,6 @@ from core.logger import sys_logger as logger
 from collections import Counter
 from sqlalchemy import select
 from common.databases.models.industry import Industry
-from common.databases.models.major import Major, MajorIndustryRelation
 from common.databases.models.system_config import SystemConfig
 class AnalysisService:
     """数据分析服务（ES 聚合 + PostgreSQL 降级）。"""
@@ -257,6 +256,168 @@ class AnalysisService:
             "total_jobs": resp["hits"]["total"]["value"],
         }
 
+    @cache(expire=3600, key_prefix="analysis:home_stats_v2")
+    async def get_home_stats(self) -> Dict[str, Any]:
+        """专门为前端首页量身定制的无参数全局统查询。缓存时间长。"""
+        try:
+            es = await get_es()
+            query_dsl = {
+                "query": {"match_all": {}},
+                "size": 0,
+                "aggs": {
+                    "salary_ranges": {
+                        "range": {
+                            "field": "salary_min",
+                            "ranges": [
+                                {"to": 10000.0, "key": "10k以下"},
+                                {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
+                                {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
+                                {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
+                                {"from": 35000.0, "key": "35k以上"},
+                            ],
+                        }
+                    },
+                    "top_industries": {"terms": {"field": "industry_code", "size": 10}},
+                    "top_skills": {"terms": {"field": "skills", "size": 15}},
+                    "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
+                },
+            }
+
+            resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
+            aggs = resp.get("aggregations", {})
+            salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
+            
+            return {
+                "salary": salary_dist,
+                "skills": skill_dist,
+                "industries": industry_dist[:5],
+                "total_jobs": resp["hits"]["total"]["value"],
+            }
+        except Exception as e:
+            logger.error(f"Home stats ES aggregation failed: {e}", exc_info=True)
+            return {"salary": [], "skills": [], "industries": [], "total_jobs": 0}
+
+    #@cache(expire=600, key_prefix="analysis:faceted_stats_v1")
+    async def get_faceted_job_stats(
+        self,
+        keyword: str = None,
+        location: str = None,
+        experience: str = None,
+        industry: int = None,
+        industry_2: int = None,
+    ) -> Dict[str, Any]:
+        """专门用于带维度筛选的 ES 岗位统计分析查询"""
+        try:
+            es = await get_es()
+            bool_query = {}
+            filter_clauses = []
+            should_clauses = []
+
+            # 关键字处理
+            search_kw = keyword
+            if search_kw:
+                should_clauses.append({
+                    "multi_match": {
+                        "query": search_kw,
+                        "fields": ["title^2", "description", "major_name^2"]
+                    }
+                })
+                bool_query["must"] = [{"bool": {"should": should_clauses, "minimum_should_match": 1}}]
+
+            if location:
+                filter_clauses.append({"term": {"city_code": location}})
+                
+            if experience and experience not in ("经验不限", "不限"):
+                filter_clauses.append({"term": {"experience": experience}})
+            
+            # 行业筛选：如果传了 industry_2，则进行精准筛选 (term)
+            if industry_2:
+                filter_clauses.append({"term": {"industry_code": industry_2}})
+            elif industry:
+                # 如果只传了 industry，则获取其所有子行业进行范围筛选 (terms)
+                industry_codes = await self._fetch_industry_codes_with_cache(industry)
+                if industry_codes:
+                    filter_clauses.append({"terms": {"industry_code": industry_codes}})
+                else:
+                    filter_clauses.append({"term": {"industry_code": -1}})
+            
+            if filter_clauses:
+                bool_query["filter"] = filter_clauses
+
+            query_dsl = {
+                "query": {"bool": bool_query} if bool_query else {"match_all": {}},
+                "size": 0,
+                "aggs": {
+                    "salary_ranges": {
+                        "range": {
+                            "field": "salary_min",
+                            "ranges": [
+                                {"to": 10000.0, "key": "10k以下"},
+                                {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
+                                {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
+                                {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
+                                {"from": 35000.0, "key": "35k以上"},
+                            ],
+                        }
+                    },
+                    "top_industries": {"terms": {"field": "industry_code", "size": 10}},
+                    "top_skills": {"terms": {"field": "skills", "size": 15}},
+                    "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
+                },
+            }
+
+            resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
+            aggs = resp.get("aggregations", {})
+            salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
+            
+            return {
+                "salary": salary_dist,
+                "skills": skill_dist,
+                "industries": industry_dist[:5],
+                "total_jobs": resp["hits"]["total"]["value"],
+            }
+        except Exception as e:
+            logger.error(f"Faceted ES aggregation failed: {e}", exc_info=True)
+            raise e
+
+
+
+
+    async def get_job_stats(
+        self,
+        keyword: str = None,
+        location: int = None,
+        experience: str = None,
+        education: str = None,
+        industry: int = None,
+        industry_2: int = None,
+        industry_name: str = None,
+        industry_2_name: str = None,
+        salary_min: float = None,
+        salary_max: float = None,
+        major_name: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Compatibility wrapper for /analysis/stats.
+        Keeps old controller contract while reusing career_analysis implementation.
+        """
+        _ = (location, experience, education, salary_min, salary_max)  # reserved params
+
+        keywords = []
+        if keyword:
+            keywords.append(keyword)
+        if major_name and major_name not in keywords:
+            keywords.append(major_name)
+        if not keywords and major_name:
+            keywords = [major_name]
+
+        return await self.career_analysis(
+            keywords=keywords,
+            industry=industry_2 or industry,
+            industry_name=industry_2_name or industry_name,
+            major_name=major_name or keyword,
+        )
+
     @cache(expire=600, key_prefix="analysis:career_analysis:v4")
     async def career_analysis(self, keywords: list[str], industry: int = None, industry_name: str = None, major_name: str = None) -> Dict[str, Any]:
         """获取职位统数据 (集成分布式锁防击穿与 ES/PG Fallback)"""
@@ -272,8 +433,6 @@ class AnalysisService:
                     session,
                     keyword=primary_keyword,
                     industry=industry,
-                    industry_name=industry_name,
-                    major_name=major_name,
                 )
         return result
 
@@ -401,25 +560,15 @@ class AnalysisService:
                 )
         return result
 
-    @cache(expire=86400, key_prefix="analysis:industry_codes_v6")
+    #@cache(expire=86400, key_prefix="analysis:industry_codes_v6")
     async def _fetch_industry_codes_with_cache(self, industry_code: int) -> List[int]:
         """根据行业 code 获取有相关的子业code列表 (利用 path 字极级?"""
         if not industry_code:
             return []
-            
-        from sqlalchemy import text
-        
         async with db_manager.async_session() as session:
-            path_stmt = text("SELECT path FROM industries WHERE code = :code LIMIT 1")
-            path_result = await session.execute(path_stmt, {"code": industry_code})
-            target_path = path_result.scalar_one_or_none()
-            
-            codes = []
-            if target_path:
-                stmt = text("SELECT code FROM industries WHERE path LIKE :path_prefix")
-                result = await session.execute(stmt, {"path_prefix": f"{target_path}%"})
-                codes = [row[0] for row in result.all()]
-            
+            stmt = select(Industry.code).where(Industry.path.like(f"{industry_code}%"))
+            result = await session.execute(stmt)
+            codes = [row[0] for row in result.all()]
         return codes
 
     @cache(expire=3600, key_prefix="analysis:skill_cloud:v4")

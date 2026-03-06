@@ -1,7 +1,7 @@
 from core.status_code import StatusCode
-from core.exceptions import AppException, AuthFailedException, PermissionDeniedException, ExternalServiceException
+from core.exceptions import AppException
 from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from common.databases.PostgresManager import db_manager
 from crud.message import message as crud_message
@@ -56,7 +56,7 @@ async def apply_job(
             "data": {
                 "title": new_msg.title,
                 "content": new_msg.content,
-                "id": new_msg.id
+                "id": str(new_msg.id)
             }
         }
         import json

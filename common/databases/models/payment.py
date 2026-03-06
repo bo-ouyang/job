@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, JSON, BigInteger
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, JSON, BigInteger, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from common.databases.models.base import Base
@@ -23,6 +23,11 @@ class ProductType(str, enum.Enum):
 
 class PaymentOrder(Base):
     __tablename__ = "payment_orders"
+    __table_args__ = (
+        Index("idx_payment_user_status_created", "user_id", "status", "created_at"),
+        Index("idx_payment_status_paid_at", "status", "paid_at"),
+        Index("idx_payment_type_created", "product_type", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     order_no = Column(String(64), unique=True, index=True, nullable=False, comment="系统订单号")

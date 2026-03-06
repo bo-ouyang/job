@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, func, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, func, BigInteger, Index
 from common.databases.models.base import Base
 from common.utils.snowflake import generate_id
 
@@ -7,6 +7,10 @@ class BossCrawlTask(Base):
     Boss直聘爬虫任务表 (执行队列)
     """
     __tablename__ = 'boss_crawl_task'
+    __table_args__ = (
+        Index("idx_boss_crawl_status_priority_created", "status", "priority", "created_at"),
+        Index("idx_boss_crawl_filter_status", "filter_id", "status"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
     url = Column(String(250), unique=True, nullable=False, index=True, comment='爬取URL')

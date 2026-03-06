@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Enum, BigInteger
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Enum, BigInteger, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -12,6 +12,10 @@ class MessageType(str, enum.Enum):
 class Message(Base):
     """消息/通知表"""
     __tablename__ = 'messages'
+    __table_args__ = (
+        Index("idx_messages_receiver_read_created", "receiver_id", "is_read", "created_at"),
+        Index("idx_messages_receiver_type_created", "receiver_id", "type", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, default=generate_id, index=True)
     sender_id = Column(BigInteger, ForeignKey('users.id'), nullable=True) # Null for System

@@ -1,8 +1,10 @@
 <script setup>
 import { useAiTaskStore } from "@/stores/aiTask";
 import { storeToRefs } from "pinia";
+import { useRouter } from "vue-router";
 
 const store = useAiTaskStore();
+const router = useRouter();
 const { taskList, pendingCount, hasUnread, panelOpen } = storeToRefs(store);
 
 const statusIcon = (status) => {
@@ -45,8 +47,21 @@ const timeAgo = (dateStr) => {
   return `${Math.floor(hours / 24)}天前`;
 };
 
-const handleClick = (task) => {
+const handleClick = async (task) => {
   store.markRead(task.taskId);
+  store.togglePanel(); // Close panel on navigate
+
+  if (task?.taskId) {
+    await store.fetchTaskById(task.taskId, task.featureKey);
+  }
+
+  if (task.featureKey === "career_compass") {
+    router.push({ path: "/career-compass", query: { task_id: task.taskId, feature_key: task.featureKey } });
+  } else if (task.featureKey === "career_advice") {
+    router.push({ path: "/major-analysis", query: { task_id: task.taskId, feature_key: task.featureKey } });
+  } else if (task.featureKey === "resume_parse") {
+    router.push({ path: "/my/resume", query: { task_id: task.taskId, feature_key: task.featureKey } });
+  }
 };
 </script>
 
