@@ -62,6 +62,20 @@ export const useAuthStore = defineStore("auth", () => {
   };
 
   const handleLoginSuccess = (data) => {
+    // Avoid carrying AI task cache across login sessions/users.
+    try {
+      import("@/stores/aiTask")
+        .then(({ useAiTaskStore }) => {
+          const aiTaskStore = useAiTaskStore();
+          if (typeof aiTaskStore.$reset === "function") {
+            aiTaskStore.$reset();
+          }
+        })
+        .catch(() => {});
+    } catch (e) {
+      /* ignore */
+    }
+
     token.value = data.token.access_token;
     refreshToken.value = data.token.refresh_token;
     user.value = data.user;

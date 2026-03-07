@@ -202,6 +202,7 @@ export const useAiTaskStore = defineStore(
       { interval = 2000, timeout = 120000 } = {},
     ) {
       const deadline = Date.now() + timeout;
+      let lastError = null;
 
       while (Date.now() < deadline) {
         try {
@@ -225,15 +226,23 @@ export const useAiTaskStore = defineStore(
             tasks.value[taskId].status = data.status;
           }
         } catch (e) {
-          if (e.message && !e.message.includes("任务执行失败")) {
-            console.error("Poll error:", e);
+          const msg = String(e?.message || "");
+          const isBusinessFailure = msg.includes("任务执行失败");
+          if (isBusinessFailure) {
+            throw e;
           }
-          throw e;
+          lastError = e;
+          console.error("Poll transient error, will retry:", e);
         }
 
         await new Promise((resolve) => setTimeout(resolve, interval));
       }
 
+      if (lastError) {
+        throw new Error(
+          `AI 任务轮询超时（最后错误: ${lastError.message || "unknown"}）`,
+        );
+      }
       throw new Error("AI 任务超时，请稍后重试");
     }
 
@@ -252,40 +261,66 @@ export const useAiTaskStore = defineStore(
       panelOpen.value = !panelOpen.value;
     }
 
+    /** Reset store state (used by logout / token-expire handlers) */
+    function $reset() {
+      tasks.value = {};
+      panelOpen.value = false;
+      try {
+        localStorage.removeItem("aiTask");
+      } catch (e) {
+        // ignore storage errors
+      }
+    }
+
     /** 获取历史任务（页面初始加载用） */
     async function fetchHistory() {
       try {
         const res = await aiAPI.getTaskHistory({ page_size: 50 });
-        if (res.data && res.data.items) {
-          res.data.items.forEach((item) => {
-            const existing = tasks.value[item.celery_task_id];
-            const result =
-              item.status === "completed"
-                ? {
-                    result_data: item.result_data,
-                    request_params: item.request_params,
-                    analysis_input: item.analysis_input,
-                    execution_time: item.execution_time,
-                  }
-                : null;
-            const normalizedResult = result ? normalizeResultData(result) : result;
-            const mergedResult =
-              existing?.result && normalizedResult
-                ? { ...existing.result, ...normalizedResult }
-                : existing?.result || normalizedResult;
-            tasks.value[item.celery_task_id] = {
-              taskId: item.celery_task_id,
-              featureKey: item.feature_key || existing?.featureKey,
-              status: item.status || existing?.status,
-              result: mergedResult,
-              error: item.error_message || existing?.error,
-              read: existing?.read ?? true, // 历史记录默认已读
-              createdAt: item.created_at || existing?.createdAt,
-              executionTime: item.execution_time || existing?.executionTime,
-              extraData: existing?.extraData,
-            };
-          });
-        }
+        const items = Array.isArray(res?.data?.items) ? res.data.items : [];
+        const nextTasks = {};
+
+        items.forEach((item) => {
+          const existing = tasks.value[item.celery_task_id];
+          const result =
+            item.status === "completed"
+              ? {
+                  result_data: item.result_data,
+                  request_params: item.request_params,
+                  analysis_input: item.analysis_input,
+                  execution_time: item.execution_time,
+                }
+              : null;
+          const normalizedResult = result ? normalizeResultData(result) : result;
+          const mergedResult =
+            existing?.result && normalizedResult
+              ? { ...existing.result, ...normalizedResult }
+              : normalizedResult;
+
+          nextTasks[item.celery_task_id] = {
+            taskId: item.celery_task_id,
+            featureKey: item.feature_key || existing?.featureKey || "unknown",
+            status: item.status || existing?.status || "pending",
+            result: mergedResult,
+            error: item.error_message || null,
+            read: existing?.read ?? true, // 历史记录默认已读
+            createdAt: item.created_at || existing?.createdAt || new Date().toISOString(),
+            executionTime: item.execution_time || existing?.executionTime,
+            extraData: existing?.extraData,
+          };
+        });
+
+        // Keep only current in-flight local tasks that have not been persisted yet.
+        Object.values(tasks.value).forEach((t) => {
+          if (
+            (t.status === "pending" || t.status === "processing") &&
+            !nextTasks[t.taskId]
+          ) {
+            nextTasks[t.taskId] = t;
+          }
+        });
+
+        // Server snapshot is the source of truth for historical tasks.
+        tasks.value = nextTasks;
       } catch (e) {
         console.error("Failed to fetch AI task history", e);
       }
@@ -376,6 +411,7 @@ export const useAiTaskStore = defineStore(
       pollAndUpdate,
       featureLabel,
       togglePanel,
+      $reset,
       fetchHistory,
       fetchTaskById,
     };

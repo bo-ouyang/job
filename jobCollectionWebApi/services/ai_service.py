@@ -369,6 +369,7 @@ class AIService:
         system_prompt: str,
         user_prompt: str,
         temperature: float = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """
         基于 LangChain 封装的通用 LLM 核心交互通道。
@@ -398,7 +399,10 @@ class AIService:
                 "api_key": settings.AI_API_KEY,
                 "temperature": temp,
                 "timeout": timeout,
+                "max_retries": 1,
             }
+            if max_tokens is not None and int(max_tokens) > 0:
+                llm_kwargs["max_tokens"] = int(max_tokens)
 
             # Keep compatibility across langchain-openai versions.
             try:
@@ -489,7 +493,15 @@ class AIService:
             str: 生成带有薪水天花板预估、Gap分析警告信息的职业罗盘报告 (Markdown)。
         """
         # ── Result-level cache (12h) ──
-        stats_hash = hashlib.md5(json.dumps(es_stats, sort_keys=True, default=str).encode()).hexdigest()
+        compact_stats = {
+            "total_jobs": int(es_stats.get("total_jobs", 0)) if isinstance(es_stats, dict) else 0,
+            "salary": (es_stats.get("salary", [])[:6] if isinstance(es_stats, dict) else []),
+            "industries": (es_stats.get("industries", [])[:6] if isinstance(es_stats, dict) else []),
+            "skills": (es_stats.get("skills", [])[:12] if isinstance(es_stats, dict) else []),
+        }
+        stats_hash = hashlib.md5(
+            json.dumps(compact_stats, sort_keys=True, default=str).encode()
+        ).hexdigest()
         cache_key = self.get_ai_cache_key("career_compass", {
             "major": major_name,
             "stats_hash": stats_hash,
@@ -516,12 +528,21 @@ class AIService:
 学生就读专业：{major_name}
 
 === 市场真实客观数据 (基于十万级有效招聘需求聚合) ===
-{json.dumps(es_stats, ensure_ascii=False, indent=2)}
+{json.dumps(compact_stats, ensure_ascii=False, separators=(",", ":"), default=str)}
 ====================================
 
 请严格基于上述客观数据（不能瞎编数据，要引用上述的行业分布和技能需求频率），为该专业的学生撰写完整的《职业罗盘诊断报告》。重点做 Gap Analysis，也就是学校教的理论同企业真实要的硬技能的差距。
 """
-        result = await self._call_llm_with_langchain(system_prompt, user_prompt)
+        llm_started_at = time.time()
+        result = await self._call_llm_with_langchain(
+            system_prompt,
+            user_prompt,
+            temperature=0.2,
+            max_tokens=settings.AI_MAX_TOKENS_CAREER_COMPASS,
+        )
+        logger.info(
+            f"career_compass_llm_done major={major_name} elapsed={time.time() - llm_started_at:.2f}s"
+        )
         if isinstance(result, str) and not result.strip().startswith("❌"):
             await redis_manager.set_cache(cache_key, result, expire=43200)  # 12h
         return result
@@ -540,7 +561,12 @@ class AIService:
         """
         system_prompt = "你是一名资深的互联网职业规划师和技术面试官。请根据用户的专业和市场热门技能，提供一份简练、专业的职业发展建议。输出格式为 Markdown。"
         user_prompt = f"我的专业是{major}，目前的市场热门技能是{', '.join(skills)}。请为我规划核心岗位方向、3个月学习路线及简历建议。"
-        return await self._call_llm_with_langchain(system_prompt, user_prompt)
+        return await self._call_llm_with_langchain(
+            system_prompt,
+            user_prompt,
+            temperature=0.2,
+            max_tokens=settings.AI_MAX_TOKENS_CAREER_ADVICE,
+        )
 
     async def parse_resume_text(self, text: str) -> dict:
         """

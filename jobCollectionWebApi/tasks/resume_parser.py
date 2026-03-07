@@ -16,7 +16,6 @@ import os
 from core.logger import sys_logger as logger
 from jobCollectionWebApi.core.celery_app import celery_app
 from services.ai_service import ai_service
-from api.v1.endpoints.ws_controller import manager
 
 
 def _get_event_loop():
@@ -43,6 +42,38 @@ def _publish_ws(user_id: int, msg_type: str, data: dict):
         r.close()
     except Exception as e:
         logger.error(f"WS publish failed: {e}")
+
+
+def _enqueue_ai_task_message(
+    *,
+    user_id: int,
+    celery_task_id: str,
+    status: str,
+    execution_time: float = None,
+    error_message: str = None,
+):
+    try:
+        try:
+            from jobCollectionWebApi.tasks.notification_tasks import persist_ai_task_message
+        except Exception:
+            from tasks.notification_tasks import persist_ai_task_message
+
+        persist_ai_task_message.apply_async(
+            kwargs={
+                "user_id": user_id,
+                "feature_key": "resume_parse",
+                "celery_task_id": celery_task_id,
+                "status": status,
+                "execution_time": execution_time,
+                "error_message": error_message,
+            },
+            queue="batch",
+            routing_key="batch",
+        )
+    except Exception as exc:
+        logger.error(
+            f"enqueue resume message failed: user_id={user_id}, task_id={celery_task_id}, status={status}, err={exc}"
+        )
 
 
 async def _extract_text_from_pdf(file_path: str) -> str:
@@ -107,34 +138,6 @@ def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started
         pass
 
     message_text = "您的简历解析已完成"
-    message_id = None
-
-    # 存入消息系统 (供消息中心展示)
-    try:
-        from crud.message import message as crud_message
-        from schemas.message_schema import MessageCreate
-        from common.databases.models.message import MessageType
-        from common.databases.PostgresManager import db_manager
-
-        async def _create_msg():
-            async with db_manager.async_session() as db:
-                import json
-                action_param = json.dumps({"task_id": celery_task_id, "feature_key": "resume_parse"})
-                new_msg = await crud_message.create(
-                    db,
-                    obj_in=MessageCreate(
-                        title="✅ 简历智能解析完成",
-                        content=f"{message_text}，耗时 {execution_time}秒。",
-                        type=MessageType.SYSTEM,
-                        receiver_id=user_id,
-                        #action_param=action_param,
-                    )
-                )
-                await db.commit()
-                return new_msg.id
-        message_id = loop.run_until_complete(_create_msg())
-    except Exception as exc:
-        logger.error(f"Save message failed: {exc}")
 
     # 统一 WS 通知
     _publish_ws(user_id, "ai_task_completed", {
@@ -143,8 +146,14 @@ def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started
         "status": "completed",
         "execution_time": execution_time,
         "message": message_text,
-        "message_id": message_id,
+        "message_id": None,
     })
+    _enqueue_ai_task_message(
+        user_id=user_id,
+        celery_task_id=celery_task_id,
+        status="completed",
+        execution_time=execution_time,
+    )
 
 
 def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_at: float):
@@ -175,34 +184,6 @@ def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_
         pass
 
     message_text = "您的简历解析失败"
-    message_id = None
-
-    # 存入消息系统
-    try:
-        from crud.message import message as crud_message
-        from schemas.message_schema import MessageCreate
-        from common.databases.models.message import MessageType
-        from common.databases.PostgresManager import db_manager
-
-        async def _create_msg():
-            async with db_manager.async_session() as db:
-                import json
-                action_param = json.dumps({"task_id": celery_task_id, "feature_key": "resume_parse"})
-                new_msg = await crud_message.create(
-                    db,
-                    obj_in=MessageCreate(
-                        title="❌ 简历智能解析失败",
-                        content=f"{message_text}。原因: {error_message}",
-                        type=MessageType.SYSTEM,
-                        receiver_id=user_id,
-                        #action_param=action_param,
-                    )
-                )
-                await db.commit()
-                return new_msg.id
-        message_id = loop.run_until_complete(_create_msg())
-    except Exception as exc:
-        logger.error(f"Save message failed: {exc}")
 
     # 统一 WS 通知
     _publish_ws(user_id, "ai_task_failed", {
@@ -211,8 +192,15 @@ def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_
         "status": "failed",
         "error": error_message,
         "message": message_text,
-        "message_id": message_id,
+        "message_id": None,
     })
+    _enqueue_ai_task_message(
+        user_id=user_id,
+        celery_task_id=celery_task_id,
+        status="failed",
+        execution_time=execution_time,
+        error_message=error_message,
+    )
 
 
 @celery_app.task(
@@ -226,9 +214,12 @@ def parse_resume_task(self, user_id: int, file_path: str):
     """Celery task wrapper for resume parsing."""
     loop = _get_event_loop()
     started_at = time.time()
+    logger.info(f"ai_task_stage task_id={self.request.id} feature=resume_parse stage=worker_started")
     try:
         result = loop.run_until_complete(_parse_resume_logic(user_id, file_path))
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=resume_parse stage=ai_done")
         _mark_completed(user_id, self.request.id, result, started_at)
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=resume_parse stage=finalized")
     except Exception as e:
         logger.error(f"Resume parsing failed: {e}")
         _mark_failed(user_id, self.request.id, str(e), started_at)

@@ -25,10 +25,12 @@ from core.logger import sys_logger as logger
 LOCK_TTL = 300       # 活跃锁 5 分钟自动过期（兜底防死锁）
 RESULT_TTL = 3600    # 完成结果缓存 1 小时
 DEDUP_TTL = 3600     # 去重缓存 1 小时
+PAYLOAD_TTL = 1800   # 提交到 worker 的大入参缓存 30 分钟
 
 _ACTIVE_PREFIX = "ai_task:active"
 _RESULT_PREFIX = "ai_task:result"
 _DEDUP_PREFIX = "ai_task:dedup"
+_PAYLOAD_PREFIX = "ai_task:payload"
 
 
 # ─── Redis Key 构建 ─────────────────────────────
@@ -42,6 +44,10 @@ def _result_key(celery_task_id: str) -> str:
 
 def _dedup_key(feature_key: str, params_hash: str) -> str:
     return f"{_DEDUP_PREFIX}:{feature_key}:{params_hash}"
+
+
+def _payload_key(celery_task_id: str) -> str:
+    return f"{_PAYLOAD_PREFIX}:{celery_task_id}"
 
 
 def _hash_params(params: dict) -> str:
@@ -87,6 +93,38 @@ async def set_dedup_cache(feature_key: str, request_params: dict, celery_task_id
         await redis_manager.redis_client.setex(rkey, DEDUP_TTL, celery_task_id)
     except Exception as exc:
         logger.warning(f"Redis dedup cache write degraded: {exc}")
+
+
+async def set_task_payload(celery_task_id: str, payload: dict, ttl: int = PAYLOAD_TTL) -> bool:
+    """
+    Save large task payload in Redis and pass only task_id/pointer via Celery.
+    """
+    if not payload:
+        return True
+    try:
+        rkey = redis_manager.make_key(_payload_key(celery_task_id))
+        await redis_manager.redis_client.setex(
+            rkey,
+            ttl,
+            json.dumps(payload, ensure_ascii=False),
+        )
+        return True
+    except Exception as exc:
+        logger.warning(f"Redis task payload write degraded: {exc}")
+        return False
+
+
+async def get_task_payload(celery_task_id: str) -> Optional[dict]:
+    """Read task payload by task id pointer."""
+    try:
+        rkey = redis_manager.make_key(_payload_key(celery_task_id))
+        cached = await redis_manager.redis_client.get(rkey)
+        if not cached:
+            return None
+        return json.loads(cached)
+    except Exception as exc:
+        logger.warning(f"Redis task payload read degraded: {exc}")
+        return None
 
 
 # ─── 公开 API ───────────────────────────────────
@@ -320,6 +358,63 @@ async def mark_failed(
         await redis_manager.redis_client.delete(lkey)
     except Exception as exc:
         logger.warning(f"Redis release active lock degraded: {exc}")
+
+
+async def mark_failed_by_task_id(
+    celery_task_id: str,
+    error_message: str,
+    started_at: float = None,
+) -> bool:
+    """
+    Fallback failure marker for cases where task function is never entered
+    (e.g. unexpected kwargs / deserialization errors at Celery trace layer).
+    Returns True if an AiTask row was found and updated.
+    """
+    execution_time = round(time.time() - started_at, 2) if started_at else None
+
+    try:
+        from common.databases.PostgresManager import db_manager
+        async with await db_manager.get_session() as db:
+            row = await db.execute(
+                select(AiTask.user_id, AiTask.feature_key, AiTask.status)
+                .where(AiTask.celery_task_id == celery_task_id)
+                .limit(1)
+            )
+            task_row = row.first()
+            if not task_row:
+                return False
+
+            user_id = task_row[0]
+            feature_key = task_row[1]
+            current_status = task_row[2]
+
+            if current_status == "completed":
+                # Do not override successful completion.
+                return True
+
+            stmt = (
+                update(AiTask)
+                .where(AiTask.celery_task_id == celery_task_id)
+                .values(
+                    status="failed",
+                    error_message=error_message,
+                    execution_time=execution_time,
+                    completed_at=datetime.utcnow(),
+                )
+            )
+            await db.execute(stmt)
+            await db.commit()
+
+            # Best-effort release active lock.
+            try:
+                lkey = redis_manager.make_key(_active_key(feature_key, user_id))
+                await redis_manager.redis_client.delete(lkey)
+            except Exception as exc:
+                logger.warning(f"Redis release active lock degraded (fallback): {exc}")
+            return True
+    except Exception as exc:
+        logger.error(f"mark_failed_by_task_id failed: {exc}")
+        return False
 
 
 async def get_user_history(

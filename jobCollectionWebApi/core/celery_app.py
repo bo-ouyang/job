@@ -13,6 +13,7 @@ celery_app = Celery(
         "jobCollectionWebApi.tasks.job_parser",
         "jobCollectionWebApi.tasks.es_sync",
         "jobCollectionWebApi.tasks.ai_tasks",
+        "jobCollectionWebApi.tasks.notification_tasks",
         "jobCollectionWebApi.tasks.ai_task_cleanup",
     ],
 )
@@ -36,6 +37,8 @@ celery_app.conf.update(
     },
     redis_backend_health_check_interval=30,
     worker_cancel_long_running_tasks_on_connection_loss=True,
+    worker_prefetch_multiplier=1,
+    task_track_started=True,
 
     # ── Queue routing ──────────────────────────────────
     task_default_queue="batch",  # Fallback queue for unrouted tasks
@@ -51,6 +54,7 @@ celery_app.conf.update(
         "tasks.fetch_proxies": {"queue": "batch"},
         "tasks.sync_proxies": {"queue": "batch"},
         "tasks.ai_task_cleanup.*": {"queue": "batch"},
+        "tasks.notification_tasks.*": {"queue": "batch"},
     },
 
     # Schedule configuration (will adhere to Celery Beat)

@@ -34,6 +34,16 @@ alipay_client: Optional[AliPay] = None
 wechat_client: Optional[WeChatPay] = None
 
 
+def _build_provider_notify_url(provider: str) -> str:
+    base = (settings.PAYMENT_NOTIFY_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        return f"/{provider}"
+    suffix = f"/{provider}"
+    if base.endswith(suffix):
+        return base
+    return f"{base}{suffix}"
+
+
 def _init_alipay_client() -> Optional[AliPay]:
     if not settings.ALIPAY_APP_ID:
         return None
@@ -44,7 +54,7 @@ def _init_alipay_client() -> Optional[AliPay]:
             alipay_public_key_string = f.read()
         return AliPay(
             appid=settings.ALIPAY_APP_ID,
-            app_notify_url=f"{settings.PAYMENT_NOTIFY_BASE_URL}/alipay",
+            app_notify_url=_build_provider_notify_url("alipay"),
             app_private_key_string=app_private_key_string,
             alipay_public_key_string=alipay_public_key_string,
             sign_type="RSA2",
@@ -68,7 +78,7 @@ def _init_wechat_client() -> Optional[WeChatPay]:
             cert_serial_no=settings.WECHAT_CERT_SERIAL_NO,
             apiv3_key=settings.WECHAT_API_V3_KEY,
             appid=settings.WECHAT_APP_ID,
-            notify_url=f"{settings.PAYMENT_NOTIFY_BASE_URL}/wechat",
+            notify_url=_build_provider_notify_url("wechat"),
             logger=logger,
         )
     except Exception as exc:
@@ -404,11 +414,14 @@ async def refund_order(
     if method == PaymentMethod.ALIPAY.value:
         if not alipay_client:
             raise ExternalServiceException(message="Alipay not configured")
-        result = alipay_client.api_alipay_trade_refund(
-            out_trade_no=order_no,
-            refund_amount=order.amount,
-            out_request_no=f"REF_{order_no}",
-        )
+        refund_kwargs: dict[str, Any] = {
+            "out_trade_no": order_no,
+            "refund_amount": order.amount,
+            "out_request_no": f"REF_{order_no}",
+        }
+        if settings.ALIPAY_APP_AUTH_TOKEN:
+            refund_kwargs["app_auth_token"] = settings.ALIPAY_APP_AUTH_TOKEN
+        result = alipay_client.api_alipay_trade_refund(**refund_kwargs)
         if result.get("code") != "10000":
             raise AppException(
                 status_code=400,
@@ -544,13 +557,16 @@ async def create_payment(
                 return response
             try:
                 return_url = f"{_build_frontend_base_url(request)}/my/wallet"
-                order_string = alipay_client.api_alipay_trade_page_pay(
-                    out_trade_no=order_no,
-                    total_amount=float(final_amount),
-                    subject=subject,
-                    return_url=return_url,
-                    notify_url=f"{settings.PAYMENT_NOTIFY_BASE_URL}/alipay",
-                )
+                pay_kwargs: dict[str, Any] = {
+                    "out_trade_no": order_no,
+                    "total_amount": float(final_amount),
+                    "subject": subject,
+                    "return_url": return_url,
+                    "notify_url": _build_provider_notify_url("alipay"),
+                }
+                if settings.ALIPAY_APP_AUTH_TOKEN:
+                    pay_kwargs["app_auth_token"] = settings.ALIPAY_APP_AUTH_TOKEN
+                order_string = alipay_client.api_alipay_trade_page_pay(**pay_kwargs)
                 gateway = (
                     "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
                     if settings.ALIPAY_DEBUG

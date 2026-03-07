@@ -287,16 +287,16 @@ onUnmounted(() => {
 <template>
   <div class="wallet-view">
     <section class="balance-card">
-      <p class="title">My Wallet</p>
+      <p class="title">我的钱包</p>
       <div class="balance" v-loading="loadingBalance">
-        <span class="currency">CNY</span>
+        <span class="currency">余额</span>
         <span class="value">{{ formatMoney(balance) }}</span>
       </div>
-      <p class="sub">Status: {{ walletStatus }}</p>
+      <p class="sub">状态: {{ walletStatus }}</p>
     </section>
 
     <section class="panel">
-      <h3>Top-up</h3>
+      <h3>热门充值</h3>
       <div class="preset-grid">
         <button
           v-for="amount in quickAmounts"
@@ -309,37 +309,37 @@ onUnmounted(() => {
       </div>
 
       <div class="row">
-        <label>Amount</label>
+        <label>金额</label>
         <input v-model.number="topUpAmount" min="0.01" step="0.01" type="number" />
       </div>
 
       <div class="row">
-        <label>Payment Method</label>
+        <label>支付方式</label>
         <div class="methods">
-          <label><input v-model="paymentMethod" type="radio" value="alipay" /> Alipay</label>
-          <label><input v-model="paymentMethod" type="radio" value="wechat" /> WeChat</label>
-          <label><input v-model="paymentMethod" type="radio" value="wallet" /> Wallet</label>
+          <label><input v-model="paymentMethod" type="radio" value="alipay" /> 支付宝</label>
+          <label><input v-model="paymentMethod" type="radio" value="wechat" /> 微信</label>
+          <label><input v-model="paymentMethod" type="radio" value="wallet" /> 钱包</label>
         </div>
       </div>
 
       <div class="action-row">
         <button class="primary" :disabled="loadingTopup" @click="handleTopUp">
-          {{ loadingTopup ? "Creating order..." : "Pay now" }}
+          {{ loadingTopup ? "创建订单" : "现在支付" }}
         </button>
         <button class="ghost" :disabled="loadingManualTopup" @click="handleManualTopUp">
-          {{ loadingManualTopup ? "Processing..." : "Manual Top-up (Test)" }}
+          {{ loadingManualTopup ? "加载中..." : "弹出测试" }}
         </button>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h3>Wallet Transactions</h3>
-        <button class="ghost" @click="fetchTransactions(1)">Refresh</button>
+        <h3>充值记录</h3>
+        <button class="ghost" @click="fetchTransactions(1)">刷新</button>
       </div>
 
       <div v-if="loadingTransactions" class="empty">Loading...</div>
-      <div v-else-if="txItems.length === 0" class="empty">No transaction</div>
+      <div v-else-if="txItems.length === 0" class="empty">没有记录</div>
       <table v-else class="table">
         <thead>
           <tr>
@@ -363,7 +363,7 @@ onUnmounted(() => {
 
       <div class="pager">
         <button class="ghost" :disabled="txPage <= 1" @click="fetchTransactions(txPage - 1)">
-          Prev
+          上一页
         </button>
         <span>{{ txPage }} / {{ txTotalPages }}</span>
         <button
@@ -371,38 +371,38 @@ onUnmounted(() => {
           :disabled="txPage >= txTotalPages"
           @click="fetchTransactions(txPage + 1)"
         >
-          Next
+          下一页
         </button>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h3>Recharge Orders</h3>
+        <h3>充值订单</h3>
         <div class="filters">
           <select v-model="orderStatusFilter" @change="fetchMyOrders(1)">
             <option value="">All</option>
-            <option value="pending">Pending</option>
-            <option value="paid">Paid</option>
-            <option value="failed">Failed</option>
-            <option value="expired">Expired</option>
-            <option value="refunded">Refunded</option>
+            <option value="pending">正在充值</option>
+            <option value="paid">已充值</option>
+            <option value="failed">充值失败</option>
+            <option value="expired">已过期</option>
+            <option value="refunded">已退款</option>
           </select>
-          <button class="ghost" @click="fetchMyOrders(1)">Refresh</button>
+          <button class="ghost" @click="fetchMyOrders(1)">刷新</button>
         </div>
       </div>
 
       <div v-if="loadingOrders" class="empty">Loading...</div>
-      <div v-else-if="orderItems.length === 0" class="empty">No recharge record</div>
+      <div v-else-if="orderItems.length === 0" class="empty">没有充值记录</div>
       <table v-else class="table">
         <thead>
           <tr>
-            <th>Order No</th>
-            <th>Amount</th>
-            <th>Method</th>
-            <th>Status</th>
-            <th>Failure Reason</th>
-            <th>Created At</th>
+            <th>订单号</th>
+            <th>金额</th>
+            <th>支付方式</th>
+            <th>状态</th>
+            <th>失败原因</th>
+            <th>创建时间</th>
           </tr>
         </thead>
         <tbody>

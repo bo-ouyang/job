@@ -1,364 +1,269 @@
-# 项目架构设计文档
+# ARCHITECTURE
 
-> 招聘数据采集与智能分析平台 · 全栈架构蓝图
+## 1. 文档目标
 
----
+本文件描述当前系统的核心架构、关键链路、扩展策略与运行约束，用于开发、排障和部署协作。
 
-## 一、系统全局架构
+## 2. 系统上下文（Context）
 
 ```mermaid
-graph TB
-    subgraph 用户端
-        FE[Vue 3 前端 SPA]
-    end
+flowchart LR
+    U[Web 用户] --> FE[Frontend Vue3]
+    FE --> API[FastAPI API]
+    OPS[管理员] --> ADMIN[Starlette-Admin]
+    ADMIN --> API
 
-    subgraph API网关层
-        API[FastAPI 主服务<br/>:8000 / 多Worker]
-        ADMIN[Starlette-Admin<br/>:8001 运营中台]
-    end
+    API --> PG[(PostgreSQL)]
+    API --> ES[(Elasticsearch)]
+    API --> REDIS[(Redis)]
+    API --> C_RT[Celery Realtime Worker]
+    API --> C_BT[Celery Batch Worker]
+    BEAT[Celery Beat] --> C_BT
 
-    subgraph 异步任务层
-        CELERY_RT[Celery Worker<br/>Realtime Queue]
-        CELERY_BT[Celery Worker<br/>Batch Queue]
-        BEAT[Celery Beat<br/>定时调度]
-    end
-
-    subgraph 数据采集层
-        SPIDER_LIST[列表爬虫<br/>boss_list_drission]
-        SPIDER_DETAIL[详情爬虫<br/>boss_detail_drission]
-    end
-
-    subgraph 基础设施层
-        PG[(PostgreSQL)]
-        REDIS[(Redis)]
-        ES[(Elasticsearch)]
-    end
-
-    subgraph AI层
-        LLM[DeepSeek / 智谱<br/>LLM API]
-        CB[Circuit Breaker<br/>熔断器]
-    end
-
-    FE -->|REST + WS| API
-    ADMIN -->|管理操作| PG
-    ADMIN -->|爬虫调度| SPIDER_LIST
-
-    API -->|提交任务| CELERY_RT
-    API -->|查询| PG
-    API -->|搜索/聚合| ES
-    API -->|缓存/锁/Pub/Sub| REDIS
-    API -->|WebSocket| FE
-
-    BEAT -->|定时触发| CELERY_BT
-    CELERY_BT -->|岗位解析| LLM
-    CELERY_BT -->|数据同步| ES
-    CELERY_RT -->|AI 实时调用| CB --> LLM
-    CELERY_RT -->|结果推送| REDIS
-
-    SPIDER_LIST -->|写入| PG
-    SPIDER_DETAIL -->|补全详情| PG
-    SPIDER_LIST & SPIDER_DETAIL -->|状态协调| REDIS
+    C_RT --> AI[LLM Provider]
+    C_BT --> AI
+    C_BT --> ES
 ```
 
----
+## 3. 容器与模块（Container / Module）
 
-## 二、技术栈矩阵
+### 3.1 前端
 
-| 层级 | 技术 | 用途 |
-|------|------|------|
-| **前端** | Vue 3 + Vite | SPA 单页应用 |
-| | ECharts + echarts-wordcloud | BI 可视化图表 |
-| | Element Plus | UI 组件库 |
-| | Axios (双拦截器) | HTTP 客户端 + 无感刷新 |
-| **后端** | FastAPI + Uvicorn (多Worker) | 异步HTTP服务 |
-| | Starlette-Admin | 独立运营后台 |
-| | SQLAlchemy 2.0 + asyncpg | 异步ORM |
-| | Pydantic v2 | 数据校验 |
-| | Loguru | 全链路日志 |
-| **任务** | Celery (realtime / batch) | 异步任务队列 |
-| | Celery Beat | 定时调度 |
-| **搜索** | Elasticsearch | 全文搜索 + 聚合分析 |
-| **缓存** | Redis | 缓存 / 分布式锁 / Pub/Sub / WS |
-| **AI** | LangChain + OpenAI协议 | LLM 调用 |
-| | Circuit Breaker | 熔断保护 |
-| **爬虫** | DrissionPage (Chromium) | 浏览器自动化 |
-| | Scrapy | 爬虫框架 |
-| | mitmproxy | 拦截代理 |
-| **支付** | 支付宝 / 微信 | 充值体系 |
+- 路径：`frontend/`
+- 核心：Vue3 + Pinia + Axios + ECharts
+- 角色：页面渲染、任务轮询、WebSocket 通知消费
 
----
+### 3.2 API 服务
 
-## 三、后端服务分层架构
+- 路径：`jobCollectionWebApi/`
+- 分层：
+  - `api/v1/endpoints`: 路由层（鉴权、参数、响应）
+  - `services`: 业务编排（ES/AI/缓存）
+  - `crud`: 数据访问
+  - `tasks`: Celery 任务
+  - `core`: 缓存、日志、鉴权、异常、指标
 
+### 3.3 数据基础设施
+
+- PostgreSQL：主业务数据
+- Elasticsearch：职位检索与聚合
+- Redis：缓存、分布式锁、Pub/Sub、队列中间件
+
+### 3.4 异步系统
+
+- Realtime 队列：面向用户交互的 AI 任务
+- Batch 队列：离线解析、同步、定时任务
+
+## 4. 关键时序（Runtime Sequence）
+
+### 4.1 首页统计（`/api/v1/analysis/stats` 无筛选）
+
+```mermaid
+sequenceDiagram
+    participant FE
+    participant API
+    participant Cache as Redis Cache
+    participant ES
+
+    FE->>API: GET /analysis/stats
+    API->>Cache: get(api_cache:analysis:home_stats_v4:hash)
+    alt cache hit
+      Cache-->>API: cached payload
+      API-->>FE: response
+    else cache miss
+      API->>ES: search(size=0, track_total_hits=true, aggs...)
+      ES-->>API: aggregations + total
+      API->>Cache: set(key, ttl)
+      API-->>FE: response
+    end
 ```
-jobCollectionWebApi/
-├── api/v1/endpoints/       ← Controller 层 (路由 + 参数校验)
-├── services/               ← Service 层   (业务逻辑)
-├── crud/                   ← Repository 层 (数据库操作)
-├── core/                   ← 核心基础设施  (安全/缓存/日志/熔断)
-├── tasks/                  ← Celery 任务层 (异步后台处理)
-├── schemas/                ← DTO 层        (Pydantic 模型)
-├── middleware/             ← 中间件层      (日志/响应包装)
-├── admin/                  ← 运营后台      (独立Admin服务)
-└── scripts/                ← 运维脚本      (ES初始化/数据迁移)
+
+架构约束：
+
+- 聚合统计必须启用 `track_total_hits=true`，避免总量被 10000 截断。
+- 缓存命中判断必须使用 `cached_data is not None`。
+- 缓存键必须覆盖位置参数和关键字参数（统一绑定后哈希）。
+
+### 4.2 AI 任务（提交 -> 执行 -> 通知）
+
+```mermaid
+sequenceDiagram
+    participant FE
+    participant API
+    participant Redis
+    participant Celery
+    participant Worker
+    participant DB as PostgreSQL
+    participant WS
+
+    FE->>API: POST /ai/...
+    API->>Redis: lock per-user/per-feature
+    API->>Celery: submit task
+    API-->>FE: task_id (pending)
+    Worker->>DB: update task status/result
+    Worker->>Redis: publish completion event
+    WS-->>FE: ai_task_completed/failed
 ```
 
-### 3.1 API Controller 层 (16 个端点)
+### 4.3 支付（创建 -> 回调 -> 钱包入账）
 
-| Controller | 路由前缀 | 核心功能 |
-|------------|----------|----------|
-| `auth_controller` | `/auth` | 登录/注册/刷新Token/发短信 |
-| `user_controller` | `/users` | 用户信息CRUD |
-| `job_controller` | `/jobs` | 职位列表/搜索/AI语义搜索 |
-| `company_controller` | `/companies` | 公司信息查询 |
-| `analysis_controller` | `/analysis` | 数据大盘/技能词云/AI职业建议/职业罗盘 |
-| `resume_controller` | `/resumes` | 简历CRUD/AI解析上传 |
-| `favorite_controller` | `/favorites` | 职位收藏 |
-| `application_controller` | `/applications` | 投递记录 |
-| `payment_controller` | `/payments` | 支付宝/微信充值/回调 |
-| `wallet_controller` | `/wallet` | 钱包余额/流水 |
-| `message_controller` | `/messages` | 系统消息 |
-| `upload_controller` | `/upload` | 文件上传 (OSS) |
-| `skill_controller` | `/skills` | 技能标签 |
-| `city_controller` | `/cities` | 城市数据 |
-| `industry_controller` | `/industries` | 行业树/级联 |
-| `ws_controller` | `/ws` | WebSocket 实时通信 |
+```mermaid
+sequenceDiagram
+    participant FE
+    participant API
+    participant PSP as Alipay/WeChat
+    participant DB
+    participant Redis
 
-### 3.2 Service 层 (9 个服务)
+    FE->>API: POST /payment/create
+    API->>DB: create PaymentOrder(PENDING)
+    API-->>FE: pay_url/qr_code
+    PSP->>API: notify callback
+    API->>Redis: callback lock(order_no)
+    API->>DB: mark PAID + wallet balance + transaction
+    API-->>PSP: success
+```
 
-| Service | 职责 |
-|---------|------|
-| `ai_service` | LLM 调用封装 (LangChain + 原生HTTP), 熔断器集成, 结果缓存 |
-| `ai_access_service` | AI 功能计费: 速率限制 + 余额检查 + 扣费 |
-| `analysis_service` | ES 聚合查询: 薪资/行业/技能统计, 支持行业穿透 |
-| `search_service` | ES 全文搜索 + AI 意图搜索 DSL 组装 |
-| `auth_service` | JWT 颁发/刷新/黑名单, OAuth集成 |
-| `crawler_service` | 爬虫进程管理: 启动/暂停/停止 subprocess |
-| `proxy_service` | 代理池管理: KDL API 拉取 + 可用性检测 |
-| `sms_service` | 短信验证码 (阿里云) |
-| `wechat_service` | 微信支付/登录 |
+架构约束：
 
-### 3.3 Core 基础设施 (7 个模块)
+- 回调处理必须幂等（订单锁 + 状态二次校验）。
+- `PAYMENT_NOTIFY_BASE_URL` 只配到 `/notify`，渠道后缀由代码拼接。
+- `ALIPAY_APP_AUTH_TOKEN` 仅 ISV 模式填写；直连商户保持为空。
 
-| 模块 | 功能 |
-|------|------|
-| `celery_app` | Celery 实例 + 双队列路由 (realtime / batch) |
-| `celery_events` | 任务信号监听器 → TaskLog 自动记录 |
-| `circuit_breaker` | AI 熔断器 (CLOSED→OPEN→HALF_OPEN) |
-| `cache` | `@cache` 装饰器 + 分布式锁 `cache_lock` |
-| `security` | JWT 编解码 + Token 黑名单 |
-| `logger` | Loguru 全局接管 (Uvicorn/Celery/App 分流落盘) |
-| `status_code` | 统一状态码枚举 |
+## 5. 数据架构
 
-### 3.4 Celery 任务层 (5 个任务模块)
+核心领域模型：
 
-| 任务 | 队列 | 功能 |
-|------|------|------|
-| `ai_tasks.career_advice_task` | realtime | AI 职业建议生成 + 扣费 + WS推送 |
-| `ai_tasks.career_compass_task` | realtime | AI 罗盘报告生成 + 扣费 + WS推送 |
-| `ai_tasks.ai_search_task` | realtime | AI 意图解析 + ES搜索 + 缓存 |
-| `resume_parser.parse_resume_task` | realtime | PDF简历 AI 解析 → 结构化数据 |
-| `job_parser.batch_parse_jobs_task` | batch | 批量岗位 LLM 标签提取 (Semaphore 3并发) |
-| `es_sync.sync_jobs_to_es_task` | batch | PostgreSQL → Elasticsearch 增量同步 |
-| `proxy_tasks.refresh_proxy_pool` | batch | 代理池定时刷新 |
+- 用户域：`User`, `Wallet`, `WalletTransaction`
+- 职位域：`Job`, `Company`, `Industry`, `Skill`
+- AI 域：`AiTask`, `Analysis`, `Message`
+- 支付域：`PaymentOrder`, `Product`
+- 运营域：`AdminLog`, `SystemConfig`
 
----
+设计原则：
 
-## 四、数据模型架构
+- 高频查询优先索引化和分页化。
+- count 查询必须在 DB 侧执行（`COUNT(*)`），禁止“全量拉取后 len()”。
+
+## 6. 可观测性与运维
+
+- 日志：`jobCollectionWebApi/logs/*.log`
+- 指标：Prometheus 抓取 `/metrics`
+- 看板：Grafana
+- 重点监控项：
+  - API 延迟与错误率
+  - Redis 连接健康与缓存命中率
+  - Celery 队列堆积与任务耗时
+  - ES 查询延迟与失败率
+
+## 7. 部署拓扑（腾讯云轻量服务器建议）
+
+最小单机生产拓扑：
+
+- `Nginx`（80/443）
+- `FastAPI`（uvicorn 多 worker）
+- `Celery worker realtime`
+- `Celery worker batch`
+- `Celery beat`
+- `PostgreSQL`
+- `Redis`
+- `Elasticsearch`（可外置）
+
+进程托管建议：`Supervisor`
+
+## 8. 扩展策略
+
+1. 读扩展：优先将搜索与统计流量压到 ES，核心事务保留 PG。  
+2. 写扩展：支付与 AI 回调走异步化与幂等锁，降低峰值冲突。  
+3. 任务扩展：按队列水平扩容 worker，实时任务与批处理物理隔离。  
+4. 缓存扩展：热点接口统一使用 `@cache + lock + jitter`。  
+
+## 9. 近期架构变更（2026-03-07）
+
+1. 首页统计总量修复：ES 聚合全面启用 `track_total_hits=true`。  
+2. 缓存层修复：`core/cache.py` 支持位置参数绑定、`is not None` 命中判断、命中日志。  
+3. 公司查询优化：同条件 `count_search`，并修复通用 `CRUDBase.count`。  
+4. 支付配置增强：支持可选 `ALIPAY_APP_AUTH_TOKEN`，统一 notify URL 拼接规则。  
+
+## 10. 爬虫与采集架构（补充）
+
+### 10.1 组件
+
+- 列表采集：`jobCollection/spiders/boss_list_drission_spider.py`
+- 详情采集：`jobCollection/spiders/boss_detail_drission_spider.py`
+- 任务管理：`common/databases/models/boss_crawl_task.py`
+- 失败重试：`common/databases/models/fetch_failure.py`
+- 管控入口：`jobCollectionWebApi/admin/views/crawler.py`
+
+### 10.2 流程
+
+```mermaid
+flowchart TD
+    A[Admin 创建抓取任务] --> B[列表爬虫抓取职位列表]
+    B --> C[写入 PostgreSQL: jobs 基础字段]
+    C --> D[标记待详情抓取]
+    D --> E[详情爬虫读取待抓取任务]
+    E --> F[抓取职位详情并解析]
+    F --> G[更新 jobs 详情字段]
+    G --> H[投递 batch 任务做 AI 结构化解析]
+    H --> I[同步到 Elasticsearch]
+```
+
+### 10.3 设计要点
+
+- 抓取任务与业务数据解耦，任务状态独立可追踪。  
+- 失败任务有独立记录，便于重试与质量统计。  
+- 详情抓取与 AI 解析分阶段，降低单链路阻塞。  
+
+## 11. 数据库 ER 关系（补充）
+
+### 11.1 主体 ER 图
 
 ```mermaid
 erDiagram
-    User ||--o{ Resume : has
-    User ||--o{ Favorite : creates
-    User ||--o{ Application : submits
     User ||--|| Wallet : owns
-    Wallet ||--o{ WalletTransaction : records
+    Wallet ||--o{ WalletTransaction : contains
+    User ||--o{ PaymentOrder : creates
+    PaymentOrder }o--|| Product : references
 
-    Job ||--o{ Favorite : "被收藏"
-    Job ||--o{ Application : "被投递"
-    Job }o--|| Company : "属于"
-    Job }o--o{ Skill : "要求"
+    User ||--o{ Resume : has
+    Resume ||--o{ Analysis : generates
 
-    Resume ||--o{ Education : contains
-    Resume ||--o{ WorkExperience : contains
+    User ||--o{ Favorite : creates
+    Favorite }o--|| Job : points_to
+    User ||--o{ Application : submits
+    Application }o--|| Job : targets
 
-    Industry ||--o{ Industry : "子行业"
-    City ||--o{ City : "子城市"
-    Major ||--o{ MajorPreset : "预设关键词"
+    Job }o--|| Company : belongs_to
+    Job }o--|| Industry : belongs_to
+
+    User ||--o{ Message : receives
+    User ||--o{ AiTask : owns
 ```
 
-### 核心实体 (29 个模型)
+### 11.2 爬虫与运营侧模型关系
 
-| 领域 | 模型 | 说明 |
-|------|------|------|
-| **用户** | `User`, `Wallet`, `WalletTransaction` | 用户 + 钱包 + 流水 |
-| **岗位** | `Job`, `Company`, `Skill` | 职位 + 公司 + 技能标签 |
-| **简历** | `Resume`, `Education`, `WorkExperience` | 结构化简历 |
-| **互动** | `Favorite`, `Application`, `Message` | 收藏 + 投递 + 消息 |
-| **支付** | `PaymentOrder`, `Product` | 充值订单 + 商品 |
-| **地理** | `City`, `CityHot`, `Industry` | 城市 + 热门城市 + 行业树 |
-| **教育** | `Major`, `MajorPreset`, `School` | 专业 + 预设 + 院校 |
-| **爬虫** | `BossCrawlTask`, `BossSpiderFilter`, `FetchFailure` | 任务 + 过滤 + 失败记录 |
-| **系统** | `AdminLog`, `TaskLog`, `Proxy`, `SystemConfig` | 审计 + 任务日志 + 代理 + 配置 |
-
----
-
-## 五、数据采集架构
-
-```
-┌──────────────────────────────────────────────────┐
-│                Admin 运营中台                      │
-│   [创建任务] → [启动] → [暂停] → [停止]           │
-└────────────┬─────────────────────────────────────┘
-             │ subprocess 启动
-             ▼
-┌──────────────────────────────────────────────────┐
-│         boss_list_drission_spider                 │
-│                                                   │
-│  DrissionPage (Chromium) + 代理池                  │
-│  ① 浏览岗位列表 → ② 提取基础信息 → ③ 写入 PG     │
-│  ④ 标记 is_crawl=0 (待详情采集)                   │
-└────────────┬─────────────────────────────────────┘
-             │ Redis 队列协调
-             ▼
-┌──────────────────────────────────────────────────┐
-│         boss_detail_drission_spider               │
-│                                                   │
-│  ① 领取任务 → ② 立即标记 is_crawl=2 (防重复)     │
-│  ③ 浏览器导航详情页 → ④ mitmproxy 拦截响应       │
-│  ⑤ 解析职位描述/要求 → ⑥ 更新 PG (is_crawl=1)   │
-│  ⑦ 60s 超时保护 + 脏数据隔离                     │
-└────────────┬─────────────────────────────────────┘
-             │ Celery Beat 定时触发
-             ▼
-┌──────────────────────────────────────────────────┐
-│         batch_parse_jobs_task (Celery)             │
-│                                                   │
-│  ① 拉取未解析岗位 → ② 预锁定 ai_parsed=1        │
-│  ③ Semaphore(3) 并发 LLM 调用                    │
-│  ④ 提取: 福利/技能/标签 → ⑤ 写回 PG              │
-└──────────────────────────────────────────────────┘
+```mermaid
+erDiagram
+    BossCrawlTask ||--o{ FetchFailure : has_failures
+    BossSpiderFilter ||--o{ BossCrawlTask : generates
+    AdminLog }o--|| User : actor
+    SystemConfig }o--|| User : updated_by
 ```
 
----
+### 11.3 关键表与职责
 
-## 六、前端功能模块
+- 用户域：`users`, `wallets`, `wallet_transactions`
+- 交易域：`payment_orders`, `products`
+- 职位域：`jobs`, `company`, `industries`
+- AI 域：`ai_tasks`, `analysis`
+- 内容域：`messages`, `favorites`, `applications`
+- 爬虫域：`boss_crawl_tasks`, `boss_spider_filters`, `fetch_failures`
+- 运营域：`admin_logs`, `system_config`
 
-| 页面 | 组件 | 核心功能 |
-|------|------|----------|
-| **首页** | `HomeView.vue` | 平台入口 + 快速搜索 + 功能导航 |
-| **职位集市** | `JobMarket.vue` | 筛选搜索 + AI语义搜索 + 详情预览 |
-| **职位详情** | `JobDetail.vue` | 完整JD + 收藏/沟通 |
-| **公司列表** | `CompanyList.vue` | 企业浏览 |
-| **公司详情** | `CompanyDetail.vue` | 企业画像 |
-| **职业罗盘** | `CareerCompass.vue` | 专业→行业级联 + ES统计图表 + AI报告 |
-| **专业分析** | `MajorAnalysis.vue` | 技能TOP15 + 薪资分布 + AI建议 |
-| **数据洞察** | `JobAnalysis.vue` | 宏观就业数据BI看板 |
-| **我的简历** | `MyResume.vue` | 简历CRUD + PDF上传AI解析 |
-| **我的收藏** | `MyFavorites.vue` | 收藏管理 |
-| **投递记录** | `MyApplications.vue` | 投递追踪 |
-| **消息中心** | `MessageCenter.vue` | 系统通知 |
-| **钱包** | `WalletView.vue` | 余额/充值/流水 |
-| **登录** | `LoginView.vue` | 认证入口 |
+## 12. 索引与查询约束（补充）
 
----
-
-## 七、弹性与高可用架构
-
-### 7.1 多层缓存防御体系
-
-```
-请求 → @cache 装饰器 (Controller 层, Hash Key + TTL 抖动)
-         ↓ miss
-       cache_lock 分布式锁 (防击穿)
-         ↓ 获锁
-       Service 层 AI 结果缓存 (24h / 12h)
-         ↓ miss
-       Elasticsearch / PostgreSQL 查询
-         ↓
-       写入缓存 (空结果短缓存, 防穿透)
-```
-
-### 7.2 AI 熔断器
-
-```
-正常 (CLOSED) ──5次连续失败──→ 熔断 (OPEN) ──60s冷却──→ 半开 (HALF_OPEN)
-     ↑                                                        │
-     └──────────────── 探测成功 ──────────────────────────────┘
-                       探测失败 → 回到 OPEN
-```
-
-### 7.3 Celery 队列隔离
-
-```
-┌─────────────────────────────────────────────┐
-│ Realtime Queue (用户实时)                     │
-│ ├── career_advice_task                       │
-│ ├── career_compass_task                      │
-│ ├── ai_search_task                           │
-│ └── parse_resume_task                        │
-├─────────────────────────────────────────────┤
-│ Batch Queue (后台批量)                        │
-│ ├── batch_parse_jobs_task                    │
-│ ├── sync_jobs_to_es_task                     │
-│ └── refresh_proxy_pool                       │
-└─────────────────────────────────────────────┘
-     物理隔离: 两个独立 Worker 进程
-```
-
----
-
-## 八、部署架构
-
-```bash
-# FastAPI 服务
-run_api_dev.bat       # 开发: 单 Worker + 热重载
-run_api_prod.bat      # 生产: 4 Worker + 0.0.0.0
-
-# Celery 双队列
-run_worker.bat            # batch 队列 Worker
-run_worker_realtime.bat   # realtime 队列 Worker
-run_beat.bat              # 定时任务调度器
-
-# Admin 后台
-python main_admin.py      # 独立端口 :8001
-```
-
-### 端口分配
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| FastAPI 主服务 | 8000 | RESTful API + WebSocket |
-| Admin 运营中台 | 8001 | Starlette-Admin |
-| PostgreSQL | 5432 | 主数据库 |
-| Redis | 6379 | 缓存/队列/锁/Pub-Sub |
-| Elasticsearch | 9200 | 搜索引擎 |
-| Vite Dev Server | 5173 | 前端开发 |
-
----
-
-## 九、认证与计费体系
-
-### 9.1 JWT 双Token 认证流
-
-```
-登录 → Access Token (2h) + Refresh Token (90d)
-         ↓ 过期
-Axios 拦截器 → 静默刷新 → 队列缓冲 → 重发原请求
-         ↓ 刷新失败
-强制登出 → 清除本地存储 → 跳转登录页
-```
-
-### 9.2 AI 功能计费流
-
-```
-Controller: ensure_access(user, feature)
-  ├── 检查功能策略 (免费额度/付费)
-  ├── 速率限制 (Redis 滑动窗口)
-  └── 余额预检
-          ↓ 通过
-提交 Celery 任务 → AI 调用成功
-          ↓
-charge_usage(user, feature, amount)
-  └── Wallet 余额扣减 + 流水记录
-```
+- 统计/列表接口必须分页，避免全表扫描。  
+- 计数必须走 DB `COUNT(*)`，禁止全量加载后计算长度。  
+- ES 统计查询必须 `size=0` 且 `track_total_hits=true`。  
+- 支付回调必须基于 `order_no` 幂等处理（锁 + 状态复核）。  

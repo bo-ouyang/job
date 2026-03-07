@@ -11,6 +11,7 @@ AI Controller — 集中管理所有 AI 异步任务端点。
 
 import hashlib
 import json
+import uuid
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,13 +108,28 @@ async def get_ai_advice(
     from core.metrics import celery_tasks_submitted, ai_task_created
 
     celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_advice_task", queue="realtime").inc()
-    task = career_advice_task.delay(
-        user_id=current_user.id,
-        major=req.major_name,
-        skills=req.skills,
-        engine=req.engine or "auto",
-        charge_amount=charge_amount,
-        analysis_result=req.analysis_result,
+    task_id = str(uuid.uuid4())
+    payload_saved = await crud_ai_task.set_task_payload(
+        task_id,
+        {"analysis_result": req.analysis_result} if req.analysis_result is not None else {},
+    )
+
+    advice_kwargs = {
+        "user_id": current_user.id,
+        "major": req.major_name,
+        "skills": req.skills,
+        "engine": req.engine or "auto",
+        "charge_amount": charge_amount,
+        "payload_task_id": task_id,
+    }
+    if not payload_saved:
+        advice_kwargs["analysis_result"] = req.analysis_result
+
+    task = career_advice_task.apply_async(
+        kwargs=advice_kwargs,
+        task_id=task_id,
+        queue="realtime",
+        routing_key="realtime",
     )
 
     # 5. 写入 AiTask 记录 + 设置 Redis 活跃锁
@@ -224,12 +240,30 @@ async def get_career_compass(
         from core.metrics import celery_tasks_submitted, ai_task_created
 
         celery_tasks_submitted.labels(task_name="tasks.ai_tasks.career_compass_task", queue="realtime").inc()
-        task = career_compass_task.delay(
-            user_id=current_user.id,
-            major_name=req.major_name,
-            es_stats=es_stats,
-            charge_amount=charge_amount,
-            skill_cloud_data=req.skill_cloud_data,
+        task_id = str(uuid.uuid4())
+        payload_saved = await crud_ai_task.set_task_payload(
+            task_id,
+            {
+                "es_stats": es_stats,
+                "skill_cloud_data": req.skill_cloud_data,
+            },
+        )
+
+        compass_kwargs = {
+            "user_id": current_user.id,
+            "major_name": req.major_name,
+            "charge_amount": charge_amount,
+            "payload_task_id": task_id,
+        }
+        if not payload_saved:
+            compass_kwargs["es_stats"] = es_stats
+            compass_kwargs["skill_cloud_data"] = req.skill_cloud_data
+
+        task = career_compass_task.apply_async(
+            kwargs=compass_kwargs,
+            task_id=task_id,
+            queue="realtime",
+            routing_key="realtime",
         )
 
         # 7. 写入 AiTask 记录
@@ -318,7 +352,11 @@ async def parse_resume(
     from core.metrics import celery_tasks_submitted, ai_task_created
 
     celery_tasks_submitted.labels(task_name="tasks.resume_parser.parse_resume_task", queue="realtime").inc()
-    task_result = parse_resume_task.delay(current_user.id, file_path)
+    task_result = parse_resume_task.apply_async(
+        args=[current_user.id, file_path],
+        queue="realtime",
+        routing_key="realtime",
+    )
 
     # 5. 写入 AiTask 记录
     await crud_ai_task.create_task(
@@ -379,6 +417,14 @@ async def get_ai_task_result(
     elif result.state == "SUCCESS":
         return {"task_id": task_id, "status": "completed", "result": result.result}
     elif result.state == "FAILURE":
+        # Fallback persistence: if signal-based writeback missed, persist failed status here.
+        try:
+            await crud_ai_task.mark_failed_by_task_id(
+                celery_task_id=task_id,
+                error_message=str(result.result),
+            )
+        except Exception as exc:
+            logger.warning(f"fallback mark_failed_by_task_id failed for task {task_id}: {exc}")
         return {"task_id": task_id, "status": "failed", "error": str(result.result)}
     else:
         return {"task_id": task_id, "status": result.state.lower()}

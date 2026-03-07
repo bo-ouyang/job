@@ -1,4 +1,4 @@
-# 项目概览：招聘数据采集与智能分析平台
+﻿# 项目概览：招聘数据采集与智能分析平台
 
 ## 1. 简介
 
@@ -456,3 +456,38 @@
 - 首个迁移脚本：`alembic/versions/20260306_01_add_model_indexes.py`，用于落库本次新增索引（增量迁移）。
 - 依赖更新：`requirements.txt` 与 `jobCollectionWebApi/requirements.txt` 新增 `alembic>=1.13.2`。
 - 文档更新：`README.md` 新增「Database Migration (Alembic)」执行步骤与注意事项。
+
+## 17. 最近更新 (2026-03-07)
+
+### A. 首页统计与缓存修复
+
+- 修复首页总量统计被 10000 截断问题：`analysis_service.py` 的 ES 聚合查询统一补充 `track_total_hits=true`。
+- 新增总量解析兜底：兼容 `hits.total` 不同返回结构，统一取 `total_jobs`。
+- 修复首页缓存未命中问题：重构 `core/cache.py`。
+  - 缓存键改为 `signature.bind_partial(*args, **kwargs)` 后统一哈希，覆盖位置参数。
+  - 命中判断从 truthy 改为 `cached_data is not None`。
+  - 增加 cache hit/set 调试日志。
+- 首页缓存键升级为 `analysis:home_stats_v4`，规避旧缓存污染。
+
+### B. 查询性能优化
+
+- 优化公司列表查询：
+  - `company_controller.py` 由“分页查询 + 全表 count”改为“分页查询 + 同筛选条件 count”。
+  - `crud/company.py` 增加 `_apply_filters` 与 `count_search`，并使用 `load_only` 减少字段加载。
+  - 列表查询加入稳定排序，降低分页抖动。
+- 优化通用 `CRUDBase.count`：从全量加载后 `len()` 改为数据库 `COUNT(*)`。
+
+### C. 支付配置增强
+
+- `payment_controller.py` 增加支付宝可选参数 `ALIPAY_APP_AUTH_TOKEN` 支持（ISV 模式可用）。
+- 统一支付回调地址拼接逻辑，避免配置中手动带渠道后缀导致 `/alipay/alipay` 重复路径。
+- `.env` / `.env.production` 补充与规范支付宝配置示例。
+
+### D. 架构与文档更新
+
+- 重写并更新 `README.md`，同步运行方式、迁移方式、支付配置关键项与近期变更。
+- 升级 `ARCHITECTURE.md` 为结构化版本，补充：
+  - 系统上下文与容器边界；
+  - 首页统计 / AI 任务 / 支付三条关键时序；
+  - 爬虫采集链路；
+  - 数据库 ER 关系与查询约束。

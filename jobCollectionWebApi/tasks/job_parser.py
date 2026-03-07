@@ -3,6 +3,7 @@ from celery import shared_task, current_app
 #from celery.utils.log import get_task_logger
 from sqlalchemy import select
 from typing import List
+import json
 
 # Import Database components
 from common.databases.PostgresManager import db_manager
@@ -44,6 +45,97 @@ def get_env_cleaned(key: str, default: str = None) -> str:
     if val:
         val = val.strip().strip("'").strip('"')
     return val
+
+
+def _safe_json_loads(text: str):
+    if not isinstance(text, str):
+        return None
+    content = text.strip()
+    if not content:
+        return None
+    if not ((content.startswith("{") and content.endswith("}")) or (content.startswith("[") and content.endswith("]"))):
+        return None
+    try:
+        return json.loads(content)
+    except Exception:
+        return None
+
+
+def _normalize_text(value) -> str:
+    """Normalize AI field into plain text for ai_summary."""
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        parsed = _safe_json_loads(value)
+        if parsed is not None:
+            return _normalize_text(parsed)
+        return value.strip()
+
+    if isinstance(value, dict):
+        # Handle schema-like payloads: {"title": "...", "type": "...", "description": "..."}
+        for key in ("summary", "description", "text", "content", "value"):
+            if key in value and value.get(key):
+                return _normalize_text(value.get(key))
+        return json.dumps(value, ensure_ascii=False)
+
+    if isinstance(value, (list, tuple, set)):
+        parts = [_normalize_text(item) for item in value]
+        parts = [p for p in parts if p]
+        return "；".join(parts)
+
+    return str(value).strip()
+
+
+def _normalize_list(value) -> List[str]:
+    """Normalize AI field into string list for ai_skills/ai_benefits."""
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        parsed = _safe_json_loads(value)
+        if parsed is not None:
+            return _normalize_list(parsed)
+        raw = value.strip()
+        if not raw:
+            return []
+        # Fallback split for plain text like "A, B, C"
+        split_items = [
+            item.strip()
+            for item in raw.replace("，", ",").replace("；", ";").replace("、", ",").replace("\n", ",").split(",")
+        ]
+        return [item for item in split_items if item]
+
+    if isinstance(value, dict):
+        # Handle schema-like payloads: {"title":"Skills","type":"array","items":[...]}
+        for key in ("items", "data", "list", "skills", "benefits", "value"):
+            if key in value:
+                return _normalize_list(value.get(key))
+        text = _normalize_text(value)
+        return [text] if text else []
+
+    if isinstance(value, (list, tuple, set)):
+        out: List[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = _normalize_text(item)
+                if text:
+                    out.append(text)
+            else:
+                text = _normalize_text(item)
+                if text:
+                    out.append(text)
+        # Deduplicate while preserving order
+        seen = set()
+        deduped: List[str] = []
+        for item in out:
+            if item not in seen:
+                seen.add(item)
+                deduped.append(item)
+        return deduped
+
+    text = _normalize_text(value)
+    return [text] if text else []
 
 async def _process_batch_job_parsing(limit: int = 10):
     """
@@ -122,14 +214,19 @@ async def _process_batch_job_parsing(limit: int = 10):
                             "format_instructions": parser.get_format_instructions()
                         })
 
+                        # Normalize model output to DB-safe types.
+                        summary_value = _normalize_text(parsed_result.get("summary", ""))
+                        skills_value = _normalize_list(parsed_result.get("skills", []))
+                        benefits_value = _normalize_list(parsed_result.get("benefits", []))
+
                         from sqlalchemy import update
                         async with (await db_manager.get_session()) as local_session:
                             await local_session.execute(
                                 update(Job).where(Job.id == job.id).values(
                                     ai_parsed=2,
-                                    ai_skills=parsed_result.get('skills', []),
-                                    ai_benefits=parsed_result.get('benefits', []),
-                                    ai_summary=parsed_result.get('summary', '')
+                                    ai_skills=skills_value,
+                                    ai_benefits=benefits_value,
+                                    ai_summary=summary_value
                                 )
                             )
                             await local_session.commit()

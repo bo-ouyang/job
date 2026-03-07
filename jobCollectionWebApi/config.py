@@ -233,6 +233,8 @@ class Settings(BaseSettings):
     AI_LANGGRAPH_ENABLED: bool = os.getenv("AI_LANGGRAPH_ENABLED", "false").lower() == "true"
     AI_LANGCHAIN_TEMPERATURE: float = float(os.getenv("AI_LANGCHAIN_TEMPERATURE", 0.6))
     AI_LANGCHAIN_TIMEOUT_SECONDS: int = int(os.getenv("AI_LANGCHAIN_TIMEOUT_SECONDS", 60))
+    AI_MAX_TOKENS_CAREER_COMPASS: int = int(os.getenv("AI_MAX_TOKENS_CAREER_COMPASS", 1200))
+    AI_MAX_TOKENS_CAREER_ADVICE: int = int(os.getenv("AI_MAX_TOKENS_CAREER_ADVICE", 900))
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "deepseek") # mock, openai
     AI_API_KEY: str = os.getenv("AI_API_KEY", "")
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
@@ -245,6 +247,7 @@ class Settings(BaseSettings):
     ALIPAY_APP_ID: str = os.getenv("ALIPAY_APP_ID", "")
     ALIPAY_PRIVATE_KEY_PATH: str = os.getenv("ALIPAY_PRIVATE_KEY_PATH", "")
     ALIPAY_PUBLIC_KEY_PATH: str = os.getenv("ALIPAY_PUBLIC_KEY_PATH", "")
+    ALIPAY_APP_AUTH_TOKEN: str = os.getenv("ALIPAY_APP_AUTH_TOKEN", "")
     ALIPAY_DEBUG: bool = os.getenv("ALIPAY_DEBUG", "true").lower() == "true"
     
     # 微信支付配置

@@ -2,6 +2,7 @@
 defineOptions({ name: "CareerCompass" });
 import {
   ref,
+  computed,
   onMounted,
   onActivated,
   onUnmounted,
@@ -63,6 +64,17 @@ const getTaskParams = (task) => {
     industry2Name: params.target_industry_2_name ?? null,
   };
 };
+
+const hasDashboardData = computed(() => {
+  const stats = statsData.value || {};
+  const hasSalary = Array.isArray(stats.salary) && stats.salary.length > 0;
+  const hasIndustries =
+    Array.isArray(stats.industries) && stats.industries.length > 0;
+  const hasSkills =
+    Array.isArray(skillCloudData.value) && skillCloudData.value.length > 0;
+  const hasReport = Boolean(reportMarkdown.value && reportMarkdown.value.trim());
+  return hasSalary || hasIndustries || hasSkills || hasReport;
+});
 
 const handleResize = () => {
   salaryChartInstance?.resize();
@@ -165,6 +177,7 @@ const applyTaskResult = async (task) => {
     (Array.isArray(restoredSkillCloud) && restoredSkillCloud.length > 0)
   ) {
     nextTick(() => {
+      initCharts();
       updateCharts();
     });
     return true;
@@ -194,6 +207,7 @@ const applyTaskResult = async (task) => {
         skillCloudData.value = skillRes.data;
       }
       nextTick(() => {
+        initCharts();
         updateCharts();
       });
     } catch (e) {
@@ -209,15 +223,40 @@ const applyLatestCompletedResult = async () => {
   return applyTaskResult(lastResult);
 };
 
+const restoreTaskWithPolling = async (taskId, featureKey = "career_compass") => {
+  if (!taskId) return false;
+  loading.value = true;
+  try {
+    await aiTaskStore.fetchTaskById(taskId, featureKey);
+    let task = aiTaskStore.getTask(taskId);
+
+    // If the task is still running, keep polling until we can render final result.
+    if (task && (task.status === "pending" || task.status === "processing")) {
+      await aiTaskStore.pollAndUpdate(taskId, {
+        interval: 2000,
+        timeout: 180000,
+      });
+      task = aiTaskStore.getTask(taskId);
+    }
+
+    return applyTaskResult(task);
+  } catch (e) {
+    console.error("Failed to restore task with polling", e);
+    return false;
+  } finally {
+    loading.value = false;
+  }
+};
+
 const restoreFromRouteOrLatest = async () => {
   const routeTaskId = getRouteTaskId();
   if (routeTaskId) {
-    await aiTaskStore.fetchTaskById(
-      routeTaskId,
-      route.query.feature_key || "career_compass",
-    );
-    const task = aiTaskStore.getTask(routeTaskId);
-    if (await applyTaskResult(task)) {
+    if (
+      await restoreTaskWithPolling(
+        routeTaskId,
+        route.query.feature_key || "career_compass",
+      )
+    ) {
       return;
     }
   }
@@ -460,9 +499,7 @@ onMounted(async () => {
 onActivated(async () => {
   const taskId = getRouteTaskId();
   if (!taskId) return;
-  await aiTaskStore.fetchTaskById(taskId, route.query.feature_key || "career_compass");
-  const task = aiTaskStore.getTask(taskId);
-  await applyTaskResult(task);
+  await restoreTaskWithPolling(taskId, route.query.feature_key || "career_compass");
 });
 
 onUnmounted(() => {
@@ -477,9 +514,7 @@ watch(
   async () => {
     const taskId = getRouteTaskId();
     if (!taskId) return;
-    await aiTaskStore.fetchTaskById(taskId, route.query.feature_key || "career_compass");
-    const task = aiTaskStore.getTask(taskId);
-    await applyTaskResult(task);
+    await restoreTaskWithPolling(taskId, route.query.feature_key || "career_compass");
   },
 );
 </script>
@@ -557,7 +592,7 @@ watch(
     </div>
 
     <div class="content-section" v-loading="loading" element-loading-text="AI 正在分析中...">
-      <div v-if="!reportMarkdown && !loading" class="empty-state">
+      <div v-if="!hasDashboardData && !loading" class="empty-state">
         <el-empty description="输入你的专业，查看职业趋势与 AI 建议" />
       </div>
 
@@ -580,7 +615,8 @@ watch(
         <div class="ai-report-panel">
           <h2 class="section-heading">AI 诊断报告</h2>
           <el-card class="markdown-body-card" shadow="hover">
-            <div class="markdown-container" v-html="reportMarkdown"></div>
+            <div v-if="reportMarkdown" class="markdown-container" v-html="reportMarkdown"></div>
+            <el-empty v-else description="报告暂未生成，已展示市场数据看板" />
           </el-card>
         </div>
       </div>

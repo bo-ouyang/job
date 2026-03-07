@@ -57,6 +57,51 @@ def _publish_error(user_id: int, task_type: str, error_msg: str):
     _publish_result(user_id, task_type, {"error": error_msg})
 
 
+def _enqueue_ai_task_message(
+    *,
+    user_id: int,
+    feature_key: str,
+    celery_task_id: str,
+    status: str,
+    execution_time: float = None,
+    error_message: str = None,
+):
+    """Persist message-center records asynchronously in batch queue."""
+    try:
+        try:
+            from jobCollectionWebApi.tasks.notification_tasks import persist_ai_task_message
+        except Exception:
+            from tasks.notification_tasks import persist_ai_task_message
+
+        persist_ai_task_message.apply_async(
+            kwargs={
+                "user_id": user_id,
+                "feature_key": feature_key,
+                "celery_task_id": celery_task_id,
+                "status": status,
+                "execution_time": execution_time,
+                "error_message": error_message,
+            },
+            queue="batch",
+            routing_key="batch",
+        )
+    except Exception as exc:
+        logger.error(
+            f"enqueue ai message failed: user_id={user_id}, feature={feature_key}, task_id={celery_task_id}, status={status}, err={exc}"
+        )
+
+
+def _load_task_payload(celery_task_id: str) -> dict:
+    """Load optional large payload from Redis pointer."""
+    from crud import ai_task as crud_ai_task
+
+    loop = _get_event_loop()
+    payload = loop.run_until_complete(crud_ai_task.get_task_payload(celery_task_id))
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
 # ─── AiTask 回写辅助 ─────────────────────────────
 
 def _mark_task_completed(
@@ -103,35 +148,6 @@ def _mark_task_completed(
         pass
 
     message_text = f"您的{_feature_display(feature_key)}已完成"
-    message_id = None
-
-    # 存入消息系统 (供消息中心展示)
-    try:
-        from crud.message import message as crud_message
-        from schemas.message_schema import MessageCreate
-        from common.databases.models.message import MessageType
-        from common.databases.PostgresManager import db_manager
-
-        async def _create_msg():
-            async with db_manager.async_session() as db:
-                import json
-                # Build an action_param dictionary so that the frontend knows where to route when the message is clicked
-                action_param = json.dumps({"task_id": celery_task_id, "feature_key": feature_key})
-                new_msg = await crud_message.create(
-                    db,
-                    obj_in=MessageCreate(
-                        title=f"✅ {_feature_display(feature_key)}完成",
-                        content=f"{message_text}，耗时 {execution_time}秒。",
-                        type=MessageType.SYSTEM,
-                        receiver_id=user_id,
-                        #action_param=action_param,
-                    )
-                )
-                await db.commit()
-                return new_msg.id
-        message_id = loop.run_until_complete(_create_msg())
-    except Exception as exc:
-        logger.error(f"Save message failed: {exc}")
 
     # 统一 WS 通知: ai_task_completed
     _publish_result(user_id, "ai_task_completed", {
@@ -140,8 +156,15 @@ def _mark_task_completed(
         "status": "completed",
         "execution_time": execution_time,
         "message": message_text,
-        "message_id": message_id,
+        "message_id": None,
     })
+    _enqueue_ai_task_message(
+        user_id=user_id,
+        feature_key=feature_key,
+        celery_task_id=celery_task_id,
+        status="completed",
+        execution_time=execution_time,
+    )
 
 
 def _mark_task_failed(
@@ -179,34 +202,6 @@ def _mark_task_failed(
         pass
 
     message_text = f"您的{_feature_display(feature_key)}处理失败"
-    message_id = None
-
-    # 存入消息系统
-    try:
-        from crud.message import message as crud_message
-        from schemas.message_schema import MessageCreate
-        from common.databases.models.message import MessageType
-        from common.databases.PostgresManager import db_manager
-
-        async def _create_msg():
-            async with db_manager.async_session() as db:
-                import json
-                action_param = json.dumps({"task_id": celery_task_id, "feature_key": feature_key})
-                new_msg = await crud_message.create(
-                    db,
-                    obj_in=MessageCreate(
-                        title=f"❌ {_feature_display(feature_key)}失败",
-                        content=f"{message_text}。原因: {error_message}",
-                        type=MessageType.SYSTEM,
-                        receiver_id=user_id,
-                        action_param=action_param,
-                    )
-                )
-                await db.commit()
-                return new_msg.id
-        message_id = loop.run_until_complete(_create_msg())
-    except Exception as exc:
-        logger.error(f"Save message failed: {exc}")
 
     # 统一 WS 通知: ai_task_failed
     _publish_result(user_id, "ai_task_failed", {
@@ -215,8 +210,16 @@ def _mark_task_failed(
         "status": "failed",
         "error": error_message,
         "message": message_text,
-        "message_id": message_id,
+        "message_id": None,
     })
+    _enqueue_ai_task_message(
+        user_id=user_id,
+        feature_key=feature_key,
+        celery_task_id=celery_task_id,
+        status="failed",
+        execution_time=execution_time,
+        error_message=error_message,
+    )
 
 
 def _feature_display(feature_key: str) -> str:
@@ -242,11 +245,12 @@ async def _career_advice_logic(
     from services.ai_service import ai_service
     from services.ai_access_service import ai_access_service
     from common.databases.PostgresManager import db_manager
-
+    logger.info(f"stat_career_advice started")
     # Call AI
     advice = await ai_service.generate_career_advice(
         major, skills, engine=engine,
     )
+    logger.info(f"generate_career_advice done")
     advice_text = advice if isinstance(advice, str) else str(advice)
 
     # Charge usage if successful
@@ -278,20 +282,28 @@ def career_advice_task(
     engine: str = "auto",
     charge_amount: float = 0,
     analysis_result: dict = None,
+    payload_task_id: str = None,
 ):
     """Celery task: generate career advice asynchronously."""
     loop = _get_event_loop()
     started_at = time.time()
     request_params = {"major_name": major, "skills": skills, "engine": engine}
+    logger.info(f"ai_task_stage task_id={self.request.id} feature=career_advice stage=worker_started")
     try:
         result = loop.run_until_complete(
             _career_advice_logic(user_id, major, skills, engine, charge_amount)
         )
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=career_advice stage=ai_done")
         # 功能级 WS 通知 (保持向后兼容)
         _publish_result(user_id, "career_advice_result", {
             "task_id": self.request.id,
             "advice": result,
         })
+
+        if analysis_result is None and payload_task_id:
+            payload = _load_task_payload(payload_task_id)
+            analysis_result = payload.get("analysis_result")
+
         # 将建议与分析结果一起落库，便于前端历史恢复图表
         result_payload = json.dumps({
             "advice": result,
@@ -299,6 +311,7 @@ def career_advice_task(
         }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
         _mark_task_completed(user_id, "career_advice", self.request.id, result_payload, started_at, request_params)
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=career_advice stage=finalized")
         return {"status": "success", "advice": result}
     except Exception as exc:
         logger.error(f"career_advice_task failed: {exc}")
@@ -320,16 +333,21 @@ async def _career_compass_logic(
     from services.ai_service import ai_service
     from services.ai_access_service import ai_access_service
     from common.databases.PostgresManager import db_manager
-
+    logger.info("stat_career_compass started")
+    ai_started_at = time.time()
     # Call AI with pre-aggregated ES data
     ai_report = await ai_service.get_career_navigation_report(
         major_name=major_name,
         es_stats=es_stats,
     )
+    logger.info(
+        f"get_career_navigation_report done elapsed={time.time() - ai_started_at:.2f}s"
+    )
     report_text = ai_report if isinstance(ai_report, str) else str(ai_report)
 
     # Charge usage if successful
     if charge_amount > 0 and not report_text.strip().startswith("❌"):
+        billing_started_at = time.time()
         session_obj = await db_manager.get_session()
         async with session_obj as db:
             await ai_access_service.charge_usage(
@@ -338,6 +356,9 @@ async def _career_compass_logic(
                 feature_key="career_compass",
                 amount=charge_amount,
             )
+        logger.info(
+            f"career_compass billing_done elapsed={time.time() - billing_started_at:.2f}s"
+        )
 
     return report_text
 
@@ -353,18 +374,31 @@ def career_compass_task(
     self,
     user_id: int,
     major_name: str,
-    es_stats: dict,
+    es_stats: dict = None,
     charge_amount: float = 0,
     skill_cloud_data: list = None,
+    payload_task_id: str = None,
 ):
     """Celery task: generate career compass report asynchronously."""
     loop = _get_event_loop()
     started_at = time.time()
     request_params = {"major_name": major_name}
+    logger.info(f"ai_task_stage task_id={self.request.id} feature=career_compass stage=worker_started")
     try:
+        if payload_task_id and (es_stats is None or skill_cloud_data is None):
+            payload = _load_task_payload(payload_task_id)
+            if es_stats is None:
+                es_stats = payload.get("es_stats")
+            if skill_cloud_data is None:
+                skill_cloud_data = payload.get("skill_cloud_data")
+
+        if not isinstance(es_stats, dict):
+            raise ValueError("Missing es_stats payload for career_compass task")
+
         result = loop.run_until_complete(
             _career_compass_logic(user_id, major_name, es_stats, charge_amount)
         )
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=career_compass stage=ai_done")
         # 功能级 WS 通知 (保持向后兼容)
         _publish_result(user_id, "career_compass_result", {
             "task_id": self.request.id,
@@ -378,6 +412,7 @@ def career_compass_task(
         }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
         _mark_task_completed(user_id, "career_compass", self.request.id, result_payload, started_at, request_params)
+        logger.info(f"ai_task_stage task_id={self.request.id} feature=career_compass stage=finalized")
         return {"status": "success", "report": result}
     except Exception as exc:
         logger.error(f"career_compass_task failed: {exc}")

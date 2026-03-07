@@ -55,6 +55,14 @@ class AnalysisService:
         pass
 
     @staticmethod
+    def _extract_total_hits(resp: Dict[str, Any]) -> int:
+        hits = (resp or {}).get("hits") or {}
+        total = hits.get("total", 0)
+        if isinstance(total, dict):
+            return int(total.get("value", 0) or 0)
+        return int(total or 0)
+
+    @staticmethod
     def _stable_digest(payload: Dict[str, Any]) -> str:
         """生成稳定的缓存摘要，避免进程重启后缓存键变化。"""
         serialized = json.dumps(
@@ -220,6 +228,7 @@ class AnalysisService:
         query_dsl = {
             "query": {"bool": bool_query} if bool_query else {"match_all": {}},
             "size": 0,
+            "track_total_hits": True,
             "aggs": {
                 "salary_ranges": {
                     "range": {
@@ -253,10 +262,10 @@ class AnalysisService:
             "salary": salary_dist,
             "skills": skill_dist,
             "industries": industry_dist[:5],
-            "total_jobs": resp["hits"]["total"]["value"],
+            "total_jobs": self._extract_total_hits(resp),
         }
 
-    @cache(expire=3600, key_prefix="analysis:home_stats_v2")
+    @cache(expire=3600, key_prefix="analysis:home_stats_v4")
     async def get_home_stats(self) -> Dict[str, Any]:
         """专门为前端首页量身定制的无参数全局统查询。缓存时间长。"""
         try:
@@ -264,6 +273,7 @@ class AnalysisService:
             query_dsl = {
                 "query": {"match_all": {}},
                 "size": 0,
+                "track_total_hits": True,
                 "aggs": {
                     "salary_ranges": {
                         "range": {
@@ -291,7 +301,7 @@ class AnalysisService:
                 "salary": salary_dist,
                 "skills": skill_dist,
                 "industries": industry_dist[:5],
-                "total_jobs": resp["hits"]["total"]["value"],
+                "total_jobs": self._extract_total_hits(resp),
             }
         except Exception as e:
             logger.error(f"Home stats ES aggregation failed: {e}", exc_info=True)
@@ -347,6 +357,7 @@ class AnalysisService:
             query_dsl = {
                 "query": {"bool": bool_query} if bool_query else {"match_all": {}},
                 "size": 0,
+                "track_total_hits": True,
                 "aggs": {
                     "salary_ranges": {
                         "range": {
@@ -374,7 +385,7 @@ class AnalysisService:
                 "salary": salary_dist,
                 "skills": skill_dist,
                 "industries": industry_dist[:5],
-                "total_jobs": resp["hits"]["total"]["value"],
+                "total_jobs": self._extract_total_hits(resp),
             }
         except Exception as e:
             logger.error(f"Faceted ES aggregation failed: {e}", exc_info=True)
@@ -525,7 +536,8 @@ class AnalysisService:
         # ==========================
         dsl = {
             "query": {"bool": bool_query} if bool_query else {"match_all": {}},
-            "size": 0, 
+            "size": 0,
+            "track_total_hits": True,
             "aggs": aggs
         }
         print(dsl) 
@@ -538,7 +550,7 @@ class AnalysisService:
             "salary": salary_dist,
             "skills": skill_dist,
             "industries": industry_dist,
-            "total_jobs": resp["hits"]["total"]["value"]
+            "total_jobs": self._extract_total_hits(resp)
         }
 
     @cache(expire=600, key_prefix="analysis:major_skills:v2")
