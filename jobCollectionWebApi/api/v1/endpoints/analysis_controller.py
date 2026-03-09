@@ -14,12 +14,14 @@ from schemas.analysis_schema import (
     UserQueryCreate,
     MajorAnalysisRequest,
     MajorCategory,
+    CompareAnalysisResponse,
 )
 from common.databases.PostgresManager import db_manager
 from core.logger import sys_logger as logger
 from dependencies import get_db
 from crud.major import major as crud_major
 from services.analysis_service import analysis_service
+from services.comparison_analysis_service import comparison_analysis_service
 from common.databases.RedisManager import redis_manager
 from crud import industry as crud_industry
 from schemas.job_schema import JobQueryParams
@@ -112,6 +114,80 @@ async def get_skill_cloud(
     except Exception as e:
         logger.error(f"Skill cloud API failed: {e}")
         return []
+
+
+@router.get("/compare/cities", response_model=CompareAnalysisResponse)
+async def get_city_salary_compare(
+    left_city_code: int,
+    right_city_code: int,
+    keyword: str = None,
+    industry: int = None,
+    industry_2: int = None,
+    experience: str = None,
+    education: str = None,
+    days: int = 30,
+):
+    """城市薪资对比分析。"""
+    try:
+        return await comparison_analysis_service.compare_cities(
+            left_city_code=left_city_code,
+            right_city_code=right_city_code,
+            keyword=keyword,
+            industry=industry,
+            industry_2=industry_2,
+            experience=experience,
+            education=education,
+            days=days,
+        )
+    except ValueError as exc:
+        raise AppException(
+            status_code=StatusCode.BAD_REQUEST,
+            code=StatusCode.BUSINESS_ERROR,
+            message=str(exc),
+        )
+    except Exception as exc:
+        logger.error(f"City comparison analysis failed: {exc}", exc_info=True)
+        raise AppException(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
+            code=StatusCode.BUSINESS_ERROR,
+            message="City comparison analysis unavailable",
+        )
+
+
+@router.get("/compare/industries", response_model=CompareAnalysisResponse)
+async def get_industry_salary_compare(
+    left_industry_code: int,
+    right_industry_code: int,
+    keyword: str = None,
+    city_code: int = None,
+    experience: str = None,
+    education: str = None,
+    days: int = 30,
+):
+    """行业薪资对比分析。"""
+    try:
+        return await comparison_analysis_service.compare_industries(
+            left_industry_code=left_industry_code,
+            right_industry_code=right_industry_code,
+            keyword=keyword,
+            city_code=city_code,
+            experience=experience,
+            education=education,
+            days=days,
+        )
+    except ValueError as exc:
+        raise AppException(
+            status_code=StatusCode.BAD_REQUEST,
+            code=StatusCode.BUSINESS_ERROR,
+            message=str(exc),
+        )
+    except Exception as exc:
+        logger.error(f"Industry comparison analysis failed: {exc}", exc_info=True)
+        raise AppException(
+            status_code=StatusCode.INTERNAL_SERVER_ERROR,
+            code=StatusCode.BUSINESS_ERROR,
+            message="Industry comparison analysis unavailable",
+        )
 
 
 @router.get("/results", response_model=AnalysisResultList)

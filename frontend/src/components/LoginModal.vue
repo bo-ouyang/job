@@ -9,8 +9,10 @@ const authStore = useAuthStore();
 const activeTab = ref('account'); // 'scan' | 'phone' | 'account'
 const phone = ref('');
 const code = ref('');
-const username = ref('');
-const password = ref('');
+const DEFAULT_USERNAME = 'user123456';
+const DEFAULT_PASSWORD = '123456';
+const username = ref(DEFAULT_USERNAME);
+const password = ref(DEFAULT_PASSWORD);
 const isRegister = ref(false);
 const countdown = ref(0);
 const isLoading = ref(false);
@@ -34,8 +36,8 @@ const close = () => {
 const resetForm = () => {
     phone.value = '';
     code.value = '';
-    username.value = '';
-    password.value = '';
+    username.value = DEFAULT_USERNAME;
+    password.value = DEFAULT_PASSWORD;
     isRegister.value = false;
     errorMsg.value = '';
     debugCode.value = '';

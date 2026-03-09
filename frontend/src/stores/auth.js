@@ -3,6 +3,16 @@ import { ref, computed } from "vue";
 import { authAPI } from "@/api/auth";
 import router from "@/router";
 
+const WALLET_PENDING_ORDER_KEY = "wallet_pending_order_no";
+
+const clearWalletPendingOrders = () => {
+  Object.keys(localStorage).forEach((key) => {
+    if (key === WALLET_PENDING_ORDER_KEY || key.startsWith(`${WALLET_PENDING_ORDER_KEY}:`)) {
+      localStorage.removeItem(key);
+    }
+  });
+};
+
 export const useAuthStore = defineStore("auth", () => {
   // State
   const user = ref(JSON.parse(localStorage.getItem("user")) || null);
@@ -79,6 +89,7 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = data.token.access_token;
     refreshToken.value = data.token.refresh_token;
     user.value = data.user;
+    clearWalletPendingOrders();
 
     // Persist to localStorage
     localStorage.setItem("token", token.value);
@@ -100,6 +111,7 @@ export const useAuthStore = defineStore("auth", () => {
       localStorage.removeItem("user");
       // Explicitly clear AI Task persisted state
       localStorage.removeItem("aiTask");
+      clearWalletPendingOrders();
       try {
         const aiTaskStore = (await import("@/stores/aiTask")).useAiTaskStore();
         aiTaskStore.$reset();

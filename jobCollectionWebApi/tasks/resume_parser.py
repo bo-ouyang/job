@@ -76,6 +76,38 @@ def _enqueue_ai_task_message(
         )
 
 
+def _save_resume_message(
+    *,
+    user_id: int,
+    celery_task_id: str,
+    status: str,
+    execution_time: float = None,
+    error_message: str = None,
+):
+    loop = _get_event_loop()
+    try:
+        try:
+            from jobCollectionWebApi.tasks.notification_tasks import save_ai_task_message
+        except Exception:
+            from tasks.notification_tasks import save_ai_task_message
+
+        return loop.run_until_complete(
+            save_ai_task_message(
+                user_id=user_id,
+                feature_key="resume_parse",
+                celery_task_id=celery_task_id,
+                status=status,
+                execution_time=execution_time,
+                error_message=error_message,
+            )
+        )
+    except Exception as exc:
+        logger.error(
+            f"save resume message failed: user_id={user_id}, task_id={celery_task_id}, status={status}, err={exc}"
+        )
+        return None
+
+
 async def _extract_text_from_pdf(file_path: str) -> str:
     text = ""
     try:
@@ -112,6 +144,7 @@ async def _parse_resume_logic(user_id: int, file_path: str) -> str:
 
 def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started_at: float):
     from crud import ai_task as crud_ai_task
+
     loop = _get_event_loop()
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
@@ -128,36 +161,59 @@ def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started
     except Exception as exc:
         logger.error(f"resume mark_completed failed: {exc}")
 
-    # Prometheus
     try:
         from core.metrics import ai_task_completed, ai_task_duration
+
         ai_task_completed.labels(feature="resume_parse").inc()
         if execution_time is not None:
             ai_task_duration.labels(feature="resume_parse").observe(execution_time)
     except Exception:
         pass
 
-    message_text = "您的简历解析已完成"
-
-    # 统一 WS 通知
-    _publish_ws(user_id, "ai_task_completed", {
-        "task_id": celery_task_id,
-        "feature_key": "resume_parse",
-        "status": "completed",
-        "execution_time": execution_time,
-        "message": message_text,
-        "message_id": None,
-    })
-    _enqueue_ai_task_message(
+    message_record = _save_resume_message(
         user_id=user_id,
         celery_task_id=celery_task_id,
         status="completed",
         execution_time=execution_time,
     )
+    if not message_record:
+        _enqueue_ai_task_message(
+            user_id=user_id,
+            celery_task_id=celery_task_id,
+            status="completed",
+            execution_time=execution_time,
+        )
+        message_text = "Your resume parsing task has completed"
+        message_id = None
+    else:
+        message_text = message_record["content"]
+        message_id = message_record["message_id"]
+        _publish_ws(
+            user_id,
+            "new_message",
+            {
+                "message_id": message_id,
+                "title": message_record["title"],
+                "content": message_record["content"],
+            },
+        )
 
+    _publish_ws(
+        user_id,
+        "ai_task_completed",
+        {
+            "task_id": celery_task_id,
+            "feature_key": "resume_parse",
+            "status": "completed",
+            "execution_time": execution_time,
+            "message": message_text,
+            "message_id": message_id,
+        },
+    )
 
 def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_at: float):
     from crud import ai_task as crud_ai_task
+
     loop = _get_event_loop()
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
@@ -174,34 +230,57 @@ def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_
     except Exception as exc:
         logger.error(f"resume mark_failed failed: {exc}")
 
-    # Prometheus
     try:
         from core.metrics import ai_task_failed, ai_task_duration
+
         ai_task_failed.labels(feature="resume_parse").inc()
         if execution_time is not None:
             ai_task_duration.labels(feature="resume_parse").observe(execution_time)
     except Exception:
         pass
 
-    message_text = "您的简历解析失败"
-
-    # 统一 WS 通知
-    _publish_ws(user_id, "ai_task_failed", {
-        "task_id": celery_task_id,
-        "feature_key": "resume_parse",
-        "status": "failed",
-        "error": error_message,
-        "message": message_text,
-        "message_id": None,
-    })
-    _enqueue_ai_task_message(
+    message_record = _save_resume_message(
         user_id=user_id,
         celery_task_id=celery_task_id,
         status="failed",
         execution_time=execution_time,
         error_message=error_message,
     )
+    if not message_record:
+        _enqueue_ai_task_message(
+            user_id=user_id,
+            celery_task_id=celery_task_id,
+            status="failed",
+            execution_time=execution_time,
+            error_message=error_message,
+        )
+        message_text = "Your resume parsing task has failed"
+        message_id = None
+    else:
+        message_text = message_record["content"]
+        message_id = message_record["message_id"]
+        _publish_ws(
+            user_id,
+            "new_message",
+            {
+                "message_id": message_id,
+                "title": message_record["title"],
+                "content": message_record["content"],
+            },
+        )
 
+    _publish_ws(
+        user_id,
+        "ai_task_failed",
+        {
+            "task_id": celery_task_id,
+            "feature_key": "resume_parse",
+            "status": "failed",
+            "error": error_message,
+            "message": message_text,
+            "message_id": message_id,
+        },
+    )
 
 @celery_app.task(
     bind=True,

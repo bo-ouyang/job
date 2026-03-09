@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 import router from "@/router";
 
 const service = axios.create({
@@ -8,6 +8,7 @@ const service = axios.create({
 
 let isRefreshing = false;
 let refreshSubscribers = [];
+const WALLET_PENDING_ORDER_KEY = "wallet_pending_order_no";
 
 const subscribeTokenRefresh = (cb) => {
   refreshSubscribers.push(cb);
@@ -16,6 +17,41 @@ const subscribeTokenRefresh = (cb) => {
 const onRefreshed = (token) => {
   refreshSubscribers.map((cb) => cb(token));
   refreshSubscribers = [];
+};
+
+const extractErrorMessage = (response) => {
+  if (!response) return "";
+  const data = response.data || {};
+  return String(data.detail || data.msg || data.message || "").trim();
+};
+
+const isAuthForbidden = (response) => {
+  const token = localStorage.getItem("token");
+  const message = extractErrorMessage(response).toLowerCase();
+
+  if (!token) {
+    return true;
+  }
+
+  return [
+    "not authenticated",
+    "could not validate credentials",
+    "credentials",
+    "token",
+    "bearer",
+    "login required",
+    "请先登录",
+    "无法验证凭据",
+    "未登录",
+  ].some((keyword) => message.includes(keyword));
+};
+
+const clearWalletPendingOrders = () => {
+  Object.keys(localStorage).forEach((key) => {
+    if (key === WALLET_PENDING_ORDER_KEY || key.startsWith(`${WALLET_PENDING_ORDER_KEY}:`)) {
+      localStorage.removeItem(key);
+    }
+  });
 };
 
 // Request interceptor
@@ -112,10 +148,11 @@ service.interceptors.response.use(
       });
     }
 
-    // Handle 403 Forbidden (Usually means user is not logged in but tries to access protected resource)
+    // 403 不一定表示未登录，也可能是权限不足或安全策略拦截。
     if (response && response.status === 403) {
-      if (window.location.pathname !== "/login") {
-        import("element-plus")
+      const detail = extractErrorMessage(response) || "当前请求被拒绝";
+      if (isAuthForbidden(response) && window.location.pathname !== "/login") {
+        import("element-plus/es/components/message/index.mjs")
           .then(({ ElMessage }) => {
             ElMessage.warning("请先登录后使用此功能");
           })
@@ -123,13 +160,20 @@ service.interceptors.response.use(
             alert("请先登录后使用此功能");
           });
 
-        // Small delay to let the user see the message before redirect
         setTimeout(() => {
           router.push({
             path: "/login",
             query: { redirect: window.location.pathname },
           });
         }, 1000);
+      } else {
+        import("element-plus/es/components/message/index.mjs")
+          .then(({ ElMessage }) => {
+            ElMessage.error(detail);
+          })
+          .catch(() => {
+            alert(detail);
+          });
       }
     }
 
@@ -153,6 +197,7 @@ async function handleLogout() {
   localStorage.removeItem("token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("user");
+  clearWalletPendingOrders();
 
   // Clear persistent AI Task store
   try {
@@ -176,3 +221,4 @@ async function handleLogout() {
 }
 
 export default service;
+

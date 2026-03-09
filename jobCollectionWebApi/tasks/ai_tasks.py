@@ -91,6 +91,42 @@ def _enqueue_ai_task_message(
         )
 
 
+def _save_ai_task_message(
+    *,
+    user_id: int,
+    feature_key: str,
+    celery_task_id: str,
+    status: str,
+    execution_time: float = None,
+    error_message: str = None,
+):
+    """Persist message synchronously in the current worker for reliability."""
+    loop = _get_event_loop()
+    try:
+        try:
+            from jobCollectionWebApi.tasks.notification_tasks import save_ai_task_message
+        except Exception:
+            from tasks.notification_tasks import save_ai_task_message
+
+        return loop.run_until_complete(
+            save_ai_task_message(
+                user_id=user_id,
+                feature_key=feature_key,
+                celery_task_id=celery_task_id,
+                status=status,
+                execution_time=execution_time,
+                error_message=error_message,
+            )
+        )
+    except Exception as exc:
+        logger.error(
+            "save ai message failed: "
+            f"user_id={user_id}, feature={feature_key}, task_id={celery_task_id}, "
+            f"status={status}, err={exc}"
+        )
+        return None
+
+
 def _load_task_payload(celery_task_id: str) -> dict:
     """Load optional large payload from Redis pointer."""
     from crud import ai_task as crud_ai_task
@@ -112,8 +148,9 @@ def _mark_task_completed(
     started_at: float,
     request_params: dict = None,
 ):
-    """同步包装：在 Celery worker 中调用 async mark_completed + 去重缓存 + 指标"""
+    """Persist final task state, cache dedup and notify the user."""
     from crud import ai_task as crud_ai_task
+
     loop = _get_event_loop()
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
@@ -130,7 +167,6 @@ def _mark_task_completed(
     except Exception as exc:
         logger.error(f"mark_completed callback failed: {exc}")
 
-    # 去重缓存
     try:
         loop.run_until_complete(
             crud_ai_task.set_dedup_cache(feature_key, request_params, celery_task_id)
@@ -138,34 +174,57 @@ def _mark_task_completed(
     except Exception as exc:
         logger.warning(f"set_dedup_cache failed: {exc}")
 
-    # Prometheus 指标
     try:
         from core.metrics import ai_task_completed, ai_task_duration
+
         ai_task_completed.labels(feature=feature_key).inc()
         if execution_time is not None:
             ai_task_duration.labels(feature=feature_key).observe(execution_time)
     except Exception:
         pass
 
-    message_text = f"您的{_feature_display(feature_key)}已完成"
-
-    # 统一 WS 通知: ai_task_completed
-    _publish_result(user_id, "ai_task_completed", {
-        "task_id": celery_task_id,
-        "feature_key": feature_key,
-        "status": "completed",
-        "execution_time": execution_time,
-        "message": message_text,
-        "message_id": None,
-    })
-    _enqueue_ai_task_message(
+    message_record = _save_ai_task_message(
         user_id=user_id,
         feature_key=feature_key,
         celery_task_id=celery_task_id,
         status="completed",
         execution_time=execution_time,
     )
+    if not message_record:
+        _enqueue_ai_task_message(
+            user_id=user_id,
+            feature_key=feature_key,
+            celery_task_id=celery_task_id,
+            status="completed",
+            execution_time=execution_time,
+        )
+        message_text = f"Your {_feature_display(feature_key)} task has completed"
+        message_id = None
+    else:
+        message_text = message_record["content"]
+        message_id = message_record["message_id"]
+        _publish_result(
+            user_id,
+            "new_message",
+            {
+                "message_id": message_id,
+                "title": message_record["title"],
+                "content": message_record["content"],
+            },
+        )
 
+    _publish_result(
+        user_id,
+        "ai_task_completed",
+        {
+            "task_id": celery_task_id,
+            "feature_key": feature_key,
+            "status": "completed",
+            "execution_time": execution_time,
+            "message": message_text,
+            "message_id": message_id,
+        },
+    )
 
 def _mark_task_failed(
     user_id: int,
@@ -174,8 +233,9 @@ def _mark_task_failed(
     error_message: str,
     started_at: float,
 ):
-    """同步包装：在 Celery worker 中调用 async mark_failed + 指标"""
+    """Persist failed task state and notify the user."""
     from crud import ai_task as crud_ai_task
+
     loop = _get_event_loop()
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
@@ -192,27 +252,16 @@ def _mark_task_failed(
     except Exception as exc:
         logger.error(f"mark_failed callback failed: {exc}")
 
-    # Prometheus 指标
     try:
         from core.metrics import ai_task_failed, ai_task_duration
+
         ai_task_failed.labels(feature=feature_key).inc()
         if execution_time is not None:
             ai_task_duration.labels(feature=feature_key).observe(execution_time)
     except Exception:
         pass
 
-    message_text = f"您的{_feature_display(feature_key)}处理失败"
-
-    # 统一 WS 通知: ai_task_failed
-    _publish_result(user_id, "ai_task_failed", {
-        "task_id": celery_task_id,
-        "feature_key": feature_key,
-        "status": "failed",
-        "error": error_message,
-        "message": message_text,
-        "message_id": None,
-    })
-    _enqueue_ai_task_message(
+    message_record = _save_ai_task_message(
         user_id=user_id,
         feature_key=feature_key,
         celery_task_id=celery_task_id,
@@ -220,16 +269,50 @@ def _mark_task_failed(
         execution_time=execution_time,
         error_message=error_message,
     )
+    if not message_record:
+        _enqueue_ai_task_message(
+            user_id=user_id,
+            feature_key=feature_key,
+            celery_task_id=celery_task_id,
+            status="failed",
+            execution_time=execution_time,
+            error_message=error_message,
+        )
+        message_text = f"Your {_feature_display(feature_key)} task has failed"
+        message_id = None
+    else:
+        message_text = message_record["content"]
+        message_id = message_record["message_id"]
+        _publish_result(
+            user_id,
+            "new_message",
+            {
+                "message_id": message_id,
+                "title": message_record["title"],
+                "content": message_record["content"],
+            },
+        )
 
+    _publish_result(
+        user_id,
+        "ai_task_failed",
+        {
+            "task_id": celery_task_id,
+            "feature_key": feature_key,
+            "status": "failed",
+            "error": error_message,
+            "message": message_text,
+            "message_id": message_id,
+        },
+    )
 
 def _feature_display(feature_key: str) -> str:
-    """功能名称中文映射"""
+    """Feature display name."""
     return {
-        "career_advice": "AI职业建议",
-        "career_compass": "职业罗盘分析",
-        "resume_parse": "简历解析",
-    }.get(feature_key, "AI任务")
-
+        "career_advice": "AI career advice",
+        "career_compass": "career compass",
+        "resume_parse": "resume parsing",
+    }.get(feature_key, "AI task")
 
 # ═══════════════════════════════════════════════════
 # Task 1: Career Advice

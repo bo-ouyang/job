@@ -133,3 +133,48 @@ class TaskLogInDB(TaskLogBase, TimestampSchema):
     id: int
     class Config:
         from_attributes = True
+
+
+class CompareBucketItem(BaseModel):
+    name: str
+    value: float | int
+
+
+class CompareTrendItem(BaseModel):
+    date: str
+    value: int
+
+
+class CompareOverview(BaseModel):
+    sample_size: int = 0
+    salary_avg: float = 0
+    salary_median: float = 0
+    salary_p25: float = 0
+    salary_p75: float = 0
+    high_salary_ratio: float = 0
+    job_count_30d: int = 0
+
+
+class CompareSideResult(BaseModel):
+    id: int
+    name: str
+    overview: CompareOverview
+    salary_distribution: List[CompareBucketItem] = []
+    trend: List[CompareTrendItem] = []
+    education_distribution: List[CompareBucketItem] = []
+    experience_distribution: List[CompareBucketItem] = []
+    top_skills: List[CompareBucketItem] = []
+
+
+class CompareSummary(BaseModel):
+    winner_dimension: Optional[str] = None
+    salary_gap: float = 0
+    sample_gap: int = 0
+    insight: str = ""
+
+
+class CompareAnalysisResponse(BaseModel):
+    dimension: str
+    left: CompareSideResult
+    right: CompareSideResult
+    summary: CompareSummary

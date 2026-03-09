@@ -1,7 +1,7 @@
-<script setup>
+﻿<script setup>
 import { onMounted, onUnmounted, ref } from "vue";
 import { RouterLink, RouterView } from "vue-router";
-import { ElNotification } from "element-plus";
+import ElNotification from "element-plus/es/components/notification/index.mjs";
 
 import LoginModal from "@/components/LoginModal.vue";
 import AiTaskPanel from "@/components/AiTaskPanel.vue";
@@ -128,8 +128,10 @@ onUnmounted(() => {
 
           <div class="links">
             <RouterLink to="/">首页</RouterLink>
-            <RouterLink to="/career-compass">职业导航罗盘</RouterLink>
+            <RouterLink to="/career-compass">职业罗盘</RouterLink>
             <RouterLink to="/major-analysis">专业分析</RouterLink>
+            <RouterLink to="/compare/cities">城市对比</RouterLink>
+            <RouterLink to="/compare/industries">行业对比</RouterLink>
             <RouterLink to="/jobs">职位市场</RouterLink>
             <RouterLink to="/companies">公司列表</RouterLink>
           </div>
@@ -304,3 +306,5 @@ main {
   opacity: 0;
 }
 </style>
+
+

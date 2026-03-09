@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory } from "vue-router";
-import BasicLayout from "@/layout/BasicLayout.vue";
-import InsightsHub from "@/views/InsightsHub.vue";
-import JobMarket from "@/views/JobMarket.vue";
-import CompanyList from "@/views/CompanyList.vue";
-import JobDetail from "@/views/JobDetail.vue";
-import CompanyDetail from "@/views/CompanyDetail.vue";
+const BasicLayout = () => import("@/layout/BasicLayout.vue");
+const InsightsHub = () => import("@/views/InsightsHub.vue");
+const JobMarket = () => import("@/views/JobMarket.vue");
+const CompanyList = () => import("@/views/CompanyList.vue");
+const JobDetail = () => import("@/views/JobDetail.vue");
+const CompanyDetail = () => import("@/views/CompanyDetail.vue");
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -47,6 +47,16 @@ const router = createRouter({
           path: "career-compass",
           name: "career-compass",
           component: () => import("@/views/CareerCompass.vue"),
+        },
+        {
+          path: "compare/cities",
+          name: "compare-cities",
+          component: () => import("@/views/CitySalaryCompareView.vue"),
+        },
+        {
+          path: "compare/industries",
+          name: "compare-industries",
+          component: () => import("@/views/IndustrySalaryCompareView.vue"),
         },
         {
           path: "my/resume",

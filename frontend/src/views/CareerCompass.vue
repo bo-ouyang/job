@@ -13,7 +13,7 @@ import { useRoute } from "vue-router";
 import { analysisAPI } from "../api/analysis";
 import { aiAPI } from "../api/ai";
 import { useAiTaskStore } from "@/stores/aiTask";
-import { ElMessage } from "element-plus";
+import ElMessage from "element-plus/es/components/message/index.mjs";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import * as echarts from "echarts";

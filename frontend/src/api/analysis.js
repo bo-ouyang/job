@@ -48,4 +48,12 @@ export const analysisAPI = {
       params: { major_name: majorName },
     });
   },
+
+  getCitySalaryCompare(params) {
+    return api.get("/analysis/compare/cities", { params });
+  },
+
+  getIndustrySalaryCompare(params) {
+    return api.get("/analysis/compare/industries", { params });
+  },
 };

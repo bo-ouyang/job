@@ -1,10 +1,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { ElMessage } from "element-plus";
+import ElMessage from "element-plus/es/components/message/index.mjs";
 import { walletAPI } from "@/api/wallet";
+import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
+const authStore = useAuthStore();
 const PENDING_ORDER_KEY = "wallet_pending_order_no";
 
 const loadingBalance = ref(false);
@@ -38,6 +40,37 @@ const orderPageSize = ref(10);
 const orderStatusFilter = ref("");
 
 let checkInterval = null;
+
+const getPendingOrderKey = () => {
+  const userId = authStore.user?.id;
+  return userId ? `${PENDING_ORDER_KEY}:${userId}` : PENDING_ORDER_KEY;
+};
+
+const setPendingOrder = (orderNo) => {
+  if (!orderNo) return;
+  localStorage.setItem(getPendingOrderKey(), orderNo);
+  // Clear the legacy shared key to avoid reusing another user's old order.
+  localStorage.removeItem(PENDING_ORDER_KEY);
+};
+
+const getPendingOrder = () =>
+  localStorage.getItem(getPendingOrderKey()) || localStorage.getItem(PENDING_ORDER_KEY);
+
+const clearPendingOrder = () => {
+  localStorage.removeItem(getPendingOrderKey());
+  localStorage.removeItem(PENDING_ORDER_KEY);
+};
+
+const isNotAuthorizedOrderError = (error) => {
+  const detail = String(
+    error?.response?.data?.detail ||
+      error?.response?.data?.msg ||
+      error?.message ||
+      "",
+  ).toLowerCase();
+
+  return error?.response?.status === 403 && detail.includes("not authorized");
+};
 
 const qrPreviewUrl = computed(() =>
   paymentQrCodeUrl.value
@@ -131,7 +164,7 @@ const markPaidAndRefresh = async (successMsg = "Top-up successful") => {
   paymentStatus.value = "paid";
   paymentFailureReason.value = "";
   stopPolling();
-  localStorage.removeItem(PENDING_ORDER_KEY);
+  clearPendingOrder();
   await Promise.all([fetchBalance(), fetchTransactions(1), fetchMyOrders(1)]);
   ElMessage.success(successMsg);
 };
@@ -152,11 +185,15 @@ const startPollingStatus = (orderNo) => {
         paymentStatus.value = data.status;
         paymentFailureReason.value = data.failure_reason || "Order not paid";
         stopPolling();
-        localStorage.removeItem(PENDING_ORDER_KEY);
+        clearPendingOrder();
         await fetchMyOrders(1);
         ElMessage.warning(paymentFailureReason.value);
       }
     } catch (error) {
+      if (isNotAuthorizedOrderError(error)) {
+        stopPolling();
+        clearPendingOrder();
+      }
       // keep polling on transient network errors
     }
   }, 3000);
@@ -181,7 +218,7 @@ const handleTopUp = async () => {
     const data = res.data || {};
     if (data.order_no) {
       paymentOrderNo.value = data.order_no;
-      localStorage.setItem(PENDING_ORDER_KEY, data.order_no);
+      setPendingOrder(data.order_no);
     }
 
     if (data.status === "failed") {
@@ -245,8 +282,7 @@ const closePaymentModal = () => {
 const handleReturnFromGateway = async () => {
   const orderNoFromQuery = route.query.out_trade_no;
   const orderNo =
-    (typeof orderNoFromQuery === "string" && orderNoFromQuery) ||
-    localStorage.getItem(PENDING_ORDER_KEY);
+    (typeof orderNoFromQuery === "string" && orderNoFromQuery) || getPendingOrder();
   if (!orderNo) return;
 
   paymentOrderNo.value = orderNo;
@@ -262,10 +298,15 @@ const handleReturnFromGateway = async () => {
     }
     if (data.status === "failed" || data.status === "expired") {
       paymentFailureReason.value = data.failure_reason || "Order not paid";
-      localStorage.removeItem(PENDING_ORDER_KEY);
+      clearPendingOrder();
       ElMessage.warning(paymentFailureReason.value);
     }
   } catch (error) {
+    if (isNotAuthorizedOrderError(error)) {
+      clearPendingOrder();
+      paymentFailureReason.value = "";
+      return;
+    }
     // ignore and allow manual refresh
   }
 };

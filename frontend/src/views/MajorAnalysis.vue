@@ -2,10 +2,28 @@
 defineOptions({ name: "MajorAnalysis" });
 import { onMounted, onActivated, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { BarChart, PieChart } from "echarts/charts";
+import {
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import { analysisAPI } from "@/api/analysis";
 import { useAiTaskStore } from "@/stores/aiTask";
 import { aiAPI } from "@/api/ai";
+
+echarts.use([
+  BarChart,
+  PieChart,
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 const chartContainer = ref(null);
 const salaryChartContainer = ref(null);

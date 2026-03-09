@@ -1,8 +1,8 @@
 """
 Background notification tasks.
 
-These tasks run in the batch queue and persist system messages without
-blocking realtime AI task completion.
+These tasks persist AI completion and failure messages for the message center.
+They can run directly inside a worker or be dispatched to the batch queue.
 """
 
 import asyncio
@@ -25,13 +25,33 @@ def _get_event_loop():
 
 def _feature_display(feature_key: str) -> str:
     return {
-        "career_advice": "AI职业建议",
-        "career_compass": "职业罗盘分析",
-        "resume_parse": "简历解析",
-    }.get(feature_key, "AI任务")
+        "career_advice": "AI career advice",
+        "career_compass": "career compass",
+        "resume_parse": "resume parsing",
+    }.get(feature_key, "AI task")
 
 
-async def _persist_ai_task_message(
+def build_ai_task_message_content(
+    *,
+    feature_key: str,
+    status: str,
+    execution_time: float | None = None,
+    error_message: str | None = None,
+) -> tuple[str, str]:
+    feature_name = _feature_display(feature_key)
+    if status == "completed":
+        title = f"{feature_name} completed"
+        if execution_time is not None:
+            content = f"Your {feature_name} task has completed in {execution_time} seconds."
+        else:
+            content = f"Your {feature_name} task has completed."
+    else:
+        title = f"{feature_name} failed"
+        content = f"Your {feature_name} task failed. Reason: {error_message or 'unknown error'}"
+    return title, content
+
+
+async def save_ai_task_message(
     *,
     user_id: int,
     feature_key: str,
@@ -40,22 +60,21 @@ async def _persist_ai_task_message(
     execution_time: float | None = None,
     error_message: str | None = None,
 ):
-    from crud.message import message as crud_message
-    from schemas.message_schema import MessageCreate
-    from common.databases.models.message import MessageType
     from common.databases.PostgresManager import db_manager
+    from common.databases.models.message import MessageType
+    from jobCollectionWebApi.crud.message import message as crud_message
+    from jobCollectionWebApi.schemas.message_schema import MessageCreate
 
-    feature_name = _feature_display(feature_key)
-    if status == "completed":
-        title = f"✅ {feature_name}完成"
-        content = f"您的{feature_name}已完成，耗时 {execution_time}秒。"
-    else:
-        title = f"❌ {feature_name}失败"
-        content = f"您的{feature_name}处理失败。原因: {error_message or '未知错误'}"
+    title, content = build_ai_task_message_content(
+        feature_key=feature_key,
+        status=status,
+        execution_time=execution_time,
+        error_message=error_message,
+    )
 
     session_obj = await db_manager.get_session()
     async with session_obj as db:
-        await crud_message.create(
+        msg = await crud_message.create(
             db,
             obj_in=MessageCreate(
                 title=title,
@@ -66,9 +85,17 @@ async def _persist_ai_task_message(
         )
         await db.commit()
 
+    message_id = getattr(msg, "id", None)
     logger.info(
-        f"ai_task_message_saved user_id={user_id} feature={feature_key} task_id={celery_task_id} status={status}"
+        "ai_task_message_saved "
+        f"user_id={user_id} feature={feature_key} task_id={celery_task_id} "
+        f"status={status} message_id={message_id}"
     )
+    return {
+        "message_id": str(message_id) if message_id is not None else None,
+        "title": title,
+        "content": content,
+    }
 
 
 @shared_task(
@@ -90,7 +117,7 @@ def persist_ai_task_message(
     loop = _get_event_loop()
     try:
         loop.run_until_complete(
-            _persist_ai_task_message(
+            save_ai_task_message(
                 user_id=user_id,
                 feature_key=feature_key,
                 celery_task_id=celery_task_id,
@@ -101,5 +128,7 @@ def persist_ai_task_message(
         )
     except Exception as exc:
         logger.error(
-            f"persist_ai_task_message failed: user_id={user_id}, feature={feature_key}, task_id={celery_task_id}, status={status}, err={exc}"
+            "persist_ai_task_message failed: "
+            f"user_id={user_id}, feature={feature_key}, task_id={celery_task_id}, "
+            f"status={status}, err={exc}"
         )

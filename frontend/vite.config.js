@@ -10,6 +10,30 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    sourcemap: false,
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return;
+          }
+          if (id.includes("echarts") || id.includes("zrender")) {
+            return "vendor-echarts";
+          }
+          if (id.includes("element-plus") || id.includes("@element-plus")) {
+            return "vendor-element-plus";
+          }
+          if (id.includes("vue") || id.includes("pinia") || id.includes("vue-router")) {
+            return "vendor-vue";
+          }
+          return "vendor";
+        },
+      },
+    },
+  },
   server: {
     host: "0.0.0.0", // 允许局域网访问
     port: 8081, // 指定前端端口

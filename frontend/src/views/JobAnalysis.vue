@@ -1,9 +1,27 @@
 <script setup>
 import { onMounted, ref, reactive, watch } from "vue";
 import { useRoute } from "vue-router";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { BarChart, PieChart } from "echarts/charts";
+import {
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import { analysisAPI } from "@/api/analysis";
 import { commonAPI } from "@/api/common";
+
+echarts.use([
+  BarChart,
+  PieChart,
+  GridComponent,
+  LegendComponent,
+  TitleComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 const route = useRoute();
 const chartContainer = ref(null);
