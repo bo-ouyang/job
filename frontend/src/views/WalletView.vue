@@ -500,8 +500,9 @@ onUnmounted(() => {
 .balance-card {
   border-radius: 12px;
   padding: 18px;
-  background: linear-gradient(135deg, #0f172a, #1d4ed8);
-  color: #fff;
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  color: #0f172a;
+  border: 1px solid rgba(96, 165, 250, 0.2);
 }
 
 .title {
@@ -532,10 +533,11 @@ onUnmounted(() => {
 }
 
 .panel {
-  background: rgba(15, 23, 42, 0.82);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 
 .panel-head {
@@ -576,9 +578,9 @@ onUnmounted(() => {
 .row input,
 select {
   height: 36px;
-  border: 1px solid #334155;
-  background: #111827;
-  color: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
   border-radius: 8px;
   padding: 0 10px;
 }
@@ -604,7 +606,7 @@ select {
 .ghost {
   height: 36px;
   border-radius: 8px;
-  border: 1px solid #334155;
+  border: 1px solid #cbd5e1;
   padding: 0 12px;
   cursor: pointer;
 }
@@ -627,8 +629,8 @@ select {
 }
 
 .ghost {
-  background: #111827;
-  color: #e2e8f0;
+  background: #fff;
+  color: #0f172a;
 }
 
 .table {
@@ -668,7 +670,7 @@ select {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(15, 23, 42, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -677,11 +679,12 @@ select {
 
 .modal-content {
   width: 320px;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
   border-radius: 12px;
   padding: 16px;
   text-align: center;
+  color: #0f172a;
 }
 
 .qr-image {

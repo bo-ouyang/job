@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as echarts from "echarts/core";
@@ -69,8 +69,8 @@ const pageTitle = computed(() =>
 );
 const pageDesc = computed(() =>
   props.mode === "city"
-    ? "同一岗位在不同城市的薪资、岗位量和技能结构对比"
-    : "同一岗位在不同行业的薪资、岗位量和门槛结构对比",
+    ? "对比同一岗位在不同城市的薪资、岗位量和技能结构。"
+    : "对比同一岗位在不同行业的薪资、岗位量和门槛结构。",
 );
 const leftLabel = computed(() => (props.mode === "city" ? "左侧城市" : "左侧行业"));
 const rightLabel = computed(() => (props.mode === "city" ? "右侧城市" : "右侧行业"));
@@ -247,24 +247,24 @@ function renderSalaryChart() {
   const labels = leftBuckets.map((item) => item.name);
 
   salaryChart.setOption({
-    title: { text: "薪资分布对比", left: "center", textStyle: { color: "#f8fafc" } },
+    title: { text: "薪资分布对比", left: "center", textStyle: { color: "#0f172a" } },
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     legend: {
       top: 28,
-      textStyle: { color: "#cbd5e1" },
+      textStyle: { color: "#475569" },
       data: [compareData.value.left.name, compareData.value.right.name],
     },
     grid: { top: 80, left: 50, right: 24, bottom: 36 },
     xAxis: {
       type: "category",
       data: labels,
-      axisLabel: { color: "#94a3b8" },
-      axisLine: { lineStyle: { color: "rgba(148,163,184,0.35)" } },
+      axisLabel: { color: "#64748b" },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.28)" } },
     },
     yAxis: {
       type: "value",
-      axisLabel: { color: "#94a3b8" },
-      splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
+      axisLabel: { color: "#64748b" },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.16)" } },
     },
     series: [
       {
@@ -292,24 +292,24 @@ function renderTrendChart() {
   const labels = leftTrend.map((item) => item.date);
 
   trendChart.setOption({
-    title: { text: "岗位数量趋势", left: "center", textStyle: { color: "#f8fafc" } },
+    title: { text: "岗位数量趋势", left: "center", textStyle: { color: "#0f172a" } },
     tooltip: { trigger: "axis" },
     legend: {
       top: 28,
-      textStyle: { color: "#cbd5e1" },
+      textStyle: { color: "#475569" },
       data: [compareData.value.left.name, compareData.value.right.name],
     },
     grid: { top: 80, left: 50, right: 24, bottom: 36 },
     xAxis: {
       type: "category",
       data: labels,
-      axisLabel: { color: "#94a3b8" },
-      axisLine: { lineStyle: { color: "rgba(148,163,184,0.35)" } },
+      axisLabel: { color: "#64748b" },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.28)" } },
     },
     yAxis: {
       type: "value",
-      axisLabel: { color: "#94a3b8" },
-      splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
+      axisLabel: { color: "#64748b" },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.16)" } },
     },
     series: [
       {
@@ -343,24 +343,24 @@ function renderSkillsChart() {
   const rightMap = new Map(rightSkills.map((item) => [item.name, item.value]));
 
   skillsChart.setOption({
-    title: { text: "热门技能对比", left: "center", textStyle: { color: "#f8fafc" } },
+    title: { text: "热门技能对比", left: "center", textStyle: { color: "#0f172a" } },
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     legend: {
       top: 28,
-      textStyle: { color: "#cbd5e1" },
+      textStyle: { color: "#475569" },
       data: [compareData.value.left.name, compareData.value.right.name],
     },
     grid: { top: 80, left: 80, right: 24, bottom: 36 },
     xAxis: {
       type: "value",
-      axisLabel: { color: "#94a3b8" },
-      splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
+      axisLabel: { color: "#64748b" },
+      splitLine: { lineStyle: { color: "rgba(148,163,184,0.16)" } },
     },
     yAxis: {
       type: "category",
       data: labels.reverse(),
-      axisLabel: { color: "#94a3b8" },
-      axisLine: { lineStyle: { color: "rgba(148,163,184,0.35)" } },
+      axisLabel: { color: "#64748b" },
+      axisLine: { lineStyle: { color: "rgba(148,163,184,0.28)" } },
     },
     series: [
       {
@@ -431,7 +431,7 @@ onUnmounted(() => {
     <div class="filters">
       <div class="field wide">
         <label>岗位关键词</label>
-        <input v-model.trim="form.keyword" placeholder="例如：Java后端 / 产品经理 / 数据分析" />
+        <input v-model.trim="form.keyword" placeholder="渚嬪锛欽ava鍚庣 / 浜у搧缁忕悊 / 鏁版嵁鍒嗘瀽" />
       </div>
 
       <div class="field">
@@ -612,7 +612,7 @@ onUnmounted(() => {
 
     <div v-else-if="!loading" class="empty-state">
       <h3>先选择两个{{ props.mode === "city" ? "城市" : "行业" }}再开始对比</h3>
-      <p>第一版会重点展示薪资、岗位量与技能差异，适合做求职决策展示。</p>
+      <p>第一版重点展示薪资、岗位量和技能差异，适合做求职决策展示。</p>
     </div>
   </section>
 </template>
@@ -644,12 +644,12 @@ onUnmounted(() => {
 .hero h1 {
   margin: 0;
   font-size: 2.8rem;
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 .desc {
   margin: 0.6rem 0 0;
-  color: #94a3b8;
+  color: #64748b;
   max-width: 620px;
 }
 
@@ -664,12 +664,12 @@ onUnmounted(() => {
 .summary-label {
   display: block;
   font-size: 0.8rem;
-  color: #cbd5e1;
+  color: #334155;
   margin-bottom: 0.4rem;
 }
 
 .summary-card strong {
-  color: #f8fafc;
+  color: #0f172a;
   line-height: 1.6;
 }
 
@@ -679,8 +679,8 @@ onUnmounted(() => {
   gap: 1rem;
   padding: 1.2rem;
   border-radius: 20px;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   margin-bottom: 1.5rem;
 }
 
@@ -696,7 +696,7 @@ onUnmounted(() => {
 
 .field label {
   font-size: 0.86rem;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .field input,
@@ -704,8 +704,8 @@ onUnmounted(() => {
   height: 42px;
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.85);
-  color: #f8fafc;
+  background: #ffffff;
+  color: #0f172a;
   padding: 0 0.95rem;
   outline: none;
 }
@@ -740,8 +740,8 @@ onUnmounted(() => {
 
 .side-panel,
 .dist-card {
-  background: rgba(15, 23, 42, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 20px;
   padding: 1.1rem;
 }
@@ -756,11 +756,11 @@ onUnmounted(() => {
 .panel-head h2,
 .dist-card h3 {
   margin: 0;
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 .panel-head span {
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.85rem;
 }
 
@@ -771,21 +771,21 @@ onUnmounted(() => {
 }
 
 .metric-card {
-  background: rgba(30, 41, 59, 0.7);
+  background: #f8fbff;
   border-radius: 16px;
   padding: 0.95rem 1rem;
 }
 
 .metric-card span {
   display: block;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.82rem;
 }
 
 .metric-card strong {
   display: block;
   margin-top: 0.35rem;
-  color: #f8fafc;
+  color: #0f172a;
   font-size: 1.3rem;
 }
 
@@ -798,8 +798,8 @@ onUnmounted(() => {
 
 .chart-card {
   height: 360px;
-  background: rgba(15, 23, 42, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 20px;
   padding: 0.5rem;
 }
@@ -824,7 +824,7 @@ onUnmounted(() => {
 .dist-columns strong {
   display: block;
   margin-bottom: 0.75rem;
-  color: #e2e8f0;
+  color: #0f172a;
 }
 
 .dist-columns ul {
@@ -840,11 +840,11 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  color: #cbd5e1;
+  color: #334155;
 }
 
 .empty-state {
-  background: rgba(15, 23, 42, 0.62);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px dashed rgba(148, 163, 184, 0.25);
   border-radius: 20px;
   padding: 2rem;
@@ -853,12 +853,12 @@ onUnmounted(() => {
 
 .empty-state h3 {
   margin: 0;
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 .empty-state p {
   margin: 0.6rem 0 0;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 @media (max-width: 1024px) {
@@ -895,3 +895,4 @@ onUnmounted(() => {
   }
 }
 </style>
+

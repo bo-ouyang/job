@@ -79,8 +79,8 @@ SCRIPT_FILE = curdir+'//static//script//'
 
 
 to_day = datetime.datetime.now()
-LOG_LEVEL = 'INFO'
-#LOG_LEVEL = 'DEBUG'
+#LOG_LEVEL = 'INFO'
+LOG_LEVEL = 'DEBUG'
 LOG_FILE_PATH = '{}/static/log/scrapy-{} {} {}.log'.format(curdir,to_day.year,to_day.month,to_day.day)
 LOG_FILE  = LOG_FILE_PATH
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"

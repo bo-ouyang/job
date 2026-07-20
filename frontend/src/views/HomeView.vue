@@ -219,25 +219,25 @@ onMounted(() => {
 }
 
 .pulse-item {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
   padding: 0.85rem 1rem;
   background:
-    linear-gradient(120deg, rgba(34, 211, 238, 0.08), rgba(99, 102, 241, 0.08)),
-    rgba(15, 23, 42, 0.5);
+    linear-gradient(120deg, rgba(34, 211, 238, 0.12), rgba(99, 102, 241, 0.1)),
+    rgba(255, 255, 255, 0.88);
 }
 
 .pulse-item span {
   display: block;
   font-size: 0.8rem;
-  color: rgba(203, 213, 225, 0.85);
+  color: #64748b;
 }
 
 .pulse-item strong {
   display: block;
   margin-top: 0.35rem;
   font-size: 1.05rem;
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 .snapshot {
@@ -274,9 +274,9 @@ onMounted(() => {
   line-height: 1;
   padding: 0.4rem 0.6rem;
   border-radius: 999px;
-  color: #dbeafe;
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.22);
 }
 
 .snapshot-grid {
@@ -287,7 +287,7 @@ onMounted(() => {
 
 .snapshot-card {
   background: var(--color-card-bg);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: var(--radius-md);
   padding: 1rem 1.1rem;
 }
@@ -302,7 +302,7 @@ onMounted(() => {
   margin-top: 0.4rem;
   display: block;
   font-size: 1.55rem;
-  color: #f8fafc;
+  color: #0f172a;
   line-height: 1.1;
 }
 
@@ -315,7 +315,7 @@ onMounted(() => {
 
 .insight-panel {
   background: var(--color-card-bg);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: var(--radius-md);
   padding: 1rem 1.1rem;
 }
@@ -323,7 +323,7 @@ onMounted(() => {
 .insight-panel h3 {
   margin: 0 0 0.75rem;
   font-size: 1rem;
-  color: #e2e8f0;
+  color: #0f172a;
 }
 
 .insight-panel ul {
@@ -340,7 +340,7 @@ onMounted(() => {
   grid-template-columns: 1fr auto;
   gap: 0.75rem;
   align-items: center;
-  color: #cbd5e1;
+  color: #334155;
 }
 
 .bar-track {
@@ -416,9 +416,9 @@ onMounted(() => {
 }
 
 .ghost-btn {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.82);
   border-radius: 999px;
   padding: 0.55rem 1.1rem;
   cursor: pointer;
@@ -428,7 +428,7 @@ onMounted(() => {
 
 .ghost-btn:hover {
   border-color: rgba(56, 189, 248, 0.75);
-  color: #f8fafc;
+  color: #0369a1;
   transform: translateY(-1px);
 }
 
@@ -476,10 +476,10 @@ onMounted(() => {
   width: 100%;
   margin: 0 auto;
   background: var(--color-glass-bg);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: var(--radius-huge);
   padding: 0.5rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   transition: all var(--transition-normal);
@@ -487,13 +487,13 @@ onMounted(() => {
 
 .search-box:focus-within {
   border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.15), 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12), 0 18px 42px rgba(15, 23, 42, 0.12);
   transform: translateY(-2px);
 }
 
 .search-box.ai-focus:focus-within {
   border-color: rgba(129, 140, 248, 0.6);
-  box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.15), 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.12), 0 18px 42px rgba(15, 23, 42, 0.12);
 }
 
 .search-box input {
@@ -507,7 +507,7 @@ onMounted(() => {
 }
 
 .search-box input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(100, 116, 139, 0.68);
   font-size: 0.95rem;
 }
 
@@ -556,7 +556,7 @@ onMounted(() => {
 
 .feature-card {
   background: var(--color-card-bg);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   padding: 2.5rem 2rem;
   border-radius: var(--radius-lg);
   transition: all var(--transition-normal);
@@ -572,15 +572,15 @@ onMounted(() => {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
   pointer-events: none;
 }
 
 .feature-card:hover {
   transform: translateY(-8px);
   border-color: rgba(14, 165, 233, 0.3);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(14, 165, 233, 0.1);
-  background: hsla(222, 47%, 16%, 0.8);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12), 0 0 20px rgba(14, 165, 233, 0.08);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .icon {

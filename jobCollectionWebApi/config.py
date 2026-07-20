@@ -71,7 +71,6 @@ class Settings(BaseSettings):
     REDIS_CACHE_EXPIRE: int = int(os.getenv('REDIS_CACHE_EXPIRE', 1800))
     REDIS_SESSION_EXPIRE: int = int(os.getenv('REDIS_SESSION_EXPIRE', 1800))
     REDIS_JOB_EXPIRE: int = int(os.getenv('REDIS_JOB_EXPIRE', 86400))
-    REDIS_JOB_EXPIRE: int = int(os.getenv('REDIS_JOB_EXPIRE', 86400))
     REDIS_ANALYSIS_EXPIRE: int = int(os.getenv('REDIS_ANALYSIS_EXPIRE', 7200))
 
     # Elasticsearch 配置

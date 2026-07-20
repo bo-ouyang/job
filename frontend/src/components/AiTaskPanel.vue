@@ -141,7 +141,7 @@ const handleClick = async (task) => {
   bottom: 0;
   left: 0;
   z-index: 2000;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(15, 23, 42, 0.12);
   backdrop-filter: blur(2px);
 }
 
@@ -152,11 +152,11 @@ const handleClick = async (task) => {
   width: 420px;
   max-width: 90vw;
   height: 100vh;
-  background: #0f172a;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: #ffffff;
+  border-left: 1px solid rgba(148, 163, 184, 0.22);
   display: flex;
   flex-direction: column;
-  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.4);
+  box-shadow: -12px 0 36px rgba(15, 23, 42, 0.12);
 }
 
 .panel-header {
@@ -164,14 +164,14 @@ const handleClick = async (task) => {
   justify-content: space-between;
   align-items: center;
   padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(248, 250, 252, 0.96);
 }
 
 .panel-header h3 {
   margin: 0;
   font-size: 1.1rem;
-  color: #f1f5f9;
+  color: #0f172a;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -188,9 +188,9 @@ const handleClick = async (task) => {
 }
 
 .mark-all-btn {
-  background: transparent;
-  border: 1px solid rgba(96, 165, 250, 0.3);
-  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  color: #2563eb;
   padding: 0.3rem 0.75rem;
   border-radius: 6px;
   font-size: 0.8rem;
@@ -206,7 +206,7 @@ const handleClick = async (task) => {
 .close-btn {
   background: transparent;
   border: none;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 1.2rem;
   cursor: pointer;
   padding: 0.25rem;
@@ -215,8 +215,8 @@ const handleClick = async (task) => {
 }
 
 .close-btn:hover {
-  color: #f1f5f9;
-  background: rgba(255, 255, 255, 0.05);
+  color: #0f172a;
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .panel-body {
@@ -228,7 +228,7 @@ const handleClick = async (task) => {
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #64748b;
+  color: #94a3b8;
 }
 
 .empty-icon {
@@ -248,16 +248,16 @@ const handleClick = async (task) => {
   gap: 0.75rem;
   padding: 1rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #f8fbff;
+  border: 1px solid rgba(148, 163, 184, 0.16);
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
 }
 
 .task-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: #ffffff;
+  border-color: rgba(96, 165, 250, 0.24);
 }
 
 .task-item.is-unread {
@@ -285,7 +285,7 @@ const handleClick = async (task) => {
 .task-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #0f172a;
   display: flex;
   align-items: center;
   gap: 0.5rem;

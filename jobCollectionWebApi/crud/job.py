@@ -43,7 +43,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             sync_job_to_es.delay(db_obj.id)
         except Exception as e:
             from core.logger import sys_logger as logger
-            logging.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for update job {db_obj.id}: {e}")
+            logger.getLogger(__name__).warning(f"Failed to dispatch Celery sync task for update job {db_obj.id}: {e}")
         return db_obj
 
     async def remove(self, db: AsyncSession, *, id: int) -> Job:
@@ -57,7 +57,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
                 delete_job_from_es.delay(id)
             except Exception as e:
                 from core.logger import sys_logger as logger
-                logging.getLogger(__name__).warning(f"Failed to dispatch Celery delete task for job {id}: {e}")
+                logger.getLogger(__name__).warning(f"Failed to dispatch Celery delete task for job {id}: {e}")
         return db_obj
 
     async def get_by_source_url(self, db: AsyncSession, source_url: str) -> Optional[Job]:

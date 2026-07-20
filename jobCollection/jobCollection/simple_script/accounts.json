@@ -1,0 +1,30 @@
+[
+  {
+    "name": "boss-main-1",
+    "mobile": "13800138000",
+    "country_code": "+86",
+    "login_mode": "auto_sms",
+    "sms_code_source": "file",
+    "sms_code_file": "D:/Code/job/jobCollection/jobCollection/simple_script/boss_sms_code_account_1.txt",
+    "user_data_dir": "D:/Code/job/jobCollection/jobCollection/simple_script/chrome_isolated_data_list_1",
+    "cookies": null,
+    "sms_code_timeout": 180,
+    "sms_poll_interval": 2,
+    "slider_max_retries": 3,
+    "slider_calibration": 14
+  },
+  {
+    "name": "boss-backup-2",
+    "mobile": "13900139000",
+    "country_code": "+86",
+    "login_mode": "auto_sms",
+    "sms_code_source": "file",
+    "sms_code_file": "D:/Code/job/jobCollection/jobCollection/simple_script/boss_sms_code_account_2.txt",
+    "user_data_dir": "D:/Code/job/jobCollection/jobCollection/simple_script/chrome_isolated_data_list_2",
+    "cookies": null,
+    "sms_code_timeout": 180,
+    "sms_poll_interval": 2,
+    "slider_max_retries": 3,
+    "slider_calibration": 14
+  }
+]

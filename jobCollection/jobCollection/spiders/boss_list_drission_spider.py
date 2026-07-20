@@ -25,6 +25,7 @@ simple_script_dir = os.path.join(os.path.dirname(current_dir), "simple_script")
 if simple_script_dir not in sys.path:
     sys.path.append(simple_script_dir)
 from proxy_manager import proxy_manager
+from .boss_sms_login_handler import BossSmsLoginHandler
 
 
 class BossListDrissionSpider(scrapy.Spider):
@@ -58,11 +59,21 @@ class BossListDrissionSpider(scrapy.Spider):
         crawler.signals.connect(spider.spider_idle, signal=signals.spider_idle)
         return spider
 
-    def __init__(self, task_id: Optional[str] = None, task_url: Optional[str] = None, accounts_json: Optional[str] = None, account_index: str = "1", *args, **kwargs):
+    def __init__(
+        self,
+        task_id: Optional[str] = None,
+        task_url: Optional[str] = None,
+        accounts_json: Optional[str] = None,
+        accounts_file: Optional[str] = None,
+        account_index: str = "1",
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.target_task_id = int(task_id) if task_id else None
         self.target_task_url = task_url
         self.accounts_json = accounts_json
+        self.accounts_file = accounts_file
 
         self.page: Optional[ChromiumPage] = None
         self.is_checking = False
@@ -83,7 +94,13 @@ class BossListDrissionSpider(scrapy.Spider):
             self.accounts.append({
                 "name": f"account-{len(self.accounts) + 1}", 
                 "cookies": None, 
-                "user_data_dir": None
+                "user_data_dir": None,
+                "mobile": None,
+                "country_code": "+86",
+                "login_mode": "manual",
+                "sms_code_source": "file",
+                "sms_code_file": None,
+                "sms_code": None,
             })
 
         # ── 任务状态 ────────────────────────────────────────────────
@@ -520,7 +537,7 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.page.set.load_mode.none()
                 self.logger.info(f"账户 [{account_name}] 已注入 Cookie（{len(cookies) if isinstance(cookies, list) else '?'} 条）")
             except Exception as e:
-                self.logger.warning(f"Cookie 注入失败: {e}")
+                self.logger.info(f"Cookie 注入失败: {e}")
 
         # Step 2：检查登录状态
         await asyncio.sleep(1)
@@ -534,14 +551,38 @@ class BossListDrissionSpider(scrapy.Spider):
 
         if self._is_logged_in():
             self.logger.info(f"✓ 账户 [{account_name}] 已登录，开始抓取")
-            self._block_images()
+            await self._handle_login_success()
             return
 
+        login_handler = BossSmsLoginHandler(
+            page=self.page,
+            logger=self.logger,
+            account=account,
+            account_index=self.account_index,
+            work_dir=simple_script_dir,
+            is_logged_in_cb=self._is_logged_in,
+        )
+        if login_handler.can_auto_login():
+            self.logger.info(f"账户 [{account_name}] 先尝试短信自动登录。")
+            logged_in = await login_handler.login(timeout=self.login_timeout)
+            if logged_in:
+                await self._handle_login_success()
+                return
+            self.logger.info(f"账户 [{account_name}] 自动登录失败，回退手动登录。")
+
         # Step 3：未登录 → 等待手动登录
-        self.logger.warning(f"✗ 账户 [{account_name}] 未登录，打开登录页等待手动操作...")
+        self.logger.info(f"✗ 账户 [{account_name}] 未登录，打开登录页等待手动操作...")
         logged_in = await self._wait_for_manual_login(account_name=account_name)
         if not logged_in:
             self.logger.error(f"账户 [{account_name}] 登录超时，爬虫可能无法抓取数据")
+
+    async def _handle_login_success(self):
+        try:
+            self.page.set.load_mode.none()
+        except Exception:
+            pass
+        self._block_images()
+        await self._save_cookies_to_disk()
 
     async def _wait_for_manual_login(
         self,
@@ -560,13 +601,13 @@ class BossListDrissionSpider(scrapy.Spider):
         timeout = timeout if timeout is not None else self.login_timeout
 
         label = f"「{account_name}」" if account_name else ""
-        self.logger.warning(f"══ 请在浏览器中手动登录 BOSS 直聘 {label} ══")
+        self.logger.info(f"══ 请在浏览器中手动登录 BOSS 直聘 {label} ══")
 
         try:
             self.page.set.load_mode.normal()
             self.page.get("https://www.zhipin.com/web/user/login")
         except Exception as e:
-            self.logger.warning(f"打开登录页失败: {e}")
+            self.logger.info(f"打开登录页失败: {e}")
 
         elapsed = 0.0
         while elapsed < timeout:
@@ -575,12 +616,7 @@ class BossListDrissionSpider(scrapy.Spider):
 
             if self._is_logged_in():
                 self.logger.info(f"✅ 登录成功！已等待 {elapsed:.0f}s")
-                try:
-                    self.page.set.load_mode.none()
-                except Exception:
-                    pass
-                self._block_images()
-                await self._save_cookies_to_disk()
+                await self._handle_login_success()
                 return True
 
             self.logger.info(f"等待登录... {elapsed:.0f}s / {timeout:.0f}s")
@@ -632,7 +668,7 @@ class BossListDrissionSpider(scrapy.Spider):
             return True  # 有 token 但无明确 DOM 信号，保守认为已登录
 
         except Exception as e:
-            self.logger.warning(f"登录状态检测异常: {e}")
+            self.logger.info(f"登录状态检测异常: {e}")
             return True
 
     def _block_images(self):
@@ -646,7 +682,7 @@ class BossListDrissionSpider(scrapy.Spider):
             ])
             self.logger.info("已启用图片屏蔽")
         except Exception as e:
-            self.logger.warning(f"图片屏蔽设置失败（可忽略）: {e}")
+            self.logger.info(f"图片屏蔽设置失败（可忽略）: {e}")
 
     # ------------------------------------------------------------------ #
     #  Cookie 持久化
@@ -666,7 +702,7 @@ class BossListDrissionSpider(scrapy.Spider):
             account_name = self.accounts[self.account_index].get("name", f"account-{self.account_index + 1}")
             self.logger.info(f"Cookie 已保存 [{account_name}]（{len(cookies)} 条）→ {path}")
         except Exception as e:
-            self.logger.warning(f"保存 Cookie 失败: {e}")
+            self.logger.info(f"保存 Cookie 失败: {e}")
 
     def _cookie_file_path(self, index: int) -> str:
         return os.path.join(simple_script_dir, f"cookies_account_{index + 1}.json")
@@ -680,7 +716,7 @@ class BossListDrissionSpider(scrapy.Spider):
                 data = json.load(f)
             return data if isinstance(data, list) and data else None
         except Exception as e:
-            self.logger.warning(f"从磁盘加载 Cookie 失败: {e}")
+            self.logger.info(f"从磁盘加载 Cookie 失败: {e}")
             return None
 
     def _parse_cookies(self, cookies: Any) -> List[Dict[str, Any]]:
@@ -718,27 +754,74 @@ class BossListDrissionSpider(scrapy.Spider):
     #  账户管理
     # ------------------------------------------------------------------ #
 
+    def _default_account_config(self) -> Dict[str, Any]:
+        return {
+            "name": "default",
+            "cookies": None,
+            "user_data_dir": None,
+            "mobile": None,
+            "country_code": "+86",
+            "login_mode": "manual",
+            "sms_code_source": "file",
+            "sms_code_file": None,
+            "sms_code": None,
+        }
+
+    def _resolve_accounts_file(self) -> str:
+        configured = (self.accounts_file or os.getenv("BOSS_LIST_ACCOUNTS_FILE", "")).strip()
+        if configured:
+            if os.path.isabs(configured):
+                return configured
+            return os.path.join(simple_script_dir, configured)
+        return os.path.join(simple_script_dir, "accounts.json")
+
     def _load_accounts(self) -> List[Dict[str, Any]]:
-        raw = self.accounts_json or os.getenv("BOSS_LIST_ACCOUNTS", "").strip()
+        raw = (self.accounts_json or os.getenv("BOSS_LIST_ACCOUNTS", "")).strip()
+        source = "inline"
         if not raw:
-            return [{"name": "default", "cookies": None, "user_data_dir": None}]
+            accounts_file = self._resolve_accounts_file()
+            if os.path.exists(accounts_file):
+                try:
+                    with open(accounts_file, "r", encoding="utf-8") as f:
+                        raw = f.read().strip()
+                    source = accounts_file
+                except Exception as e:
+                    self.logger.info(f"读取账户配置文件失败: {accounts_file}, error={e}")
+        if not raw:
+            self.logger.info("未提供账户配置，回退单账户手动登录模式")
+            return [self._default_account_config()]
         try:
             data = json.loads(raw)
         except Exception:
-            self.logger.warning("账户配置 JSON 解析失败，回退单账户模式")
-            return [{"name": "default", "cookies": None, "user_data_dir": None}]
+            self.logger.info(f"账户配置 JSON 解析失败，回退单账户模式，source={source}")
+            return [self._default_account_config()]
         if not isinstance(data, list) or not data:
-            return [{"name": "default", "cookies": None, "user_data_dir": None}]
+            self.logger.info(f"账户配置为空，回退单账户模式，source={source}")
+            return [self._default_account_config()]
         normalized = [
             {
                 "name": acc.get("name") or f"account-{i + 1}",
                 "cookies": acc.get("cookies") or acc.get("cookie"),
                 "user_data_dir": acc.get("user_data_dir"),
+                "mobile": acc.get("mobile") or acc.get("phone"),
+                "country_code": acc.get("country_code") or acc.get("area_code") or "+86",
+                "login_mode": acc.get("login_mode") or ("auto_sms" if (acc.get("mobile") or acc.get("phone")) else "manual"),
+                "sms_code_source": acc.get("sms_code_source") or "file",
+                "sms_code_file": acc.get("sms_code_file"),
+                "sms_code": acc.get("sms_code"),
+                "sms_code_timeout": acc.get("sms_code_timeout"),
+                "sms_poll_interval": acc.get("sms_poll_interval"),
+                "slider_max_retries": acc.get("slider_max_retries"),
+                "slider_calibration": acc.get("slider_calibration"),
             }
             for i, acc in enumerate(data)
             if isinstance(acc, dict)
         ]
-        return normalized or [{"name": "default", "cookies": None, "user_data_dir": None}]
+        if normalized:
+            self.logger.info(f"已加载账户配置 {len(normalized)} 个，source={source}")
+            return normalized
+        self.logger.info(f"账户配置无有效账号，回退单账户模式，source={source}")
+        return [self._default_account_config()]
 
     # ------------------------------------------------------------------ #
     #  数据库操作

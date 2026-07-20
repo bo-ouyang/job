@@ -326,10 +326,10 @@ class AIService:
             "You are a senior recruiter. Output a practical skills gap analysis for entry-level hiring."
         )
         user_prompt = (
-            f"Major: {major}\n"
-            f"Known skills: {skill_text}\n"
-            f"Profile summary: {profile_summary}\n"
-            f"Market evidence: {evidence_summary}\n"
+            f"专业: {major}\n"
+            f"技能: {skill_text}\n"
+            f"总结: {profile_summary}\n"
+            f"市场证据: {evidence_summary}\n"
             "Return 5 bullet points with: current strength, likely gap, and high-impact action."
         )
         gap_analysis = await self._call_llm_with_langchain(system_prompt, user_prompt)
@@ -350,11 +350,11 @@ class AIService:
             "You are an expert career coach. Produce actionable, realistic advice in Markdown."
         )
         user_prompt = (
-            f"Major: {major}\n"
-            f"Skills: {skill_text}\n"
-            f"Profile summary: {profile_summary}\n"
-            f"Gap analysis: {gap_analysis}\n\n"
-            f"Market evidence JSON: {evidence_summary}\n\n"
+            f"专业: {major}\n"
+            f"技能: {skill_text}\n"
+            f"总结: {profile_summary}\n"
+            f"差距分析: {gap_analysis}\n\n"
+            f"市场证据: {evidence_summary}\n\n"
             "Structure your response with sections:\n"
             "1) Recommended job tracks\n"
             "2) 90-day learning plan\n"

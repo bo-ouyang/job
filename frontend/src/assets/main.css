@@ -1,14 +1,14 @@
 :root {
-  --color-background: #0f172a;
-  --color-background-soft: #1e293b;
-  --color-background-mute: #334155;
+  --color-background: #f7fafc;
+  --color-background-soft: #ffffff;
+  --color-background-mute: #e8eef5;
 
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-hover: rgba(255, 255, 255, 0.2);
+  --color-border: rgba(148, 163, 184, 0.22);
+  --color-border-hover: rgba(100, 116, 139, 0.32);
 
-  --color-heading: #f8fafc;
-  --color-text: #cbd5e1;
-  --color-text-mute: #94a3b8;
+  --color-heading: #0f172a;
+  --color-text: #1e293b;
+  --color-text-mute: #64748b;
 
   --color-primary: #38bdf8;
   --color-secondary: #818cf8;
@@ -17,9 +17,9 @@
   --color-warning: #fbbf24;
   --color-danger: #f87171;
 
-  --color-card-bg: rgba(30, 41, 59, 0.6);
-  --color-glass-bg: rgba(15, 23, 42, 0.45);
-  --color-input-bg: rgba(0, 0, 0, 0.2);
+  --color-card-bg: rgba(255, 255, 255, 0.82);
+  --color-glass-bg: rgba(255, 255, 255, 0.78);
+  --color-input-bg: rgba(255, 255, 255, 0.92);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -31,12 +31,12 @@
   --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 
   --shadow-sm:
-    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    0 6px 12px -8px rgba(15, 23, 42, 0.18), 0 2px 6px -4px rgba(15, 23, 42, 0.12);
   --shadow-md:
-    0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+    0 18px 30px -18px rgba(15, 23, 42, 0.24), 0 8px 18px -14px rgba(15, 23, 42, 0.16);
   --shadow-lg:
-    0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-  --shadow-glow: 0 0 15px rgba(56, 189, 248, 0.3);
+    0 28px 60px -30px rgba(15, 23, 42, 0.28), 0 16px 24px -24px rgba(15, 23, 42, 0.18);
+  --shadow-glow: 0 0 18px rgba(56, 189, 248, 0.18);
 
   --font-family:
     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
@@ -57,8 +57,9 @@ body {
   color: var(--color-text);
   background: var(--color-background);
   background-image:
-    radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(129, 140, 248, 0.1) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.14) 0px, transparent 48%),
+    radial-gradient(at 100% 0%, rgba(129, 140, 248, 0.12) 0px, transparent 44%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
   background-attachment: fixed;
   font-family: var(--font-family);
   font-size: 16px;
@@ -153,7 +154,7 @@ textarea {
   transition: all var(--transition-normal);
 }
 .btn-outline:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(56, 189, 248, 0.08);
   border-color: var(--color-primary);
   color: var(--color-primary);
 }

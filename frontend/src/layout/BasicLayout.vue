@@ -185,7 +185,7 @@ header {
   z-index: 1000;
   background: var(--color-glass-bg);
   backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .wrapper {
@@ -239,7 +239,7 @@ nav a.router-link-active {
 }
 
 .divider {
-  color: rgba(255, 255, 255, 0.2);
+  color: rgba(100, 116, 139, 0.45);
 }
 
 .username {
@@ -249,8 +249,8 @@ nav a.router-link-active {
 
 .login-btn,
 .logout-btn {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.75);
   color: var(--color-heading);
   border-radius: 999px;
   padding: 0.35rem 0.9rem;
