@@ -86,8 +86,8 @@ docker-compose up -d prometheus grafana
 
 ## 📖 详细文档
 
-- 系统架构蓝图与功能模块全景：[`ARCHITECTURE.md`](ARCHITECTURE.md)
-- 迭代大纲与设计变更全记录：[`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md)
+- 系统架构蓝图与功能模块全景：[`架构.md`](架构.md)
+- 迭代大纲与设计变更全记录：[`项目开发日志.md`](项目开发日志.md)
 
 ---
 *Developed with ❤️ and Python.*
