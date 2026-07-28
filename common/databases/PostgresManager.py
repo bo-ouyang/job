@@ -136,6 +136,10 @@ class PostgresManager:
                 boss_crawl_task,
                 proxy,
                 ai_task,
+                agent_conversation,
+                agent_message,
+                agent_run,
+                career_profile,
             )
 
             async with self.engine.begin() as conn:

@@ -9,6 +9,8 @@ from core.logger import sys_logger as logger
 
 async def _sync_job_logic(job_id: int):
     """Core async logic for syncing job"""
+    if not settings.ES_ENABLED:
+        return {"job_id": str(job_id), "status": "disabled"}
     try:
         # Celery workers do not run FastAPI lifespan, so DB manager must be
         # initialized explicitly before using sessions.
@@ -92,12 +94,17 @@ def _get_event_loop():
 @celery_app.task(bind=True, max_retries=3, name="sync_job_to_es")
 def sync_job_to_es(self, job_id: int):
     """把单独一条的变动映射到 ES 中"""
+    if not settings.ES_ENABLED:
+        return {"job_id": str(job_id), "status": "disabled"}
     loop = _get_event_loop()
-    loop.run_until_complete(_sync_job_logic(job_id))
+    return loop.run_until_complete(_sync_job_logic(job_id))
     
 @celery_app.task(bind=True, max_retries=3, name="delete_job_from_es")
 def delete_job_from_es(self, job_id: int):
     """当 PostgreSQL 中删除时，对应的同步删除 ES 信息"""
+    if not settings.ES_ENABLED:
+        return {"job_id": str(job_id), "status": "disabled"}
+
     async def _delete():
         try:
             es = await get_es()

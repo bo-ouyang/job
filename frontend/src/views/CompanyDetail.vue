@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { companyAPI } from '@/api/company';
 import { jobAPI } from '@/api/job';
+import { formatJobSalary } from '@/utils/jobData';
 
 const route = useRoute();
 const router = useRouter();
@@ -73,7 +74,7 @@ onMounted(fetchCompanyData);
                         <div class="job-item" v-for="job in jobs" :key="job.id" @click="router.push(`/jobs/${job.id}`)">
                             <div class="job-main">
                                 <div class="job-title">{{ job.title }}</div>
-                                <div class="job-salary">{{ job.salary_desc || `${job.salary_min}-${job.salary_max}K` }}</div>
+                                <div class="job-salary">{{ formatJobSalary(job) }}</div>
                                 <div class="job-req">{{ job.experience }} · {{ job.education }}</div>
                             </div>
                             <button class="job-btn">查看</button>

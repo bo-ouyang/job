@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useFavoriteStore } from '../stores/favorite';
 import { useRouter } from 'vue-router';
+import { formatJobSalary } from '@/utils/jobData';
 
 const store = useFavoriteStore();
 const router = useRouter();
@@ -49,7 +50,7 @@ const handleUnfollowCompany = async (companyId) => {
                 <!-- Using optional chaining as job might be null if deleted -->
                 <div class="job-info" v-if="fav.job">
                     <div class="title-row">
-                        <h3>{{ fav.job.title }} <span class="salary">{{ fav.job.salary_desc || `${fav.job.salary_min}-${fav.job.salary_max}K` }}</span></h3>
+                        <h3>{{ fav.job.title }} <span class="salary">{{ formatJobSalary(fav.job) }}</span></h3>
                         <span class="date">{{ new Date(fav.created_at).toLocaleDateString() }} 收藏</span>
                     </div>
                     <div class="tags">

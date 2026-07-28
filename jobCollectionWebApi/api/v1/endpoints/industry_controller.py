@@ -6,7 +6,7 @@ from typing import List, Optional
 from dependencies import get_db
 from crud.industry import IndustryCRUD
 from schemas.industry_schema import Industry, IndustryCreate, IndustryUpdate, IndustryTree, IndustryResponse
-router = APIRouter(prefix="/industries", tags=["industries"])
+router = APIRouter(tags=["industries"])
 industry_crud = IndustryCRUD()
 
 @router.get("/", response_model=List[Industry])

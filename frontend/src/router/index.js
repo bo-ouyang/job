@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 const BasicLayout = () => import("@/layout/BasicLayout.vue");
+const HomeView = () => import("@/views/HomeView.vue");
 const InsightsHub = () => import("@/views/InsightsHub.vue");
 const JobMarket = () => import("@/views/JobMarket.vue");
 const CompanyList = () => import("@/views/CompanyList.vue");
@@ -16,7 +17,29 @@ const router = createRouter({
         {
           path: "",
           name: "home",
+           component: HomeView,
+        },
+        {
+          path: "career-data",
+          name: "career-data",
           component: InsightsHub,
+        },
+        {
+          path: "career-analysis",
+          name: "career-analysis",
+          component: () => import("@/views/CareerAnalysisView.vue"),
+        },
+        {
+          path: "agent",
+          name: "agent",
+          component: () => import("@/views/AgentWorkspace.vue"),
+          meta: { requiresAuth: true, feature: "agent" },
+        },
+        {
+          path: "agent/:conversationId",
+          name: "agent-conversation",
+          component: () => import("@/views/AgentWorkspace.vue"),
+          meta: { requiresAuth: true, feature: "agent" },
         },
         {
           path: "jobs",
@@ -62,6 +85,12 @@ const router = createRouter({
           path: "my/resume",
           name: "my-resume",
           component: () => import("@/views/MyResume.vue"),
+          meta: { requiresAuth: true },
+        },
+        {
+          path: "my/profile",
+          name: "my-profile",
+          component: () => import("@/views/ProfileCenterView.vue"),
           meta: { requiresAuth: true },
         },
         {
@@ -112,9 +141,13 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem("token");
   const requiredAuth = to.matched.some((record) => record.meta.requiresAuth);
+  const agentDisabled = to.matched.some((record) => record.meta.feature === "agent")
+    && import.meta.env.VITE_AGENT_ENABLED === "false";
 
-  if (requiredAuth && !token) {
-    next({ name: "home", query: { login: "true" } });
+  if (agentDisabled) {
+    next({ name: "home" });
+  } else if (requiredAuth && !token) {
+    next({ name: "home", query: { login: "true", redirect: to.fullPath } });
   } else {
     next();
   }

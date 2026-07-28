@@ -60,6 +60,32 @@ async def get_current_user(
     
     return user
 
+
+async def get_current_user_id_short_lived(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> int:
+    """Authenticate without retaining a database session for streaming responses."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="无法验证凭据",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    token = credentials.credentials
+    payload = verify_token(token)
+    if payload is None or await is_token_blacklisted(token):
+        raise credentials_exception
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise credentials_exception
+    async with db_manager.async_session() as db:
+        user = await crud_user.get(db, id=user_id)
+        if user is None:
+            raise credentials_exception
+        if user.status != "active":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="用户账户已被禁用")
+    return user_id
+
 async def get_current_admin_user(
     current_user: dict = Depends(get_current_user),
 ) -> dict:

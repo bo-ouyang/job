@@ -306,3 +306,19 @@ async def test_ai_parse(
             code=StatusCode.INTERNAL_SERVER_ERROR,
             message=f"Failed to parse query via AI: {e}"
         )
+
+
+@router.get("/{job_id}", response_model=JobWithRelations)
+async def get_job_detail(
+    job_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取职位详情及其公司、行业关联信息。"""
+    job = await crud_job.get_with_relations(db, job_id)
+    if job is None:
+        raise AppException(
+            status_code=404,
+            code=StatusCode.BUSINESS_ERROR,
+            message="职位不存在",
+        )
+    return job

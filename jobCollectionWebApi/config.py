@@ -12,16 +12,22 @@ specific_env_path = os.path.join(project_root, f".env.{env_state}") if env_state
 default_env_path = os.path.join(project_root, ".env")
 
 if specific_env_path and os.path.exists(specific_env_path):
-    load_dotenv(dotenv_path=specific_env_path, override=True)
+    load_dotenv(dotenv_path=specific_env_path, override=False)
     print(f"✅ Loaded environment variables from: {specific_env_path}")
 elif os.path.exists(default_env_path):
-    load_dotenv(dotenv_path=default_env_path, override=True)
+    load_dotenv(dotenv_path=default_env_path, override=False)
     print(f"✅ Loaded default environment variables from: {default_env_path}")
 else:
     print("⚠️ No .env file found, relying on system environment variables.")
 
 class Settings(BaseSettings):
     """应用配置"""
+    @field_validator("DEBUG", "ALIPAY_DEBUG", mode="before", check_fields=False)
+    @classmethod
+    def parse_boolean_environment(cls, value):
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
     # def __init__(self, **kwargs):
     #     #super().__init__(**kwargs)
     #     # 解析 API Keys
@@ -74,6 +80,7 @@ class Settings(BaseSettings):
     REDIS_ANALYSIS_EXPIRE: int = int(os.getenv('REDIS_ANALYSIS_EXPIRE', 7200))
 
     # Elasticsearch 配置
+    ES_ENABLED: bool = os.getenv('ES_ENABLED', 'false').lower() == 'true'
     ES_HOST: str = os.getenv('ES_HOST', 'localhost')
     ES_PORT: int = int(os.getenv('ES_PORT', 9200))
     ES_USER: str = os.getenv('ES_USER', 'elastic')
@@ -238,6 +245,26 @@ class Settings(BaseSettings):
     AI_API_KEY: str = os.getenv("AI_API_KEY", "")
     AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
     AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat")
+
+    # Career Agent
+    AGENT_ENABLED: bool = os.getenv("AGENT_ENABLED", "false").lower() == "true"
+    AGENT_ROLLOUT_PERCENT: int = max(0, min(100, int(os.getenv("AGENT_ROLLOUT_PERCENT", 0))))
+    AGENT_ROLLOUT_USER_IDS: str = os.getenv("AGENT_ROLLOUT_USER_IDS", "")
+    AGENT_MAX_CONCURRENT_RUNS_PER_USER: int = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS_PER_USER", 1))
+    AGENT_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("AGENT_RATE_LIMIT_PER_MINUTE", 3))
+    AGENT_RUN_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", 60))
+    AGENT_LLM_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", 20))
+    AGENT_MAX_TOOL_CALLS: int = int(os.getenv("AGENT_MAX_TOOL_CALLS", 6))
+    AGENT_MAX_STEPS: int = int(os.getenv("AGENT_MAX_STEPS", 12))
+    AGENT_MAX_CLARIFICATIONS: int = int(os.getenv("AGENT_MAX_CLARIFICATIONS", 2))
+    AGENT_MAX_OUTPUT_TOKENS: int = int(os.getenv("AGENT_MAX_OUTPUT_TOKENS", 1200))
+    AGENT_MAX_CONTEXT_MESSAGES: int = int(os.getenv("AGENT_MAX_CONTEXT_MESSAGES", 20))
+    AGENT_EVENT_TTL_SECONDS: int = int(os.getenv("AGENT_EVENT_TTL_SECONDS", 86400))
+    AGENT_EVENT_MAXLEN: int = int(os.getenv("AGENT_EVENT_MAXLEN", 500))
+    AGENT_LOCK_TTL_SECONDS: int = int(os.getenv("AGENT_LOCK_TTL_SECONDS", 90))
+    AGENT_SSE_HEARTBEAT_SECONDS: int = int(os.getenv("AGENT_SSE_HEARTBEAT_SECONDS", 15))
+    AGENT_MAX_SSE_CONNECTIONS_PER_USER: int = int(os.getenv("AGENT_MAX_SSE_CONNECTIONS_PER_USER", 2))
+    AGENT_SSE_REDIS_MAX_CONNECTIONS: int = int(os.getenv("AGENT_SSE_REDIS_MAX_CONNECTIONS", 100))
 
     # 支付配置
     PAYMENT_NOTIFY_BASE_URL: str = os.getenv("PAYMENT_NOTIFY_BASE_URL", "http://localhost:8000/api/v1/payment/notify")

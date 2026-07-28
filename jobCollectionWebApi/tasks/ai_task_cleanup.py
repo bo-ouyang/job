@@ -32,9 +32,14 @@ def _get_event_loop():
 async def _cleanup_logic():
     from common.databases.PostgresManager import db_manager
     from common.databases.models.ai_task import AiTask
+    from common.databases.models.agent_run import AgentRun
     from sqlalchemy import select, update
     from common.databases.RedisManager import redis_manager
     from core.celery_app import celery_app
+    from crud import agent as crud_agent
+    from agent.event_store import agent_event_publisher
+    from agent.events import AgentEventType
+    from core.metrics import agent_runs_failed
 
     cutoff = datetime.utcnow() - timedelta(minutes=STALE_THRESHOLD_MINUTES)
     cleaned = 0
@@ -83,6 +88,47 @@ async def _cleanup_logic():
         if cleaned > 0:
             await db.commit()
             logger.info(f"AI task cleanup: recovered/cleaned {cleaned} stale tasks")
+
+        agent_result = await db.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.status.in_(["queued", "running"]),
+                AgentRun.status_updated_at < cutoff,
+            )
+            .limit(50)
+        )
+        stale_agent_runs = agent_result.scalars().all()
+        transitioned_agent_runs = []
+        for run in stale_agent_runs:
+            transitioned = await crud_agent.transition_run(
+                db,
+                run_id=run.id,
+                user_id=run.user_id,
+                from_statuses=("queued", "running"),
+                to_status="failed",
+                values={
+                    "current_node": "stale_cleanup",
+                    "error_code": "AGENT_RUN_STALE",
+                    "error_message": "Agent 运行超时，已被系统自动清理",
+                },
+                status_updated_before=cutoff,
+            )
+            if transitioned is not None:
+                transitioned_agent_runs.append(transitioned)
+                cleaned += 1
+                logger.warning(f"Cleaned stale AgentRun {run.id}")
+
+        if transitioned_agent_runs:
+            await db.commit()
+            for run in transitioned_agent_runs:
+                agent_runs_failed.labels(failure_kind="AGENT_RUN_STALE").inc()
+                await agent_event_publisher.publish(
+                    run_id=run.id,
+                    conversation_id=run.conversation_id,
+                    event=AgentEventType.RUN_FAILED,
+                    data={"status": "failed", "error_code": "AGENT_RUN_STALE"},
+                )
+            logger.info(f"Agent run cleanup: cleaned {len(transitioned_agent_runs)} stale runs")
 
 
 @shared_task(name="tasks.ai_task_cleanup.cleanup_stale_ai_tasks")

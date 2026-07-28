@@ -15,6 +15,8 @@ if sys.platform == 'win32':
 
 from config import settings
 from common.databases.PostgresManager import db_manager
+from common.databases.RedisManager import redis_manager
+from agent.event_store import close_agent_event_resources
 # Import models to ensure they are registered with Base.metadata
 from common.databases.models import user, job, company, resume, favorite
 from api.v1.api import api_router
@@ -39,7 +41,7 @@ async def _infra_health_probe_loop():
             db_ok = await db_manager.health_check()
             infra_health.labels(component="database").set(1 if db_ok else 0)
 
-            es_ok = await es_manager.health_check()
+            es_ok = await es_manager.health_check() if settings.ES_ENABLED else False
             infra_health.labels(component="elasticsearch").set(1 if es_ok else 0)
 
             # Update circuit breaker gauge
@@ -72,17 +74,20 @@ async def lifespan(app: FastAPI):
     logger.success("Database connection established successfully")
     
     # 初始化 ES 连接并确保索引存在
-    try:
-        await es_manager.ensure_index(
-            index_name=settings.ES_INDEX_JOB,
-            mapping=JOB_INDEX_MAPPING
-        )
-        if await es_manager.health_check():
-            logger.success("Elasticsearch connection established successfully")
-        else:
-            logger.warning("Elasticsearch connection failed on startup, some features may be unavailable")
-    except Exception as e:
-        logger.warning(f"Elasticsearch initialization failed: {e}, some features may be unavailable")
+    if settings.ES_ENABLED:
+        try:
+            await es_manager.ensure_index(
+                index_name=settings.ES_INDEX_JOB,
+                mapping=JOB_INDEX_MAPPING
+            )
+            if await es_manager.health_check():
+                logger.success("Elasticsearch connection established successfully")
+            else:
+                logger.warning("Elasticsearch connection failed on startup, some features may be unavailable")
+        except Exception as e:
+            logger.warning(f"Elasticsearch initialization failed: {e}, some features may be unavailable")
+    else:
+        logger.info("Elasticsearch is disabled by ES_ENABLED=false")
     
     # Start Redis Listener for WebSocket
     from api.v1.endpoints.ws_controller import manager, start_redis_listener
@@ -102,6 +107,8 @@ async def lifespan(app: FastAPI):
     
     # 关闭时清理资源
     await es_manager.close()
+    await close_agent_event_resources()
+    await redis_manager.close()
     await db_manager.close()
     logger.info("Application shutdown complete")
 
@@ -234,13 +241,17 @@ async def root():
 async def health_check():
     """健康检查接口"""
     db_health = await db_manager.health_check()
-    es_health = await es_manager.health_check()
+    es_health = await es_manager.health_check() if settings.ES_ENABLED else None
     
-    all_healthy = db_health and es_health
+    all_healthy = db_health and (not settings.ES_ENABLED or es_health)
     return {
         "status": "healthy" if all_healthy else "degraded",
         "database": "connected" if db_health else "disconnected",
-        "elasticsearch": "connected" if es_health else "disconnected",
+        "elasticsearch": (
+            "disabled"
+            if not settings.ES_ENABLED
+            else "connected" if es_health else "disconnected"
+        ),
         "environment": settings.ENVIRONMENT
     }
 

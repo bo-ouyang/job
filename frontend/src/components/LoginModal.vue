@@ -1,10 +1,21 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuthStore } from '../stores/auth';
+import { useRoute, useRouter } from 'vue-router';
 
 const props = defineProps(['isOpen']);
 const emit = defineEmits(['close']);
 const authStore = useAuthStore();
+const route = useRoute();
+const router = useRouter();
+const isDev = import.meta.env.DEV;
+
+const navigateAfterLogin = async () => {
+    const redirect = String(route.query.redirect || '');
+    if (redirect.startsWith('/') && !redirect.startsWith('//')) {
+        await router.replace(redirect);
+    }
+};
 
 const activeTab = ref('account'); // 'scan' | 'phone' | 'account'
 const phone = ref('');
@@ -61,11 +72,8 @@ const startPolling = () => {
                 // Login Success!
                 // The 'login_data' is nested in the response
                 if (res.login_data) {
-                     // Manually trigger success handling since we bypass the store's login action
-                     authStore.token = res.login_data.token.access_token;
-                     authStore.user = res.login_data.user;
-                     localStorage.setItem('token', authStore.token);
-                     localStorage.setItem('user', JSON.stringify(authStore.user));
+                     authStore.completeLogin(res.login_data);
+                     await navigateAfterLogin();
                      close();
                 }
             } else if (res.status === 'expired') {
@@ -149,6 +157,7 @@ const handleLogin = async () => {
                 await authStore.login(username.value, password.value);
             }
         }
+        await navigateAfterLogin();
         close();
     } catch (err) {
         errorMsg.value = err.response?.data?.detail || err.message || '操作失败';
@@ -177,6 +186,15 @@ const simulateScan = async () => {
         }, 1000);
     } catch (e) {
         console.error(e);
+    }
+};
+
+const simulateConfirm = async () => {
+    if (!isDev || !qrTicket.value) return;
+    try {
+        await authStore.mockConfirmQrCode(qrTicket.value);
+    } catch (e) {
+        errorMsg.value = '模拟确认失败: ' + e.message;
     }
 };
 </script>
@@ -251,7 +269,7 @@ const simulateScan = async () => {
                 <p v-else-if="scanStatus === 'scanned'">已扫码，请在手机上点击确认</p>
                 <p v-else-if="scanStatus === 'confirmed'">登录成功，正在跳转...</p>
                 
-                <div class="mock-actions">
+                <div v-if="isDev" class="mock-actions">
                      <!-- 开发模式辅助按钮 -->
                     <button class="mock-btn" @click="simulateScan" v-if="scanStatus === 'waiting'" :disabled="!qrTicket">
                         (测试) 模拟手机扫码

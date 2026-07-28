@@ -12,6 +12,8 @@ class APILogMiddleware(BaseHTTPMiddleware):
     用于记录 QPS、响应耗时、状态码等统计数据
     """
     async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/api/v1/agent/runs/") and request.url.path.endswith("/events"):
+            return await call_next(request)
         # 排除非 API 请求或健康检查
         if request.url.path.startswith("/static") or request.url.path in ["/health", "/", "/favicon.ico"]:
             return await call_next(request)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
@@ -137,7 +139,7 @@ class TaskLogInDB(TaskLogBase, TimestampSchema):
 
 class CompareBucketItem(BaseModel):
     name: str
-    value: float | int
+    value: Union[float, int]
 
 
 class CompareTrendItem(BaseModel):

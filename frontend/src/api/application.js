@@ -5,7 +5,7 @@ export const applicationAPI = {
     return request.post("/applications/", { job_id: jobId });
   },
   getMyApplications(params) {
-    return request.get("/applications/me", { params });
+    return request.get("/applications/", { params });
   },
   updateApplicationStatus(applicationId, status) {
     return request.put(`/applications/${applicationId}/status`, { status });

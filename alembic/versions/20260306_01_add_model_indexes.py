@@ -8,11 +8,12 @@ Create Date: 2026-03-06 18:20:00
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
 revision: str = "20260306_01"
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = "20260201_00"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -89,10 +90,23 @@ NEW_INDEXES: list[tuple[str, str, list[str]]] = [
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    tables = set(inspector.get_table_names())
     for index_name, table_name, columns in NEW_INDEXES:
-        op.create_index(index_name, table_name, columns, unique=False)
+        if table_name not in tables:
+            continue
+        existing = {item["name"] for item in inspector.get_indexes(table_name)}
+        table_columns = {item["name"] for item in inspector.get_columns(table_name)}
+        if index_name not in existing and set(columns).issubset(table_columns):
+            op.create_index(index_name, table_name, columns, unique=False)
 
 
 def downgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    tables = set(inspector.get_table_names())
     for index_name, table_name, _columns in reversed(NEW_INDEXES):
-        op.drop_index(index_name, table_name=table_name)
+        if table_name not in tables:
+            continue
+        existing = {item["name"] for item in inspector.get_indexes(table_name)}
+        if index_name in existing:
+            op.drop_index(index_name, table_name=table_name)

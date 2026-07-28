@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse, Response
 
 class UnifiedResponseMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/api/v1/agent/runs/") and request.url.path.endswith("/events"):
+            return await call_next(request)
         # Allow skipping certain paths (e.g. docs, openapi, admin)
         if request.url.path.startswith("/docs") or \
            request.url.path.startswith("/redoc") or \

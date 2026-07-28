@@ -3,6 +3,7 @@ import { ref, onMounted, watch, reactive, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { jobAPI } from '@/api/job';
 import { commonAPI } from '@/api/common';
+import { formatJobSalary, normalizeJobTags } from '@/utils/jobData';
 
 const route = useRoute();
 const router = useRouter(); // Added router
@@ -172,17 +173,6 @@ const handlePageChange = (page) => {
 const selectJob = (job) => {
   selectedJob.value = job;
   checkFavoriteStatus(job.id);
-};
-
-const parseTags = (tagStr) => {
-  if (!tagStr) return [];
-  try {
-    return JSON.parse(tagStr);
-  } catch (e) {
-    if (typeof tagStr === "string")
-      return tagStr.split(",").filter((t) => t.trim());
-    return [];
-  }
 };
 
 const handleImageError = (e) => {
@@ -357,7 +347,7 @@ watch(
             <div class="card-top">
               <span class="job-card-title">{{ job.title }}</span>
               <span class="job-card-salary">{{
-                job.salary_desc || `${job.salary_min}-${job.salary_max}K`
+                formatJobSalary(job)
               }}</span>
             </div>
             <div class="card-mid">
@@ -408,8 +398,7 @@ watch(
               <h1>
                 {{ selectedJob.title }}
                 <span class="salary-highlight">{{
-                  selectedJob.salary_desc ||
-                  `${selectedJob.salary_min}-${selectedJob.salary_max}K`
+                  formatJobSalary(selectedJob)
                 }}</span>
               </h1>
               <div class="job-badges">
@@ -462,7 +451,7 @@ watch(
               <div class="skills-row">
                 <span
                   class="skill-pill"
-                  v-for="tag in parseTags(selectedJob.tags)"
+                  v-for="tag in normalizeJobTags(selectedJob.tags)"
                   :key="tag"
                   >{{ tag }}</span
                 >

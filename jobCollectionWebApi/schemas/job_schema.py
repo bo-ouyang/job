@@ -2,8 +2,10 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, model_valida
 from typing import Optional, List, Any
 from datetime import datetime
 from .base_schema import TimestampSchema
+from .types import SnowflakeId
 from enum import Enum
 import re
+
 class WorkType(str, Enum):
     FULL_TIME = "full_time"
     PART_TIME = "part_time"
@@ -95,7 +97,7 @@ class JobUpdate(BaseModel):
 
 # 响应模式
 class JobInDB(JobBase, TimestampSchema):
-    id: int
+    id: SnowflakeId
     is_active: bool = True
 
     class Config:
@@ -115,7 +117,7 @@ class JobWithRelations(JobInDB):
 
 # 列表项模式（精简版）
 class JobSimple(BaseModel):
-    #id: int
+    id: SnowflakeId
     title: str
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None

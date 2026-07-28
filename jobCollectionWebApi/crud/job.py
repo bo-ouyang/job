@@ -1,4 +1,6 @@
-from typing import List, Optional,Tuple
+from __future__ import annotations
+
+from typing import List, Optional, Tuple, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func, and_, desc, String
 import json
@@ -32,7 +34,7 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         return db_obj
 
     async def update(
-        self, db: AsyncSession, *, db_obj: Job, obj_in: JobUpdate | dict
+        self, db: AsyncSession, *, db_obj: Job, obj_in: Union[JobUpdate, dict]
     ) -> Job:
         """更新职位并发送 ES 双写队列"""
         db_obj = await super().update(db, db_obj=db_obj, obj_in=obj_in)

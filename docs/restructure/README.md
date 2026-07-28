@@ -51,3 +51,4 @@ restructure/
 - [Agent 工作台交互与事件状态](frontend/02-Agent工作台交互与事件状态.md)
 - [前端组件、状态与路由设计](frontend/03-组件状态与路由设计.md)
 - [前端实施计划与验收](frontend/04-前端实施计划与验收.md)
+- [前后端接口对接规范](frontend/05-前后端接口对接规范.md)

@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { jobAPI } from '@/api/job';
 import { applicationAPI } from '@/api/application';
+import { formatJobSalary, normalizeJobTags } from '@/utils/jobData';
 
 const route = useRoute();
 const router = useRouter();
@@ -76,7 +77,7 @@ onMounted(fetchJob);
             <div class="job-main">
                 <div class="job-title-row">
                     <h1>{{ job.title }}</h1>
-                    <span class="salary">{{ job.salary_desc || `${job.salary_min}-${job.salary_max}K` }}</span>
+                    <span class="salary">{{ formatJobSalary(job) }}</span>
                 </div>
                 <div class="job-props">
                     <span>{{ job.location }}</span>
@@ -86,7 +87,7 @@ onMounted(fetchJob);
                     <span>{{ job.education }}</span>
                 </div>
                 <div class="tags">
-                    <span v-for="tag in JSON.parse(job.tags || '[]')" :key="tag">{{ tag }}</span>
+                    <span v-for="tag in normalizeJobTags(job.tags)" :key="tag">{{ tag }}</span>
                 </div>
                 <div class="publish-time">发布于 {{ formatDate(job.updated_at) }}</div>
             </div>

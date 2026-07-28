@@ -6,17 +6,43 @@ const service = axios.create({
   timeout: 5000,
 });
 
-let isRefreshing = false;
-let refreshSubscribers = [];
+let refreshPromise = null;
 const WALLET_PENDING_ORDER_KEY = "wallet_pending_order_no";
 
-const subscribeTokenRefresh = (cb) => {
-  refreshSubscribers.push(cb);
-};
+export const getApiBaseUrl = () => service.defaults.baseURL;
+export const getAccessToken = () => localStorage.getItem("token");
 
-const onRefreshed = (token) => {
-  refreshSubscribers.map((cb) => cb(token));
-  refreshSubscribers = [];
+export const refreshAccessToken = async () => {
+  if (refreshPromise) return refreshPromise;
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) {
+    await handleLogout();
+    throw new Error("Missing refresh token");
+  }
+
+  refreshPromise = axios
+    .post(`${service.defaults.baseURL}/auth/refresh-token`, {
+      refresh_token: refreshToken,
+    })
+    .then((refreshRes) => {
+      const payload = refreshRes.data?.code === 200 ? refreshRes.data.data : refreshRes.data;
+      const accessToken = payload?.access_token;
+      if (!accessToken) throw new Error("Token refresh returned no access token");
+      localStorage.setItem("token", accessToken);
+      window.dispatchEvent(
+        new CustomEvent("auth-token-refreshed", { detail: { token: accessToken } }),
+      );
+      return accessToken;
+    })
+    .catch(async (error) => {
+      await handleLogout();
+      throw error;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
 };
 
 const extractErrorMessage = (response) => {
@@ -90,62 +116,13 @@ service.interceptors.response.use(
     if (response && response.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      const refreshToken = localStorage.getItem("refresh_token");
-      if (!refreshToken) {
-        handleLogout();
-        return Promise.reject(error);
+      try {
+        const token = await refreshAccessToken();
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return service(originalRequest);
+      } catch (refreshError) {
+        return Promise.reject(refreshError);
       }
-
-      if (!isRefreshing) {
-        isRefreshing = true;
-        try {
-          // No interceptors for this specific call to avoid loop
-          // Use the same baseURL as the main service instance
-          const refreshUrl = `${service.defaults.baseURL}/auth/refresh-token`;
-          console.log(
-            `Token expired (401). Attempting silent refresh via ${refreshUrl}...`,
-          );
-
-          const refreshRes = await axios.post(refreshUrl, {
-            refresh_token: refreshToken,
-          });
-
-          // Handle Unified Response Structure
-          let access_token;
-          if (
-            refreshRes.data &&
-            refreshRes.data.code === 200 &&
-            refreshRes.data.data
-          ) {
-            access_token = refreshRes.data.data.access_token;
-          } else {
-            // Fallback for non-wrapped or direct response
-            access_token = refreshRes.data.access_token;
-          }
-
-          if (!access_token) {
-            throw new Error("Token refresh failed: No access token received");
-          }
-
-          localStorage.setItem("token", access_token);
-
-          isRefreshing = false;
-          onRefreshed(access_token);
-        } catch (refreshError) {
-          isRefreshing = false;
-          console.error("Silent token refresh failed:", refreshError);
-          handleLogout();
-          return Promise.reject(refreshError);
-        }
-      }
-
-      // Wait for token refresh and retry original request
-      return new Promise((resolve) => {
-        subscribeTokenRefresh((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(service(originalRequest));
-        });
-      });
     }
 
     // 403 不一定表示未登录，也可能是权限不足或安全策略拦截。
@@ -193,7 +170,7 @@ service.interceptors.response.use(
   },
 );
 
-async function handleLogout() {
+export async function handleLogout() {
   localStorage.removeItem("token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("user");
@@ -206,16 +183,24 @@ async function handleLogout() {
   } catch (e) {
     /* ignore */
   }
+  try {
+    const agentStore = (await import("@/stores/agent")).useAgentStore();
+    agentStore.reset?.();
+  } catch (e) {
+    /* ignore */
+  }
 
-  // Force redirect to login page and refresh to clear Pinia state
-  if (window.location.pathname !== "/login") {
-    // We intentionally avoid window.location.href or window.location.reload()
-    // because that causes a hard page request to the server, which results
-    // in a 404 Nginx error if try_files is not properly configured.
-    // Instead, we use Vue router to navigate safely as an SPA.
+  const currentRoute = router.currentRoute?.value;
+  const requiresAuth = currentRoute?.matched?.some(
+    (record) => record.meta?.requiresAuth,
+  );
+  if (requiresAuth) {
     router.push({
-      path: "/login",
-      query: { redirect: window.location.pathname },
+      name: "home",
+      query: {
+        login: "true",
+        redirect: currentRoute.fullPath,
+      },
     });
   }
 }

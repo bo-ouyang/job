@@ -19,16 +19,46 @@ class SearchService:
         location: Optional[int] = None, # updated type based on dict keys
         experience: Optional[str] = None,
         education: Optional[str] = None,
-        industry: Optional[str] = None,
+        industry: Optional[int] = None,
+        skills: Optional[List[str]] = None,
         salary_min: Optional[float] = None,
         salary_max: Optional[float] = None,
         skip: int = 0,
         limit: int = 20
     ) -> Tuple[List[dict], int]:
+        jobs, total, _source, _warnings = await self.search_jobs_with_meta(
+            keyword=keyword,
+            location=location,
+            experience=experience,
+            education=education,
+            industry=industry,
+            skills=skills,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            skip=skip,
+            limit=limit,
+        )
+        return jobs, total
+
+    async def search_jobs_with_meta(
+        self,
+        *,
+        keyword: Optional[str] = None,
+        location: Optional[int] = None,
+        experience: Optional[str] = None,
+        education: Optional[str] = None,
+        industry: Optional[int] = None,
+        skills: Optional[List[str]] = None,
+        salary_min: Optional[float] = None,
+        salary_max: Optional[float] = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[dict], int, str, List[str]]:
         """
         基于 ES 的职位全文搜索 (附带 PG 降级保护)
         """
         # --- 优先尝试 Elasticsearch 查询 ---
+        requested_skills = list(skills or [])
         try:
             es = await get_es() # Connects to ES implicitly via ESManager
             
@@ -53,6 +83,15 @@ class SearchService:
                 filter_clauses.append({"prefix": {"experience": experience}})
             if education:
                 filter_clauses.append({"prefix": {"education": education}})
+            if industry:
+                filter_clauses.append({"term": {"industry_code": int(industry)}})
+            for skill in requested_skills:
+                must_clauses.append({
+                    "multi_match": {
+                        "query": skill,
+                        "fields": ["skills^4", "ai_skills^4", "requirements", "description"],
+                    }
+                })
                 
             # 薪资处理 (单位：元) 因为 PG 侧是实际存的元
             if salary_min is not None:
@@ -86,7 +125,7 @@ class SearchService:
                  source = hit["_source"]
                  # 返回 ES document 包含的数据，不需要再查关联表。这是 ES 冗余设计的优势
                  job_list.append({
-                     #"id": source.get("id"),
+                     "id": source.get("id") or hit.get("_id"),
                      "title": source.get("title"),
                      "description": source.get("description"),
                      "requirements": source.get("requirements"),
@@ -104,11 +143,11 @@ class SearchService:
                          "id": 0, 
                          "name": source.get("industry", "")
                      },
-                     "tags": list(set(source.get("skills", []) + source.get("ai_skills", [])))
+                     "tags": list(set((source.get("skills") or []) + (source.get("ai_skills") or [])))
                  })
                  
             logger.info("Successfully fetched search results from Elasticsearch.")
-            return job_list, total
+            return job_list, total, "elasticsearch", []
 
         except Exception as e:
             logger.error(f"Elasticsearch search failed: {e}. Falling back to PostgreSQL DB.")
@@ -121,7 +160,7 @@ class SearchService:
                 location=location,
                 experience=experience,
                 education=education,
-                industry=None, # PostgreSQL search uses ID code not string, needs careful passing
+                industry=industry,
                 salary_min=salary_min,
                 salary_max=salary_max,
                 skip=skip,
@@ -130,26 +169,26 @@ class SearchService:
             
             job_list = []
             for job in jobs:
-                skills = []
+                job_skills = []
                 if job.tags:
                     try:
                         import json
                         parsed_tags = job.tags if isinstance(job.tags, (list, dict)) else json.loads(job.tags)
                         if isinstance(parsed_tags, str): parsed_tags = [parsed_tags]
-                        skills.extend(parsed_tags)
+                        job_skills.extend(parsed_tags)
                     except:
-                        skills.append(str(job.tags))
+                        job_skills.append(str(job.tags))
                 
                 if job.ai_skills:
                     try:
                         import json
                         parsed_ai = job.ai_skills if isinstance(job.ai_skills, (list, dict)) else json.loads(job.ai_skills)
                         if isinstance(parsed_ai, str): parsed_ai = [parsed_ai]
-                        skills.extend(parsed_ai)
+                        job_skills.extend(parsed_ai)
                     except:
-                        skills.append(str(job.ai_skills))
+                        job_skills.append(str(job.ai_skills))
                         
-                skills = list(set(skills))
+                job_skills = list(set(job_skills))
                 job_dict = {
                     "id": job.id,
                     "title": job.title,
@@ -169,11 +208,21 @@ class SearchService:
                         "id": job.industry.id if job.industry else 0,
                         "name": job.industry.name if job.industry else ""
                     },
-                    "tags": skills
+                    "tags": job_skills
                 }
                 job_list.append(job_dict)
                 
-            return job_list, total
+            warnings = []
+            if requested_skills:
+                required = {str(skill).strip().lower() for skill in requested_skills if str(skill).strip()}
+                job_list = [
+                    item
+                    for item in job_list
+                    if required.issubset({str(tag).strip().lower() for tag in item.get("tags", [])})
+                ]
+                total = len(job_list)
+                warnings.append("PostgreSQL 降级搜索的技能过滤仅作用于当前结果页")
+            return job_list, total, "postgresql", warnings
 
     async def search_jobs_by_ai_intent(self, intent: dict, skip: int = 0, limit: int = 20) -> Tuple[List[dict], int]:
         """

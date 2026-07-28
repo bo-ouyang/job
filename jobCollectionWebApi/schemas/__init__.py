@@ -4,6 +4,18 @@ from .skill_schema import SkillBase, SkillCreate, SkillUpdate, SkillInDB, SkillW
 from .analysis_schema import AnalysisResultBase, AnalysisResultCreate, AnalysisResultUpdate, AnalysisResultInDB, AnalysisResultList, UserQueryCreate, UserQueryInDB
 from .user_schema import UserBase, UserCreate, UserUpdate, UserAdminUpdate, UserInDB, UserPublic, UserDetail, UserStats, UserList, UserRole, UserStatus
 from .token_schema import Token, TokenPayload, TokenData, WechatLoginRequest, PhoneLoginRequest, SendSMSRequest, RefreshTokenRequest, LoginResponse
+from .agent_schema import (
+    AgentConversationCreate,
+    AgentConversationUpdate,
+    AgentConversationResponse,
+    AgentMessageCreate,
+    AgentMessageResponse,
+    AgentRunCreate,
+    AgentRunResponse,
+    CareerProfileUpdate,
+    CareerProfileResponse,
+    AgentConversationListResponse,
+)
 
 # 解决循环导入
 from .job_schema import JobWithRelations

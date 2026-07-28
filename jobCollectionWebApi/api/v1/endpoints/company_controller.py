@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,8 +18,8 @@ router = APIRouter()
 async def read_companies(
     db: AsyncSession = Depends(get_db),
     commons: CommonQueryParams = Depends(),
-    industry: str | None = Query(default=None, max_length=100),
-    location: str | None = Query(default=None, max_length=100),
+    industry: Optional[str] = Query(default=None, max_length=100),
+    location: Optional[str] = Query(default=None, max_length=100),
 ):
     companies = await crud_company.search(
         db,

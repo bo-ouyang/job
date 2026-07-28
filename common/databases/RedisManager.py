@@ -13,7 +13,7 @@ class RedisManager:
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
-            # max_connections=settings.REDIS_MAX_CONNECTIONS, # asyncio version manages this differently or same
+            max_connections=settings.REDIS_MAX_CONNECTIONS,
             socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
             socket_connect_timeout=settings.REDIS_SOCKET_CONNECT_TIMEOUT,
             retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
@@ -23,7 +23,8 @@ class RedisManager:
     
     def make_key(self, key: str) -> str:
         """生成带前缀的键"""
-        return f"{settings.REDIS_KEY_PREFIX}:{key}"
+        prefix = str(settings.REDIS_KEY_PREFIX or "").strip(":")
+        return f"{prefix}:{key}" if prefix else key
     
     async def set_cache(self, key: str, value: Any, expire: Optional[int] = None, jitter: bool = True) -> bool:
         """设置缓存 (支持 TTL 抖动防雪崩, 可缓存 None 防穿透)"""
@@ -109,13 +110,11 @@ class RedisManager:
     
     async def set_analysis_result(self, analysis_id: str, result: Any) -> bool:
         """存储分析结果"""
-        key = self.make_key(f"analysis:{analysis_id}")
-        return await self.set_cache(key, result, settings.REDIS_ANALYSIS_EXPIRE)
+        return await self.set_cache(f"analysis:{analysis_id}", result, settings.REDIS_ANALYSIS_EXPIRE)
     
     async def get_analysis_result(self, analysis_id: str) -> Optional[Any]:
         """获取分析结果"""
-        key = self.make_key(f"analysis:{analysis_id}")
-        return await self.get_cache(key)
+        return await self.get_cache(f"analysis:{analysis_id}")
     
     async def increment_counter(self, key: str, amount: int = 1) -> int:
         """自增计数器"""
@@ -134,6 +133,14 @@ class RedisManager:
             return await self.redis_client.ping()
         except redis.ConnectionError:
             return False
+
+    async def close(self) -> None:
+        close_method = getattr(self.redis_client, "aclose", None) or getattr(self.redis_client, "close", None)
+        if close_method:
+            result = close_method()
+            if hasattr(result, "__await__"):
+                await result
+        await self.pool.disconnect()
 
 # 创建全局 Redis 管理器实例
 redis_manager = RedisManager()

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>职途 · 前端 V2 原型</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="prototype-note">V2 可交互原型 · 数据均为演示</div>
+  <header class="topbar">
+    <button class="brand nav-trigger" data-page="home" aria-label="返回首页">
+      <span class="brand-mark">途</span>
+      <span><strong>职途</strong><small>CAREER INTELLIGENCE</small></span>
+    </button>
+    <nav class="primary-nav" aria-label="主导航">
+      <button class="nav-item active" data-page="home">行业全景</button>
+      <button class="nav-item" data-page="career">职业分析</button>
+    </nav>
+    <div class="top-actions">
+      <button class="balance-chip nav-trigger" data-page="wallet"><span>余额</span><b>¥ 68.40</b></button>
+      <button class="icon-button" aria-label="通知">◌<i></i></button>
+      <button class="avatar-button nav-trigger" data-page="profile"><span>林</span><b>林晓雨<small>计算机科学与技术</small></b><em>⌄</em></button>
+    </div>
+  </header>
+
+  <main>
+    <section class="page active" data-page-panel="home">
+      <div class="page-shell">
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow"><i></i> LIVE LABOR MARKET · 2026</p>
+            <h1>看懂行业趋势，<br /><span>再决定你的方向。</span></h1>
+            <p class="hero-description">聚合真实招聘市场数据，观察行业需求、城市薪资和技能变化。首页无需登录，所有人都可以自由探索。</p>
+            <div class="hero-actions">
+              <button class="primary-button nav-trigger" data-page="career">生成我的职业分析 <span>→</span></button>
+              <span class="data-freshness"><i></i> 数据更新于 10 分钟前</span>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+            <div class="hero-stat"><small>市场活跃指数</small><strong>82.6</strong><em>较上月 +4.8%</em></div>
+            <div class="signal-card signal-a"><span>人工智能</span><b>+24.8%</b></div>
+            <div class="signal-card signal-b"><span>先进制造</span><b>+18.3%</b></div>
+          </div>
+        </section>
+
+        <section class="home-ai-dialog card open" id="homeAiDialog" aria-label="AI 行业问数对话框" aria-hidden="false">
+          <div class="home-ai-main">
+            <div class="home-ai-heading"><span>AI</span><div><p class="section-kicker">MARKET DATA COPILOT</p><h2>AI 行业问数</h2></div><i></i><em>在线</em><button class="home-ai-close" type="button" aria-label="收起 AI 对话框">×</button></div>
+            <div class="home-chat-flow">
+              <div class="home-ai-message">你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。</div>
+              <div class="home-user-message">计算机专业应届生，现在去杭州还是上海机会更多？</div>
+              <div class="home-ai-answer"><b>杭州的增速更高，上海的岗位总量更大。</b><p>杭州相关岗位近半年增长 19.4%，上海为 12.8%；上海岗位量约高 48%。如果偏向 AI 产品和电商技术，杭州的性价比更高。</p><button class="nav-trigger" data-page="career">结合我的资料继续分析 →</button></div>
+            </div>
+            <div class="home-chat-composer"><textarea placeholder="例如：新能源行业未来一年需要哪些技能？"></textarea><div><span>发送问题需登录 · 约 ¥0.20/次</span><button class="charge-trigger" data-cost="0.20" data-action="向 AI 行业助手提问">发送问题 ↑</button></div></div>
+          </div>
+        </section>
+        <button class="home-ai-launcher" type="button" aria-controls="homeAiDialog" aria-expanded="true" aria-hidden="true" aria-label="打开 AI 行业问数"><span>AI</span><b>问行业数据</b><i></i></button>
+
+        <section class="filter-bar card">
+          <label><span>时间范围</span><select><option>近 12 个月</option><option>近 6 个月</option><option>近 30 天</option></select></label>
+          <label><span>城市</span><select><option>全国</option><option>北京</option><option>上海</option><option>深圳</option><option>杭州</option></select></label>
+          <label><span>行业</span><select><option>全部行业</option><option>互联网 / AI</option><option>先进制造</option><option>新能源</option></select></label>
+          <label><span>学历</span><select><option>不限</option><option>本科</option><option>硕士</option></select></label>
+          <button class="filter-button">应用筛选</button>
+        </section>
+
+        <section class="kpi-grid">
+          <article class="kpi-card"><div class="kpi-icon blue">▦</div><p>在招岗位</p><strong>1,284,760</strong><span class="up">↑ 12.6%</span><small>对比上月</small></article>
+          <article class="kpi-card"><div class="kpi-icon mint">¥</div><p>全国月薪中位数</p><strong>¥ 12,680</strong><span class="up">↑ 4.2%</span><small>税前月薪</small></article>
+          <article class="kpi-card"><div class="kpi-icon violet">↗</div><p>增长最快行业</p><strong>人工智能</strong><span class="up">↑ 24.8%</span><small>岗位同比</small></article>
+          <article class="kpi-card"><div class="kpi-icon amber">⌁</div><p>技能需求热点</p><strong>数据分析</strong><span class="up">↑ 17.5%</span><small>出现频率</small></article>
+        </section>
+
+        <section class="dashboard-grid top-grid">
+          <article class="card chart-card span-two">
+            <div class="card-heading"><div><p class="section-kicker">DEMAND TREND</p><h2>重点行业岗位需求趋势</h2></div><div class="legend"><span><i class="blue-dot"></i>人工智能</span><span><i class="green-dot"></i>新能源</span><span><i class="gray-dot"></i>互联网</span></div></div>
+            <svg class="line-chart" viewBox="0 0 760 260" role="img" aria-label="行业岗位需求趋势图">
+              <g class="grid-lines"><line x1="50" y1="20" x2="740" y2="20"/><line x1="50" y1="75" x2="740" y2="75"/><line x1="50" y1="130" x2="740" y2="130"/><line x1="50" y1="185" x2="740" y2="185"/><line x1="50" y1="240" x2="740" y2="240"/></g>
+              <defs><linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#176bff" stop-opacity=".24"/><stop offset="1" stop-color="#176bff" stop-opacity="0"/></linearGradient></defs>
+              <path class="area" d="M50 195 C115 184 130 176 185 171 S280 135 335 142 S430 118 485 105 S575 88 625 61 S695 39 740 28 L740 240 L50 240 Z"/>
+              <path class="line primary-line" d="M50 195 C115 184 130 176 185 171 S280 135 335 142 S430 118 485 105 S575 88 625 61 S695 39 740 28"/>
+              <path class="line green-line" d="M50 214 C120 206 140 190 190 196 S280 165 340 173 S430 144 485 150 S570 119 630 123 S700 94 740 101"/>
+              <path class="line gray-line" d="M50 130 C110 126 150 133 190 125 S280 129 340 121 S430 137 485 130 S580 143 630 139 S700 146 740 141"/>
+              <g class="axis-labels"><text x="50" y="258">8月</text><text x="180" y="258">10月</text><text x="325" y="258">12月</text><text x="470" y="258">2月</text><text x="615" y="258">4月</text><text x="720" y="258">6月</text></g>
+            </svg>
+          </article>
+
+          <article class="card city-card">
+            <div class="card-heading"><div><p class="section-kicker">CITY SALARY</p><h2>城市薪资中位数</h2></div><button class="text-button">查看对比 →</button></div>
+            <div class="city-list">
+              <div><span><b>01</b>北京</span><i><em style="width:100%"></em></i><strong>18.6K</strong></div>
+              <div><span><b>02</b>上海</span><i><em style="width:94%"></em></i><strong>17.5K</strong></div>
+              <div><span><b>03</b>深圳</span><i><em style="width:91%"></em></i><strong>16.9K</strong></div>
+              <div><span><b>04</b>杭州</span><i><em style="width:83%"></em></i><strong>15.4K</strong></div>
+              <div><span><b>05</b>广州</span><i><em style="width:72%"></em></i><strong>13.3K</strong></div>
+            </div>
+            <p class="card-footnote">数据口径：本科及以上 · 1–3 年经验</p>
+          </article>
+        </section>
+
+        <section class="market-detail-grid">
+          <article class="card salary-distribution-card">
+            <div class="card-heading"><div><p class="section-kicker">SALARY DISTRIBUTION</p><h2>全行业月薪分布</h2></div><span class="data-scope">样本 86.4 万</span></div>
+            <div class="histogram" aria-label="全行业薪资区间柱状图">
+              <div style="--height:35%"><b>12%</b><i></i><span>8K 以下</span></div>
+              <div style="--height:68%"><b>24%</b><i></i><span>8–12K</span></div>
+              <div class="highlight" style="--height:100%"><b>31%</b><i></i><span>12–18K</span></div>
+              <div style="--height:73%"><b>21%</b><i></i><span>18–25K</span></div>
+              <div style="--height:41%"><b>9%</b><i></i><span>25–35K</span></div>
+              <div style="--height:20%"><b>3%</b><i></i><span>35K 以上</span></div>
+            </div>
+            <div class="histogram-summary"><div><small>薪资中位数</small><strong>¥12,680</strong></div><div><small>P75 薪资</small><strong>¥21,300</strong></div><p>技术研发与产品岗位的高薪区间占比连续 3 个月提升。</p></div>
+          </article>
+
+          <article class="card talent-structure-card">
+            <div class="card-heading"><div><p class="section-kicker">TALENT STRUCTURE</p><h2>学历与经验结构</h2></div><select><option>全部行业</option></select></div>
+            <div class="structure-block"><div class="structure-title"><span>学历要求</span><b>本科仍是主流</b></div><div class="stacked-bar"><i style="width:14%"></i><i style="width:62%"></i><i style="width:19%"></i><i style="width:5%"></i></div><div class="stacked-legend"><span><i></i>不限 14%</span><span><i></i>本科 62%</span><span><i></i>硕士 19%</span><span><i></i>其他 5%</span></div></div>
+            <div class="structure-block"><div class="structure-title"><span>经验要求</span><b>1–3 年需求最高</b></div><div class="experience-ring"><div class="ring-chart"><strong>42%</strong><small>1–3 年</small></div><div class="ring-legend"><span><i></i>应届 / 在校 18%</span><span><i></i>1–3 年 42%</span><span><i></i>3–5 年 27%</span><span><i></i>5 年以上 13%</span></div></div></div>
+          </article>
+
+          <article class="card opportunity-matrix-card">
+            <div class="card-heading"><div><p class="section-kicker">CITY OPPORTUNITY MATRIX</p><h2>城市机会矩阵</h2></div><span class="data-scope">横轴薪资 · 纵轴增长</span></div>
+            <div class="matrix-chart" aria-label="城市岗位增长与薪资机会矩阵">
+              <span class="matrix-zone high">高增长 / 高薪资</span><span class="matrix-zone stable">成熟市场</span>
+              <i class="matrix-line horizontal"></i><i class="matrix-line vertical"></i>
+              <button class="city-bubble hangzhou"><b>杭州</b><small>+19.4%</small></button>
+              <button class="city-bubble shenzhen"><b>深圳</b><small>+16.8%</small></button>
+              <button class="city-bubble shanghai"><b>上海</b><small>+12.8%</small></button>
+              <button class="city-bubble beijing"><b>北京</b><small>+10.6%</small></button>
+              <button class="city-bubble chengdu"><b>成都</b><small>+15.1%</small></button>
+              <span class="matrix-axis y">岗位增长率 ↑</span><span class="matrix-axis x">薪资中位数 →</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="signal-section">
+          <div class="section-heading"><div><p class="section-kicker">MONTHLY SIGNALS</p><h2>本月关键变化</h2></div><span class="muted">从岗位发布、薪资和技能频率中识别</span></div>
+          <div class="change-signal-grid">
+            <article><span class="signal-icon rise">↗</span><div><small>需求加速</small><strong>AI 产品经理</strong><p>岗位发布量连续 6 周上升</p></div><em>+28.4%</em><svg viewBox="0 0 90 28"><path d="M2 24 C18 24 20 17 34 19 S54 12 63 14 S78 6 88 3"/></svg></article>
+            <article><span class="signal-icon salary">¥</span><div><small>薪资上涨</small><strong>新能源算法</strong><p>P50 月薪达到 23.6K</p></div><em>+11.2%</em><svg viewBox="0 0 90 28"><path d="M2 23 C15 20 23 22 34 17 S55 19 65 11 S80 10 88 5"/></svg></article>
+            <article><span class="signal-icon skill">⌁</span><div><small>新兴技能</small><strong>RAG / Agent</strong><p>首次进入技能需求 Top 20</p></div><em>+46.8%</em><svg viewBox="0 0 90 28"><path d="M2 25 C24 25 32 23 44 21 S59 14 68 14 S79 5 88 3"/></svg></article>
+            <article><span class="signal-icon cool">↓</span><div><small>需求降温</small><strong>传统运营岗位</strong><p>低经验岗位占比持续收缩</p></div><em class="down">-8.3%</em><svg class="down-line" viewBox="0 0 90 28"><path d="M2 4 C18 6 23 9 35 8 S55 17 65 15 S77 24 88 25"/></svg></article>
+          </div>
+        </section>
+
+        <section class="dashboard-grid bottom-grid">
+          <article class="card skill-card">
+            <div class="card-heading"><div><p class="section-kicker">SKILL SIGNAL</p><h2>热门技能需求</h2></div><span class="live-badge"><i></i>实时</span></div>
+            <div class="skill-cloud"><button class="largest">Python <small>68%</small></button><button class="large">数据分析 <small>61%</small></button><button>SQL <small>53%</small></button><button>AI 应用 <small>49%</small></button><button>项目管理 <small>42%</small></button><button>英语 <small>38%</small></button><button>产品设计 <small>35%</small></button><button>沟通协作 <small>32%</small></button></div>
+          </article>
+          <article class="card opportunity-card span-two">
+            <div class="card-heading"><div><p class="section-kicker">OPPORTUNITY RANK</p><h2>行业机会榜</h2></div><span class="muted">综合岗位增长、薪资与人才缺口</span></div>
+            <div class="opportunity-table">
+              <div class="table-head"><span>行业</span><span>岗位增长</span><span>薪资中位数</span><span>人才缺口</span><span>机会指数</span></div>
+              <div><span><b class="rank-one">1</b>人工智能 / 大模型</span><span class="up">+24.8%</span><span>¥ 21.6K</span><span>高</span><strong>92.4</strong></div>
+              <div><span><b>2</b>新能源与储能</span><span class="up">+18.3%</span><span>¥ 15.8K</span><span>高</span><strong>87.1</strong></div>
+              <div><span><b>3</b>智能制造</span><span class="up">+15.7%</span><span>¥ 14.9K</span><span>中高</span><strong>83.6</strong></div>
+              <div><span><b>4</b>跨境电商</span><span class="up">+12.2%</span><span>¥ 13.4K</span><span>中</span><strong>78.9</strong></div>
+            </div>
+          </article>
+        </section>
+      </div>
+    </section>
+
+    <section class="page" data-page-panel="career">
+      <div class="page-shell career-shell">
+        <section class="career-header">
+          <div><p class="eyebrow"><i></i> PERSONAL CAREER REPORT</p><h1>你好，林晓雨。<br /><span>这是你的职业机会地图。</span></h1><p>基于你的专业、课程、技能与当前市场数据生成。</p></div>
+          <div class="report-actions"><span>上次分析：今天 09:40</span><button class="outline-button nav-trigger" data-page="profile">完善资料</button><button class="primary-button charge-trigger" data-cost="2.00" data-action="重新生成职业分析">重新分析 · ¥2.00</button></div>
+        </section>
+
+        <section class="profile-strip card">
+          <div class="profile-score"><div><strong>78</strong><small>%</small></div><span>画像完整度</span></div>
+          <div class="profile-summary"><span>浙江理工大学</span><span>计算机科学与技术</span><span>2027 届本科</span><span>杭州 / 上海</span></div>
+          <p>再补充 <b>项目经历</b> 和 <b>英语水平</b>，分析准确度预计提升 12%</p>
+          <button class="text-button nav-trigger" data-page="profile">去补充 →</button>
+        </section>
+
+        <section class="analysis-filter card">
+          <label><span>目标城市</span><select><option>杭州</option><option>上海</option><option>深圳</option><option>北京</option></select></label>
+          <label><span>目标行业</span><select><option>人工智能</option><option>互联网</option><option>智能制造</option></select></label>
+          <label><span>职业方向</span><select><option>智能产品经理</option><option>数据分析师</option><option>AI 应用工程师</option></select></label>
+          <button class="filter-button">更新视图</button>
+        </section>
+
+        <div class="career-layout">
+          <div class="career-main">
+            <section>
+              <div class="section-heading"><div><p class="section-kicker">RECOMMENDED PATHS</p><h2>最适合你的 3 个方向</h2></div><span class="muted">匹配度由个人画像与市场需求共同计算</span></div>
+              <div class="direction-grid">
+                <article class="direction-card featured"><div class="direction-top"><span>最佳匹配</span><strong>86<small>%</small></strong></div><div class="direction-icon">✦</div><h3>智能产品经理</h3><p>专业技术背景和产品课程形成复合优势，杭州岗位近半年增长明显。</p><div class="tag-row"><span>技术理解</span><span>产品思维</span><span>AI 应用</span></div><div class="direction-footer"><b>薪资 15–25K</b><button>查看证据 →</button></div></article>
+                <article class="direction-card"><div class="direction-top"><span>稳健方向</span><strong>81<small>%</small></strong></div><div class="direction-icon cyan">▦</div><h3>数据分析师</h3><p>Python、SQL 和统计课程匹配度高，需要补充业务分析项目证据。</p><div class="tag-row"><span>Python</span><span>SQL</span><span>数据洞察</span></div><div class="direction-footer"><b>薪资 12–20K</b><button>查看证据 →</button></div></article>
+                <article class="direction-card"><div class="direction-top"><span>进阶挑战</span><strong>74<small>%</small></strong></div><div class="direction-icon purple">⌁</div><h3>AI 应用工程师</h3><p>市场需求强，但算法基础和工程项目是当前主要能力差距。</p><div class="tag-row"><span>Python</span><span>LLM</span><span>后端工程</span></div><div class="direction-footer"><b>薪资 18–30K</b><button>查看证据 →</button></div></article>
+              </div>
+            </section>
+
+            <section class="career-data-grid">
+              <article class="card radar-card">
+                <div class="card-heading"><div><p class="section-kicker">SKILL GAP</p><h2>能力差距</h2></div><select><option>智能产品经理</option></select></div>
+                <div class="radar-wrap">
+                  <svg viewBox="0 0 320 260"><g class="radar-grid"><polygon points="160,20 275,85 250,210 70,210 45,85"/><polygon points="160,55 242,101 224,186 96,186 78,101"/><polygon points="160,90 210,117 198,160 122,160 110,117"/><line x1="160" y1="20" x2="160" y2="210"/><line x1="45" y1="85" x2="250" y2="210"/><line x1="275" y1="85" x2="70" y2="210"/></g><polygon class="target-shape" points="160,39 257,91 232,194 84,200 63,91"/><polygon class="user-shape" points="160,62 228,105 205,173 105,180 89,108"/><g class="radar-label"><text x="143" y="14">技术理解</text><text x="270" y="80">产品设计</text><text x="232" y="230">数据分析</text><text x="35" y="230">沟通协作</text><text x="0" y="80">行业认知</text></g></svg>
+                  <div class="radar-notes"><span><i class="user"></i>你的能力</span><span><i class="target"></i>岗位要求</span><p><b>最大差距：</b>行业认知、产品设计</p></div>
+                </div>
+              </article>
+              <article class="card city-compare-card">
+                <div class="card-heading"><div><p class="section-kicker">CITY FIT</p><h2>城市机会对比</h2></div><button class="text-button">更换城市</button></div>
+                <div class="compare-list"><div class="compare-head"><span></span><b>杭州</b><b>上海</b></div><div><span>匹配岗位</span><b>1,286</b><b>1,904</b></div><div><span>薪资中位数</span><b>17.2K</b><b>19.8K</b></div><div><span>竞争指数</span><b class="good">适中</b><b class="warn">较高</b></div><div><span>近半年增长</span><b class="up">+19.4%</b><b class="up">+12.8%</b></div></div>
+                <div class="recommend-note"><span>建议</span><p>杭州的 AI 产品岗位增长更快，且你的院校地域网络具备优势。</p></div>
+              </article>
+            </section>
+
+            <section class="card action-plan-card">
+              <div class="card-heading"><div><p class="section-kicker">90-DAY ROADMAP</p><h2>你的 90 天行动路线</h2></div><button class="outline-button">保存到计划</button></div>
+              <div class="timeline"><article><span>01</span><div><small>第 1–30 天 · 补足基础</small><h3>完成一份 AI 产品竞品分析</h3><p>选择 3 个同类 AI 产品，从用户、功能、商业模式和模型能力四个维度分析。</p><div class="tag-row"><span>预计 12 小时</span><span>建立作品集</span></div></div></article><article><span>02</span><div><small>第 31–60 天 · 项目实践</small><h3>设计一个校园 AI 助手 MVP</h3><p>完成需求文档、低保真原型和核心指标设计，补齐产品设计证据。</p><div class="tag-row"><span>预计 24 小时</span><span>核心任务</span></div></div></article><article><span>03</span><div><small>第 61–90 天 · 求职验证</small><h3>定向投递并完成 5 次模拟面试</h3><p>针对杭州 AI 产品岗位准备项目讲述和行业问题。</p><div class="tag-row"><span>目标 20 份</span><span>验证方向</span></div></div></article></div>
+            </section>
+          </div>
+
+          <aside class="ai-coach card">
+            <div class="coach-heading"><span>AI</span><div><small>职业顾问</small><strong>基于你的报告提问</strong></div><i></i></div>
+            <div class="coach-context"><span>当前上下文</span><p>智能产品经理 · 杭州<br />职业分析报告 #A260728</p></div>
+            <div class="chat-list"><div class="assistant-message">我可以基于你的资料和市场数据，解释推荐理由或调整行动计划。</div><div class="suggestion-list"><button>为什么最推荐产品经理？</button><button>杭州和上海应该怎么选？</button><button>帮我细化第一个月计划</button></div></div>
+            <div class="chat-composer"><textarea placeholder="输入你的职业问题…"></textarea><div><span>每次约 ¥0.20</span><button class="charge-trigger" data-cost="0.20" data-action="发送 AI 职业问题">↑</button></div></div>
+            <p class="balance-hint">余额 ¥68.40 · 预计可对话 342 次</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" data-page-panel="profile">
+      <div class="page-shell account-shell">
+        <div class="account-heading"><div><p class="eyebrow"><i></i> PERSONAL PROFILE</p><h1>个人资料</h1><p>资料越完整，职业分析越准确。简历解析的信息会在你确认后更新到这里。</p></div><div class="completion-ring"><strong>78%</strong><span>资料完整度</span></div></div>
+        <div class="account-layout">
+          <aside class="account-nav card"><button class="active">基本资料</button><button>教育与专业</button><button>专业课程</button><button>专业技能</button><button class="nav-trigger" data-page="resume">简历管理 <span>2</span></button><button class="nav-trigger" data-page="wallet">余额与账单</button></aside>
+          <div class="profile-content">
+            <section class="card form-card">
+              <div class="card-heading"><div><p class="section-kicker">BASIC INFORMATION</p><h2>基本信息</h2></div><button class="text-button">编辑</button></div>
+              <div class="identity-row"><span class="large-avatar">林</span><div><strong>林晓雨</strong><p>2027 届 · 正在寻找实习机会</p></div><button class="outline-button">更换头像</button></div>
+              <div class="form-grid"><label><span>姓名</span><input value="林晓雨" /></label><label><span>所在城市</span><input value="杭州" /></label><label><span>手机号</span><input value="138****6821" /></label><label><span>邮箱</span><input value="linxiaoyu@example.com" /></label></div>
+            </section>
+            <section class="card form-card">
+              <div class="card-heading"><div><p class="section-kicker">EDUCATION</p><h2>教育与专业</h2></div><button class="text-button">编辑</button></div>
+              <div class="education-card"><span class="school-mark">浙</span><div><strong>浙江理工大学</strong><p>计算机科学与技术 · 本科 · 2023.09–2027.06</p><div class="tag-row"><span>一本院校</span><span>GPA 3.6 / 4.0</span><span>专业前 20%</span></div></div></div>
+              <div class="preference-grid"><div><small>目标方向</small><strong>智能产品经理</strong></div><div><small>意向城市</small><strong>杭州、上海</strong></div><div><small>期望薪资</small><strong>12–18K</strong></div></div>
+            </section>
+            <section class="two-column-forms">
+              <article class="card form-card"><div class="card-heading"><div><p class="section-kicker">COURSES</p><h2>专业课程</h2></div><button class="add-button">＋ 添加</button></div><div class="item-list"><div><span>数据结构与算法<small>核心课程 · 92 分</small></span><b>熟练</b></div><div><span>数据库原理<small>核心课程 · 88 分</small></span><b>熟练</b></div><div><span>软件工程<small>专业课程 · 90 分</small></span><b>掌握</b></div><div><span>产品设计基础<small>选修课程 · 86 分</small></span><b>掌握</b></div></div></article>
+              <article class="card form-card"><div class="card-heading"><div><p class="section-kicker">SKILLS</p><h2>专业技能</h2></div><button class="add-button">＋ 添加</button></div><div class="skill-detail-list"><div><span>Python<small>项目 / 课程</small></span><i><em style="width:78%"></em></i><b>熟练</b></div><div><span>SQL<small>课程 / 实习</small></span><i><em style="width:72%"></em></i><b>熟练</b></div><div><span>Axure<small>个人项目</small></span><i><em style="width:58%"></em></i><b>掌握</b></div><div><span>数据分析<small>课程项目</small></span><i><em style="width:64%"></em></i><b>掌握</b></div></div></article>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" data-page-panel="resume">
+      <div class="page-shell narrow-shell">
+        <div class="account-heading"><div><p class="eyebrow"><i></i> RESUME INTELLIGENCE</p><h1>简历管理</h1><p>上传 PDF 简历，AI 会提取教育、课程、技能与经历；只有你确认的字段才会写入资料。</p></div><button class="outline-button nav-trigger" data-page="profile">返回个人资料</button></div>
+        <section class="upload-zone card" id="uploadZone"><div class="upload-symbol">⇧</div><h2>拖拽 PDF 简历到这里</h2><p>或点击选择文件 · 最大 10MB · 解析过程约 30 秒</p><button class="primary-button" id="uploadButton">选择 PDF 文件</button><input type="file" id="fileInput" accept="application/pdf" hidden /></section>
+        <section class="resume-list card"><div class="card-heading"><div><p class="section-kicker">RESUME FILES</p><h2>我的简历</h2></div><span class="muted">共 2 份</span></div><div class="resume-row"><span class="pdf-icon">PDF</span><div><strong>林晓雨-产品实习简历.pdf</strong><p>2026-07-26 上传 · 1.8MB</p></div><span class="status success">解析完成</span><button>查看解析</button><button>···</button></div><div class="resume-row"><span class="pdf-icon">PDF</span><div><strong>林晓雨-通用简历.pdf</strong><p>2026-06-18 上传 · 1.4MB</p></div><span class="status muted-status">已归档</span><button>查看</button><button>···</button></div></section>
+        <section class="parse-preview card"><div class="card-heading"><div><p class="section-kicker">PARSE PREVIEW</p><h2>待确认的资料更新</h2></div><div><span class="status warn-status">6 项待确认</span><button class="primary-button small" id="acceptAll">全部接受</button></div></div><div class="diff-list"><div><label><input type="checkbox" checked /></label><span><small>专业技能 · 新增</small><strong>Figma</strong><p>来源：校园二手交易平台产品设计项目</p></span><em>＋ 新增</em></div><div><label><input type="checkbox" checked /></label><span><small>项目经历 · 新增</small><strong>校园二手交易平台</strong><p>负责需求调研、原型设计和数据分析</p></span><em>＋ 新增</em></div><div><label><input type="checkbox" /></label><span><small>目标岗位 · 存在冲突</small><strong>数据分析师 <b>→</b> AI 产品经理</strong><p>现有资料与简历求职意向不一致</p></span><em class="conflict">需确认</em></div></div><div class="preview-footer"><p>勾选的内容将在保存后更新个人资料，原数据会保留变更记录。</p><button class="primary-button" id="saveResumeChanges">保存 2 项更新</button></div></section>
+      </div>
+    </section>
+
+    <section class="page" data-page-panel="wallet">
+      <div class="page-shell narrow-shell">
+        <div class="account-heading"><div><p class="eyebrow"><i></i> WALLET & BILLING</p><h1>余额与账单</h1><p>余额用于 AI 职业分析和 AI 职业顾问对话，普通数据浏览与已有报告查看不收费。</p></div><button class="outline-button nav-trigger" data-page="profile">返回个人中心</button></div>
+        <section class="wallet-hero"><div><small>可用余额</small><strong>¥ 68.40</strong><p>冻结金额 ¥0.00</p></div><div><span>本月 AI 消费</span><strong>¥ 12.60</strong><small>共 18 次服务</small></div><div><span>累计充值</span><strong>¥ 100.00</strong><small>最近充值 07-20</small></div></section>
+        <section class="card recharge-card"><div class="card-heading"><div><p class="section-kicker">RECHARGE</p><h2>余额充值</h2></div><span class="secure-note">交易由支付平台安全处理</span></div><div class="amount-grid"><button>¥20</button><button class="selected">¥50 <small>推荐</small></button><button>¥100 <small>赠 ¥5</small></button><button>¥200 <small>赠 ¥15</small></button><label>自定义金额<input placeholder="输入金额" /></label></div><div class="payment-row"><span>支付方式</span><label><input type="radio" checked /> 支付宝</label><label><input type="radio" /> 微信支付</label><button class="primary-button" id="rechargeButton">立即充值 ¥50</button></div></section>
+        <section class="card bill-card"><div class="card-heading"><div><p class="section-kicker">TRANSACTIONS</p><h2>收支明细</h2></div><div class="bill-tabs"><button class="active">全部</button><button>充值</button><button>AI 消费</button><button>退款</button></div></div><div class="bill-table"><div class="table-head"><span>时间</span><span>项目</span><span>状态</span><span>金额</span><span>余额</span></div><div><span>07-28 09:40</span><span><b>AI 职业分析</b><small>报告 #A260728</small></span><span class="status success">已完成</span><strong class="expense">- ¥2.00</strong><span>¥68.40</span></div><div><span>07-27 21:18</span><span><b>AI 职业顾问</b><small>对话 6 次</small></span><span class="status success">已完成</span><strong class="expense">- ¥1.20</strong><span>¥70.40</span></div><div><span>07-20 14:22</span><span><b>余额充值</b><small>支付宝 · 订单 07201422</small></span><span class="status success">充值成功</span><strong class="income">+ ¥50.00</strong><span>¥71.60</span></div><div><span>07-16 10:03</span><span><b>AI 职业分析退回</b><small>任务执行失败</small></span><span class="status refund">已退回</span><strong class="income">+ ¥2.00</strong><span>¥21.60</span></div></div></section>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="chargeModal" aria-hidden="true">
+    <div class="modal-card"><button class="modal-close" aria-label="关闭">×</button><div class="modal-icon">¥</div><p class="section-kicker">BALANCE CONFIRMATION</p><h2 id="chargeTitle">确认使用 AI 服务</h2><p>本次将从余额中扣除</p><strong class="modal-cost">¥<span id="chargeCost">2.00</span></strong><div class="modal-balance"><span>当前余额</span><b>¥68.40</b></div><button class="primary-button full" id="confirmCharge">确认并开始</button><small>任务失败或取消后，金额将自动退回</small></div>
+  </div>
+
+  <div class="toast" id="toast"><span>✓</span><p>操作已完成</p></div>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -24,7 +24,12 @@ from .spider_boss_crawl_url import SpiderBossCrawlUrl
 from .major import Major, MajorIndustryRelation
 from .boss_stu_crawl_url import BossStuCrawlUrl
 from .system_config import SystemConfig
+from .proxy import Proxy
 from .ai_task import AiTask
+from .agent_conversation import AgentConversation
+from .agent_message import AgentMessage
+from .agent_run import AgentRun
+from .career_profile import CareerProfile
 
 __all__ = [
     'Base',
@@ -67,5 +72,10 @@ __all__ = [
     'MajorIndustryRelation',
     'BossStuCrawlUrl',
     'SystemConfig',
+    'Proxy',
     'AiTask',
+    'AgentConversation',
+    'AgentMessage',
+    'AgentRun',
+    'CareerProfile',
 ]

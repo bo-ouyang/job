@@ -19,6 +19,12 @@ export const useAuthStore = defineStore("auth", () => {
   const token = ref(localStorage.getItem("token") || null);
   const refreshToken = ref(localStorage.getItem("refresh_token") || null);
 
+  if (typeof window !== "undefined") {
+    window.addEventListener("auth-token-refreshed", (event) => {
+      token.value = event.detail?.token || localStorage.getItem("token");
+    });
+  }
+
   // Getters
   const isAuthenticated = computed(() => !!token.value);
 
@@ -85,6 +91,13 @@ export const useAuthStore = defineStore("auth", () => {
     } catch (e) {
       /* ignore */
     }
+    try {
+      import("@/stores/agent")
+        .then(({ useAgentStore }) => useAgentStore().reset())
+        .catch(() => {});
+    } catch (e) {
+      /* ignore */
+    }
 
     token.value = data.token.access_token;
     refreshToken.value = data.token.refresh_token;
@@ -96,6 +109,8 @@ export const useAuthStore = defineStore("auth", () => {
     localStorage.setItem("refresh_token", refreshToken.value);
     localStorage.setItem("user", JSON.stringify(user.value));
   };
+
+  const completeLogin = (data) => handleLoginSuccess(data);
 
   const logout = async () => {
     try {
@@ -118,10 +133,13 @@ export const useAuthStore = defineStore("auth", () => {
       } catch (e) {
         console.error("Failed to reset aiTask store:", e);
       }
-      // Force redirect to login page cleanly via router
-      if (window.location.pathname !== "/login") {
-        router.push("/login");
+      try {
+        const agentStore = (await import("@/stores/agent")).useAgentStore();
+        agentStore.reset();
+      } catch (e) {
+        console.error("Failed to reset Agent store:", e);
       }
+      router.push({ name: "home" });
     }
   };
 
@@ -145,6 +163,7 @@ export const useAuthStore = defineStore("auth", () => {
     checkQrCodeStatus,
     mockScanQrCode,
     mockConfirmQrCode,
+    completeLogin,
     logout,
     updateProfile,
   };

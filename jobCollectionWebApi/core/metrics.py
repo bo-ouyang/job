@@ -131,3 +131,60 @@ infra_health = Gauge(
     "Health status of infrastructure components (1=healthy, 0=unhealthy)",
     ["component"],  # database / elasticsearch / redis
 )
+
+# ── Career Agent ─────────────────────────────────────────────
+agent_runs_created = Counter(
+    "agent_runs_created_total",
+    "Career Agent runs accepted",
+    ["source"],
+)
+agent_runs_completed = Counter(
+    "agent_runs_completed_total",
+    "Career Agent runs completed",
+)
+agent_runs_failed = Counter(
+    "agent_runs_failed_total",
+    "Career Agent runs failed",
+    ["failure_kind"],
+)
+agent_runs_cancelled = Counter(
+    "agent_runs_cancelled_total",
+    "Career Agent runs cancelled",
+)
+agent_run_duration = Histogram(
+    "agent_run_duration_seconds",
+    "Career Agent end-to-end runtime duration",
+    buckets=[1, 2, 5, 10, 20, 30, 45, 60, 90],
+)
+agent_first_event_latency = Histogram(
+    "agent_first_event_latency_seconds",
+    "Latency from AgentRun creation to first event",
+    buckets=[0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+)
+agent_tool_calls = Counter(
+    "agent_tool_calls_total",
+    "Career Agent tool calls",
+    ["tool_name", "source"],
+)
+agent_tool_failures = Counter(
+    "agent_tool_failures_total",
+    "Career Agent tool failures",
+    ["tool_name", "failure_kind"],
+)
+agent_sse_connections_active = Gauge(
+    "agent_sse_connections_active",
+    "Active Career Agent SSE connections",
+)
+agent_sse_reconnects = Counter(
+    "agent_sse_reconnects_total",
+    "Career Agent SSE reconnect requests",
+)
+agent_lock_contention = Counter(
+    "agent_lock_contention_total",
+    "Career Agent run lock contention",
+)
+agent_event_publish_failures = Counter(
+    "agent_event_publish_failures_total",
+    "Career Agent event publication failures",
+    ["event"],
+)

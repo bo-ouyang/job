@@ -77,6 +77,7 @@ async def get_followed_companies(
 ):
     """获取关注的公司列表"""
     stmt = select(FollowCompany).where(FollowCompany.user_id == current_user.id)\
+        .options(selectinload(FollowCompany.company))\
         .offset(skip).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()

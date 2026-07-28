@@ -5,7 +5,10 @@ These tasks persist AI completion and failure messages for the message center.
 They can run directly inside a worker or be dispatched to the batch queue.
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import Optional
 
 from celery import shared_task
 
@@ -35,8 +38,8 @@ def build_ai_task_message_content(
     *,
     feature_key: str,
     status: str,
-    execution_time: float | None = None,
-    error_message: str | None = None,
+    execution_time: Optional[float] = None,
+    error_message: Optional[str] = None,
 ) -> tuple[str, str]:
     feature_name = _feature_display(feature_key)
     if status == "completed":
@@ -57,8 +60,8 @@ async def save_ai_task_message(
     feature_key: str,
     celery_task_id: str,
     status: str,
-    execution_time: float | None = None,
-    error_message: str | None = None,
+    execution_time: Optional[float] = None,
+    error_message: Optional[str] = None,
 ):
     from common.databases.PostgresManager import db_manager
     from common.databases.models.message import MessageType

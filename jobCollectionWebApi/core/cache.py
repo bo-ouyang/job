@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import hashlib
 import inspect
 import json
 import random
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from common.databases.RedisManager import redis_manager
 from jobCollectionWebApi.config import settings
@@ -57,7 +59,7 @@ def _should_skip_cache_arg(name: str, value: Any) -> bool:
     return False
 
 
-def cache(expire: int | None = None, key_prefix: str = ""):
+def cache(expire: Optional[int] = None, key_prefix: str = ""):
     """
     通用异步缓存装饰器。
 

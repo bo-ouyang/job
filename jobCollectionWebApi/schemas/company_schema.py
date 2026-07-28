@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from .base_schema import TimestampSchema
+from .types import SnowflakeId
 
 class CompanyBase(BaseModel):
     name: str
@@ -29,7 +30,7 @@ class CompanyUpdate(BaseModel):
     introduction: Optional[str] = None
 
 class CompanyInDB(CompanyBase, TimestampSchema):
-    id: int
+    id: SnowflakeId
 
     class Config:
         from_attributes = True
@@ -38,7 +39,7 @@ class CompanyWithJobs(CompanyInDB):
     jobs: List["JobInDB"] = []
 
 class CompanySimple(BaseModel):
-    id: int
+    id: SnowflakeId
     name: str
     industry: Optional[str] = None
     scale: Optional[str] = None

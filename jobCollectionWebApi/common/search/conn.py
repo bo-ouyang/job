@@ -5,12 +5,18 @@ from config import settings
 from core.logger import sys_logger as logger
 
 
+class ElasticsearchDisabledError(RuntimeError):
+    pass
+
+
 class ESManager:
     def __init__(self):
         self.es: AsyncElasticsearch = None
 
     async def connect(self):
         """建立连接"""
+        if not settings.ES_ENABLED:
+            raise ElasticsearchDisabledError("Elasticsearch is disabled")
         if self.es is None:
             es_url = settings.ES_URL
             logger.info(f"Connecting to Elasticsearch at {es_url}")
@@ -30,12 +36,16 @@ class ESManager:
             self.es = None
 
     async def get_es(self) -> AsyncElasticsearch:
+        if not settings.ES_ENABLED:
+            raise ElasticsearchDisabledError("Elasticsearch is disabled")
         if self.es is None:
             await self.connect()
         return self.es
         
     async def health_check(self) -> bool:
         """健康检查"""
+        if not settings.ES_ENABLED:
+            return False
         try:
             es = await self.get_es()
             is_ping = await es.ping()
@@ -48,6 +58,8 @@ class ESManager:
 
     async def ensure_index(self, index_name: str, mapping: dict, recreate: bool = False):
         """确保索引存在，不存在则创建；recreate=True 时先删除再重建"""
+        if not settings.ES_ENABLED:
+            raise ElasticsearchDisabledError("Elasticsearch is disabled")
         es = await self.get_es()
         
         try:

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { applicationAPI } from '@/api/application';
+import { formatJobSalary } from '@/utils/jobData';
 
 const applications = ref([]);
 const loading = ref(true);
@@ -57,7 +58,7 @@ onMounted(fetchApplications);
                 <div class="job-info">
                     <h3 @click="$router.push(`/jobs/${app.job.id}`)" class="job-link">{{ app.job.title }}</h3>
                     <div class="company">{{ app.job.company_name || '未知公司' }}</div>
-                    <div class="salary">{{ app.job.salary_min }}-{{ app.job.salary_max }}</div>
+                    <div class="salary">{{ formatJobSalary(app.job) }}</div>
                 </div>
                 <div class="status-col">
                     <span class="status-tag" :class="getStatusClass(app.status)">

@@ -11,7 +11,7 @@ from common.search.conn import get_es
 from core.cache import cache
 from core.logger import sys_logger as logger
 from collections import Counter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from common.databases.models.industry import Industry
 from common.databases.models.system_config import SystemConfig
 class AnalysisService:
@@ -574,14 +574,20 @@ class AnalysisService:
 
     #@cache(expire=86400, key_prefix="analysis:industry_codes_v6")
     async def _fetch_industry_codes_with_cache(self, industry_code: int) -> List[int]:
-        """根据行业 code 获取有相关的子业code列表 (利用 path 字极级?"""
+        """Return the selected industry and all descendants by code/path."""
         if not industry_code:
             return []
         async with db_manager.async_session() as session:
-            stmt = select(Industry.code).where(Industry.path.like(f"{industry_code}%"))
+            stmt = select(Industry.code).where(
+                or_(
+                    Industry.code == int(industry_code),
+                    Industry.parent_id == int(industry_code),
+                    Industry.path.like(f"%/{int(industry_code)}/%"),
+                )
+            )
             result = await session.execute(stmt)
-            codes = [row[0] for row in result.all()]
-        return codes
+            codes = {int(row[0]) for row in result.all()}
+        return sorted(codes)
 
     @cache(expire=3600, key_prefix="analysis:skill_cloud:v4")
     async def get_skill_cloud_stats(self, keyword: str, industry: int = None, industry_name: str = None, limit: int = 20) -> List[Dict[str, Any]]:

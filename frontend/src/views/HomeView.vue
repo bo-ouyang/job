@@ -1,636 +1,211 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { analysisAPI } from "@/api/analysis";
+
+import { marketAPI } from "@/api/market";
+import { careerAPI } from "@/api/career";
+import HomePanel from "@/components/home/HomePanel.vue";
+import KpiCard from "@/components/home/KpiCard.vue";
+import IndustryTrendChart from "@/components/charts/IndustryTrendChart.vue";
+import SalaryBarChart from "@/components/charts/SalaryBarChart.vue";
+import SkillDonutChart from "@/components/charts/SkillDonutChart.vue";
+import homeMockData from "@/data/homeMockData";
+import { loadMarketDashboard } from "@/services/marketDashboard";
+import { useAuthStore } from "@/stores/auth";
 
 const router = useRouter();
-const searchQuery = ref("");
-const isAiMode = ref(false); // AI search mode toggle
-const snapshotLoading = ref(false);
-const snapshot = ref({
-  total_jobs: 0,
-  salary: [],
-  skills: [],
-  industries: [],
-});
+const authStore = useAuthStore();
+const dashboard = ref(null);
+const dataSource = ref("loading");
+const updatedAt = ref(null);
+const pricing = ref({});
+const loading = ref(true);
+const aiOpen = ref(true);
+const aiSending = ref(false);
+const aiQuestion = ref("");
+const aiError = ref("");
+const aiMessages = ref([
+  {
+    role: "assistant",
+    content: "你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。",
+  },
+]);
+const filters = reactive({ range: "12m", city: "", industry: "", education: "" });
 
-const topSkill = computed(() => snapshot.value.skills?.[0]?.name || "-");
-const topIndustry = computed(() => snapshot.value.industries?.[0]?.name || "-");
-const topSalaryBand = computed(() => {
-  const salary = snapshot.value.salary || [];
-  if (!salary.length) return "-";
-  const maxBand = salary.reduce((best, item) => {
-    if (!best || (item.value || 0) > (best.value || 0)) return item;
-    return best;
-  }, null);
-  return maxBand?.name || "-";
-});
-const topSkills = computed(() => (snapshot.value.skills || []).slice(0, 6));
-const leadingIndustries = computed(() => (snapshot.value.industries || []).slice(0, 4));
-const salaryBreakdown = computed(() => {
-  const total = Number(snapshot.value.total_jobs || 0) || 1;
-  return (snapshot.value.salary || [])
-    .slice(0, 5)
-    .map((item) => ({
-      ...item,
-      percent: Math.min(100, Math.round(((item.value || 0) / total) * 100)),
-    }));
-});
+const market = computed(() => dashboard.value || homeMockData);
+const filterOptions = computed(() => market.value.filters || homeMockData.filters);
+const questionPrice = computed(() => pricing.value.marketQuestion?.amount || "");
+const priceHint = computed(() => questionPrice.value
+  ? `预计 ¥${questionPrice.value}/次`
+  : "价格以发送前确认为准");
 
-const goToAnalysis = () => {
-  router.push({ name: "home", hash: "#analysis-panel" });
+const formatUpdatedAt = (value) => {
+  if (!value) return "更新时间待同步";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return `更新于 ${date.toLocaleString("zh-CN", { hour12: false })}`;
 };
 
-const handleSearch = () => {
-  if (searchQuery.value.trim()) {
-    if (isAiMode.value) {
-      router.push({ name: "jobs", query: { ai_q: searchQuery.value } });
-    } else {
-      router.push({ name: "jobs", query: { q: searchQuery.value } });
-    }
+const refreshDashboard = async () => {
+  loading.value = true;
+  const result = await loadMarketDashboard({ ...filters });
+  dashboard.value = result.data;
+  dataSource.value = result.source;
+  updatedAt.value = result.updatedAt;
+  loading.value = false;
+};
+
+const loadPricing = async () => {
+  try {
+    const response = await careerAPI.getPricing();
+    pricing.value = response?.data || {};
+  } catch {
+    pricing.value = {};
   }
 };
 
-const fetchSnapshot = async () => {
-  snapshotLoading.value = true;
+const matrixStyle = (item) => ({
+  left: `${Math.min(84, Math.max(10, (Number(item.salary) - 10) * 10))}%`,
+  bottom: `${Math.min(76, Math.max(12, (Number(item.growth) - 7) * 5.2))}%`,
+  width: `${item.size || 64}px`,
+  height: `${item.size || 64}px`,
+});
+
+const goCareerAnalysis = () => router.push({ name: "career-analysis" });
+
+const sendAiQuestion = async () => {
+  const question = aiQuestion.value.trim();
+  if (!question || aiSending.value) return;
+  if (!authStore.isAuthenticated) {
+    router.push({
+      name: "home",
+      query: { login: "true", redirect: "/", action: "market-ai" },
+    });
+    return;
+  }
+
+  aiSending.value = true;
+  aiError.value = "";
+  aiMessages.value.push({ role: "user", content: question });
+  aiQuestion.value = "";
   try {
-    const res = await analysisAPI.getJobStats({});
-    if (res?.data) {
-      snapshot.value = {
-        total_jobs: res.data.total_jobs || 0,
-        salary: res.data.salary || [],
-        skills: res.data.skills || [],
-        industries: res.data.industries || [],
-      };
-    }
+    const idempotencyKey = globalThis.crypto?.randomUUID?.()
+      || `market-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const response = await marketAPI.askQuestion(
+      { question, context: { filters: { ...filters } } },
+      idempotencyKey,
+    );
+    const content = response?.data?.answer || response?.data?.content || "分析任务已创建，请稍后查看结果。";
+    aiMessages.value.push({ role: "assistant", content });
   } catch (error) {
-    console.error("Failed to fetch home snapshot", error);
+    aiError.value = error?.response?.data?.detail || "问题暂时发送失败，请稍后重试。";
   } finally {
-    snapshotLoading.value = false;
+    aiSending.value = false;
   }
 };
 
 onMounted(() => {
-  fetchSnapshot();
+  refreshDashboard();
+  loadPricing();
 });
 </script>
 
 <template>
-  <div class="home">
-    <section class="hero">
-      <div class="hero-content">
-        <h1>洞察职场，<span class="gradient-text">掌握未来</span></h1>
-        <p class="hero-subtitle">基于大数据的大学生就业技能分析平台，助你精准定位理想职位。</p>
-        
-        <div class="search-tabs">
-          <button :class="{ active: !isAiMode }" @click="isAiMode = false; searchQuery = ''">精准搜索</button>
-          <button :class="{ active: isAiMode, 'ai-tab': true }" @click="isAiMode = true; searchQuery = ''">✨ AI 智能匹配</button>
-        </div>
-        
-        <div class="search-box" :class="{ 'ai-focus': isAiMode }">
-          <input 
-            type="text" 
-            v-model="searchQuery" 
-            :placeholder="isAiMode ? '请输入您一整段口语化的求职期望 (例如：想在杭州找Go开发，不要外包，薪资大于20k...)' : '搜索职位 (如: Python开发, 数据分析师...)'"
-            @keyup.enter="handleSearch"
-          >
-          <button class="action-btn" :class="{ 'ai-btn': isAiMode }" @click="handleSearch">
-             {{ isAiMode ? 'AI 发现' : '搜索' }}
-          </button>
-        </div>
-
+  <main class="market-page">
+    <section class="market-hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><i /> LIVE LABOR MARKET · 2026</p>
+        <h1>看懂全行业就业市场，<br><span>再决定你的职业方向。</span></h1>
+        <p class="hero-description">聚合真实招聘市场数据，观察行业需求、城市薪资、人才结构和技能变化。首页无需登录，所有人都可以自由探索。</p>
         <div class="hero-actions">
-          <button class="ghost-btn" @click="goToAnalysis">查看全站分析</button>
-          <button class="ghost-btn" @click="router.push('/career-compass')">进入职业罗盘</button>
+          <button class="primary-action" @click="goCareerAnalysis">生成我的职业分析 <span>→</span></button>
+          <span class="freshness"><i /> {{ formatUpdatedAt(updatedAt) }}</span>
         </div>
       </div>
+      <div class="hero-visual" aria-label="市场活跃指数 82.6">
+        <div class="orbit orbit-one" /><div class="orbit orbit-two" />
+        <div class="hero-stat"><small>市场活跃指数</small><strong>82.6</strong><em>较上月 +4.8%</em></div>
+        <div v-for="(signal, index) in market.heroSignals" :key="signal.label" class="hero-signal" :class="`signal-${index}`"><span>{{ signal.label }}</span><b>{{ signal.value }}</b></div>
+      </div>
     </section>
 
-    <section class="pulse-strip">
-      <article class="pulse-item">
-        <span>市场热技能</span>
-        <strong>{{ snapshotLoading ? "..." : topSkill }}</strong>
-      </article>
-      <article class="pulse-item">
-        <span>主导行业</span>
-        <strong>{{ snapshotLoading ? "..." : topIndustry }}</strong>
-      </article>
-      <article class="pulse-item">
-        <span>薪资高峰带</span>
-        <strong>{{ snapshotLoading ? "..." : topSalaryBand }}</strong>
-      </article>
-      <article class="pulse-item">
-        <span>有效岗位样本</span>
-        <strong>{{ snapshotLoading ? "..." : Number(snapshot.total_jobs || 0).toLocaleString() }}</strong>
-      </article>
+    <form class="filter-card" @submit.prevent="refreshDashboard">
+      <label><span>时间范围</span><select v-model="filters.range"><option v-for="item in filterOptions.ranges" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label><span>城市</span><select v-model="filters.city"><option v-for="item in filterOptions.cities" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label><span>行业</span><select v-model="filters.industry"><option v-for="item in filterOptions.industries" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label><span>学历</span><select v-model="filters.education"><option v-for="item in filterOptions.educations" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <button class="filter-submit" :disabled="loading">{{ loading ? "加载中…" : "应用筛选" }}</button>
+    </form>
+
+    <p v-if="dataSource === 'fallback'" class="source-notice" data-test="market-source"><span>i</span> 数据服务已降级，当前展示最近一次可用数据 · {{ formatUpdatedAt(updatedAt) }}</p>
+
+    <section class="kpi-grid" :aria-busy="loading">
+      <KpiCard v-for="item in market.kpis" :key="item.label" :item="item" />
     </section>
 
-    <section class="snapshot">
-      <div class="snapshot-head">
-        <h2>全站数据快照</h2>
-        <p>基于实时职位样本生成，帮助你快速判断市场热度</p>
-        <div class="industry-chips">
-          <span v-for="item in leadingIndustries" :key="item.name">{{ item.name }}</span>
+    <section class="dashboard-grid primary-grid">
+      <HomePanel class="trend-panel" title="行业岗位需求趋势" subtitle="重点行业 · 近 12 个月" :action="''"><IndustryTrendChart :data="market.trend" /></HomePanel>
+      <HomePanel title="城市薪资中位数" subtitle="月薪 · 单位：千元" :action="''"><SalaryBarChart :data="market.citySalaries" /></HomePanel>
+    </section>
+
+    <section class="market-detail-grid">
+      <article class="data-card salary-card">
+        <header><div><p>SALARY DISTRIBUTION</p><h2>全行业月薪分布</h2></div><span>样本 86.4 万</span></header>
+        <div class="histogram" aria-label="全行业薪资区间柱状图">
+          <div v-for="item in market.salaryDistribution" :key="item.label" :class="{ featured: item.featured }"><b>{{ item.value }}%</b><i :style="{ height: `${Math.max(8, item.value * 3)}px` }" /><span>{{ item.label }}</span></div>
         </div>
-      </div>
+        <footer class="salary-summary"><div><small>薪资中位数</small><strong>{{ market.salarySummary?.median || '—' }}</strong></div><div><small>P75 薪资</small><strong>{{ market.salarySummary?.p75 || '—' }}</strong></div></footer>
+      </article>
 
-      <div class="snapshot-grid">
-        <article class="snapshot-card">
-          <span class="snapshot-label">岗位总量</span>
-          <strong class="snapshot-value">
-            {{ snapshotLoading ? "..." : Number(snapshot.total_jobs || 0).toLocaleString() }}
-          </strong>
-        </article>
-        <article class="snapshot-card">
-          <span class="snapshot-label">当前热门技能</span>
-          <strong class="snapshot-value">{{ snapshotLoading ? "..." : topSkill }}</strong>
-        </article>
-        <article class="snapshot-card">
-          <span class="snapshot-label">热度行业</span>
-          <strong class="snapshot-value">{{ snapshotLoading ? "..." : topIndustry }}</strong>
-        </article>
-        <article class="snapshot-card">
-          <span class="snapshot-label">高峰薪资带</span>
-          <strong class="snapshot-value">{{ snapshotLoading ? "..." : topSalaryBand }}</strong>
-        </article>
-      </div>
+      <article class="data-card talent-card">
+        <header><div><p>TALENT STRUCTURE</p><h2>学历与经验结构</h2></div></header>
+        <section><div class="structure-heading"><span>学历要求</span><b>本科仍是主流</b></div><div class="stacked-bar"><i v-for="item in market.talentStructure.education" :key="item.label" :style="{ width: `${item.value}%` }" /></div><div class="structure-legend"><span v-for="item in market.talentStructure.education" :key="item.label">{{ item.label }} {{ item.value }}%</span></div></section>
+        <section class="experience-block"><div class="structure-heading"><span>经验要求</span><b>1–3 年需求最高</b></div><div class="experience-ring"><strong>42%</strong><small>1–3 年</small></div><div class="experience-list"><span v-for="item in market.talentStructure.experience" :key="item.label"><i :style="{ width: `${item.value}%` }" />{{ item.label }} {{ item.value }}%</span></div></section>
+      </article>
 
-      <div class="insight-panels">
-        <article class="insight-panel">
-          <h3>Top 技能需求</h3>
-          <ul>
-            <li v-for="item in topSkills" :key="item.name">
-              <span>{{ item.name }}</span>
-              <b>{{ item.value }}</b>
-            </li>
-          </ul>
-        </article>
-        <article class="insight-panel">
-          <h3>薪资分布占比</h3>
-          <ul>
-            <li v-for="item in salaryBreakdown" :key="item.name">
-              <span>{{ item.name }}</span>
-              <div class="bar-track">
-                <div class="bar-fill" :style="{ width: `${item.percent}%` }"></div>
-              </div>
-              <b>{{ item.percent }}%</b>
-            </li>
-          </ul>
-        </article>
-      </div>
+      <article class="data-card matrix-card">
+        <header><div><p>CITY OPPORTUNITY MATRIX</p><h2>城市机会矩阵</h2></div><span>横轴薪资 · 纵轴增长</span></header>
+        <div class="matrix-plot"><i class="axis-x" /><i class="axis-y" /><small class="zone-label">高增长 / 高薪资</small><button v-for="item in market.cityMatrix" :key="item.city" class="city-bubble" :class="item.tone" :style="matrixStyle(item)"><b>{{ item.city }}</b><span>+{{ item.growth }}%</span></button><em class="axis-label-x">薪资中位数 →</em><em class="axis-label-y">岗位增长率 →</em></div>
+      </article>
     </section>
 
-    <section class="features">
-      <div class="feature-card" @click="goToAnalysis">
-        <div class="icon">📊</div>
-        <h3>全站分析面板</h3>
-        <p>一键下探到分析模块，查看技能热度与薪资结构。</p>
-      </div>
-      <div class="feature-card" @click="router.push('/jobs')">
-        <div class="icon">💼</div>
-        <h3>海量职位</h3>
-        <p>汇聚各大平台招聘信息，一站式浏览筛选。</p>
-      </div>
-      <div class="feature-card" @click="router.push('/companies')">
-        <div class="icon">🏢</div>
-        <h3>名企风向</h3>
-        <p>关注顶尖企业的招聘动态和人才偏好。</p>
-      </div>
+    <section class="signal-section">
+      <div class="section-heading"><div><p>MONTHLY SIGNALS</p><h2>本月关键变化</h2></div><span>从岗位发布、薪资和技能频率中识别</span></div>
+      <div class="signal-grid"><article v-for="item in market.signals" :key="item.title"><span class="signal-icon" :class="item.tone">{{ item.icon }}</span><div><small>{{ item.type }}</small><strong>{{ item.title }}</strong><p>{{ item.detail }}</p></div><em :class="item.tone">{{ item.delta }}</em></article></div>
     </section>
-  </div>
+
+    <section class="dashboard-grid bottom-grid">
+      <HomePanel title="热门技能需求" subtitle="招聘文本出现频率" :action="''"><SkillDonutChart :data="market.skills" /></HomePanel>
+      <article class="data-card ranking-card">
+        <header><div><p>OPPORTUNITY RANK</p><h2>行业机会榜</h2></div><span>综合岗位增长、薪资与人才缺口</span></header>
+        <div class="ranking-table"><div class="table-head"><span>行业</span><span>岗位增长</span><span>薪资中位数</span><span>人才缺口</span><span>机会指数</span></div><div v-for="(item, index) in market.rankings" :key="item.name"><span><b :class="{ first: index === 0 }">{{ index + 1 }}</b>{{ item.name }}</span><span>{{ item.growth }}</span><span>{{ item.salary }}</span><span>{{ item.gap }}</span><strong>{{ item.score }}</strong></div></div>
+      </article>
+    </section>
+
+    <section class="personal-cta"><div><p>PERSONAL CAREER ANALYSIS</p><h2>市场数据只是起点，更重要的是它与你有什么关系。</h2><span>完善学校、专业、课程和技能资料，生成属于你的职业机会地图。</span></div><button @click="goCareerAnalysis">开始职业分析 →</button></section>
+
+    <aside v-show="aiOpen" class="market-ai-dialog" data-test="market-ai-dialog" aria-label="AI 行业问数">
+      <header><span>AI</span><div><small>MARKET DATA COPILOT</small><strong>AI 行业问数</strong></div><i /><em>在线</em><button data-test="market-ai-close" aria-label="收起 AI 对话框" @click="aiOpen = false">×</button></header>
+      <div class="ai-message-list"><div v-for="(message, index) in aiMessages" :key="index" :class="message.role">{{ message.content }}</div></div>
+      <form class="ai-composer" @submit.prevent="sendAiQuestion"><textarea v-model="aiQuestion" data-test="market-ai-input" placeholder="例如：新能源行业未来一年需要哪些技能？" /><p v-if="aiError" class="ai-error">{{ aiError }}</p><div><span>发送时需要登录 · {{ priceHint }}</span><button data-test="market-ai-send" :disabled="aiSending">{{ aiSending ? "发送中…" : "发送问题 ↑" }}</button></div></form>
+    </aside>
+    <button v-show="!aiOpen" class="ai-launcher" data-test="market-ai-launcher" aria-label="打开 AI 行业问数" @click="aiOpen = true"><span>AI</span><b>问行业数据</b><i /></button>
+  </main>
 </template>
 
 <style scoped>
-.home {
-  display: flex;
-  flex-direction: column;
-  gap: 4.5rem;
-  padding-bottom: 6rem;
-}
+.market-page { width: min(1540px,calc(100% - 32px)); margin: 0 auto; padding: 36px 0 88px; color: #17253d; }.market-hero { display: grid; min-height: 365px; grid-template-columns: 1.05fr .95fr; align-items: center; gap: 56px; }.hero-copy { padding-left: 8px; }.eyebrow,.data-card header p,.section-heading p,.personal-cta p { margin: 0 0 10px; color: #55708f; font-size: 11px; font-weight: 800; letter-spacing: .16em; }.eyebrow i,.freshness i { display: inline-block; width: 6px; height: 6px; margin: 0 7px 1px 0; background: #20aa91; border-radius: 50%; box-shadow: 0 0 0 4px #dcf5ee; }.market-hero h1 { margin: 0; color: #13233c; font-size: clamp(39px,4vw,61px); line-height: 1.08; letter-spacing: -.055em; }.market-hero h1 span { color: #1767dc; }.hero-description { max-width: 650px; margin: 25px 0; color: #596d87; font-size: 16px; line-height: 1.9; }.hero-actions { display: flex; align-items: center; gap: 22px; }.primary-action,.filter-submit,.personal-cta button { padding: 12px 18px; color: #fff; background: linear-gradient(135deg,#176bff,#1257c9); border: 0; border-radius: 9px; box-shadow: 0 8px 20px rgba(23,107,255,.2); font-size: 13px; font-weight: 700; cursor: pointer; }.primary-action span { margin-left: 15px; }.freshness { color: #64778e; font-size: 12px; }.hero-visual { position: relative; height: 320px; background: radial-gradient(circle at 50% 48%,#ddecff 0,#f4f8fc 52%,transparent 73%); border-radius: 50%; }.orbit { position: absolute; border: 1px solid #bfd5ef; border-radius: 50%; }.orbit-one { inset: 45px; transform: rotate(-12deg); }.orbit-two { inset: 88px 32px; transform: rotate(30deg); }.hero-stat { position: absolute; top: 82px; left: 50%; width: 158px; height: 158px; padding-top: 33px; background: rgba(255,255,255,.96); border: 1px solid #d9e5f2; border-radius: 50%; box-shadow: 0 14px 40px rgba(39,64,98,.08); text-align: center; transform: translateX(-50%); }.hero-stat small,.hero-stat strong,.hero-stat em { display: block; }.hero-stat small { color: #63768e; font-size: 11px; }.hero-stat strong { margin: 4px 0; color: #1767dc; font-size: 42px; letter-spacing: -.06em; }.hero-stat em { color: #17846e; font-size: 11px; font-style: normal; }.hero-signal { position: absolute; display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: #fff; border: 1px solid #dce7f2; border-radius: 10px; box-shadow: 0 14px 40px rgba(39,64,98,.08); font-size: 12px; }.hero-signal b { color: #159278; }.signal-0 { top: 48px; right: 24px; }.signal-1 { bottom: 34px; left: 24px; }
+.filter-card { display: grid; grid-template-columns: repeat(4,1fr) auto; align-items: end; gap: 14px; padding: 17px 18px; background: #fff; border: 1px solid #e1e8f0; border-radius: 14px; box-shadow: 0 8px 25px rgba(42,67,101,.04); }.filter-card label { display: grid; gap: 7px; }.filter-card label span { color: #5d7088; font-size: 12px; }.filter-card select { width: 100%; padding: 10px 11px; color: #344760; background: #f8fafc; border: 1px solid #dde5ee; border-radius: 7px; outline: none; font-size: 13px; }.filter-submit { min-width: 98px; padding: 11px 15px; background: #173d70; box-shadow: none; }.filter-submit:disabled { opacity: .65; cursor: wait; }.source-notice { display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; color: #7a6539; font-size: 12px; }.source-notice span { display: grid; width: 17px; height: 17px; place-items: center; color: #9b701c; background: #fff3d5; border-radius: 50%; font-size: 10px; font-weight: 800; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin: 14px 0; }.dashboard-grid { display: grid; gap: 14px; }.primary-grid { grid-template-columns: 1.8fr 1fr; }.dashboard-grid :deep(.panel) { min-width: 0; height: 365px; }.data-card { min-width: 0; padding: 21px; background: #fff; border: 1px solid #e1e8f0; border-radius: 14px; box-shadow: 0 8px 25px rgba(42,67,101,.04); }.data-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.data-card header p,.section-heading p { margin-bottom: 5px; font-size: 10px; }.data-card h2,.section-heading h2 { margin: 0; color: #1e314b; font-size: 19px; }.data-card header>span,.section-heading>span { color: #687a91; font-size: 11px; }.market-detail-grid { display: grid; grid-template-columns: 1.15fr .85fr 1fr; gap: 14px; margin-top: 14px; }.market-detail-grid>article { min-height: 380px; }
+.histogram { display: grid; height: 220px; grid-template-columns: repeat(6,1fr); align-items: end; gap: 10px; margin-top: 22px; padding: 15px 5px 0; border-bottom: 1px solid #dfe6ee; background: repeating-linear-gradient(to bottom,#fff 0,#fff 52px,#edf1f5 53px); }.histogram>div { display: grid; height: 100%; grid-template-rows: 26px 1fr 38px; align-items: end; text-align: center; }.histogram b { color: #60728a; font-size: 11px; }.histogram i { display: block; width: 100%; min-height: 8px; max-height: 135px; background: linear-gradient(180deg,#7db3e9,#d7e8f7); border-radius: 7px 7px 2px 2px; }.histogram .featured i { background: linear-gradient(180deg,#176bff,#83b4f5); box-shadow: 0 6px 15px rgba(23,107,255,.16); }.histogram span { align-self: center; color: #66778d; font-size: 10px; }.salary-summary { display: flex; gap: 34px; margin-top: 17px; }.salary-summary div { padding-right: 34px; border-right: 1px solid #e3e9ef; }.salary-summary small,.salary-summary strong { display: block; }.salary-summary small { color: #78899f; font-size: 10px; }.salary-summary strong { margin-top: 4px; font-size: 16px; }.talent-card>section { margin-top: 25px; }.structure-heading { display: flex; justify-content: space-between; color: #596c84; font-size: 11px; }.structure-heading b { color: #1b6ad5; }.stacked-bar { display: flex; height: 14px; margin: 12px 0; overflow: hidden; border-radius: 10px; }.stacked-bar i:nth-child(1) { background: #cdd8e6; }.stacked-bar i:nth-child(2) { background: #176bff; }.stacked-bar i:nth-child(3) { background: #18a88c; }.stacked-bar i:nth-child(4) { background: #7561d5; }.structure-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; color: #687991; font-size: 10px; }.experience-block { position: relative; }.experience-ring { position: absolute; left: 5px; top: 37px; display: grid; width: 84px; height: 84px; place-items: center; background: radial-gradient(circle,#fff 51%,transparent 53%),conic-gradient(#176bff 0 42%,#18a88c 42% 69%,#7561d5 69% 82%,#d5deea 82%); border-radius: 50%; }.experience-ring strong,.experience-ring small { grid-area: 1/1; }.experience-ring strong { margin-top: -12px; color: #176bff; font-size: 18px; }.experience-ring small { margin-top: 20px; color: #718299; font-size: 9px; }.experience-list { display: grid; gap: 8px; margin: 15px 0 0 108px; color: #63758c; font-size: 10px; }.experience-list span { position: relative; padding-left: 15px; }.experience-list i { position: absolute; left: 0; top: 4px; max-width: 9px; height: 7px; background: #176bff; border-radius: 2px; }
+.matrix-plot { position: relative; height: 285px; margin-top: 20px; overflow: hidden; background: linear-gradient(90deg,rgba(236,241,247,.7) 50%,rgba(232,244,255,.8) 50%); border: 1px solid #e3eaf2; border-radius: 10px; }.axis-x,.axis-y { position: absolute; background: #cbd7e5; }.axis-x { right: 12px; left: 12px; top: 50%; height: 1px; }.axis-y { top: 12px; bottom: 12px; left: 50%; width: 1px; }.zone-label { position: absolute; top: 10px; right: 12px; color: #13846f; font-size: 10px; }.city-bubble { position: absolute; display: grid; place-items: center; color: #fff; background: rgba(23,107,255,.9); border: 4px solid rgba(255,255,255,.84); border-radius: 50%; box-shadow: 0 7px 17px rgba(31,87,164,.18); transform: translate(-50%,50%); }.city-bubble b,.city-bubble span { display: block; }.city-bubble b { font-size: 11px; }.city-bubble span { margin-top: -5px; font-size: 8px; }.city-bubble.green { background: #18a88c; }.city-bubble.violet { background: #7561d5; }.city-bubble.navy { background: #2c5b94; }.city-bubble.amber { background: #dda036; }.axis-label-x,.axis-label-y { position: absolute; color: #73849b; font-size: 9px; font-style: normal; }.axis-label-x { right: 12px; bottom: 7px; }.axis-label-y { left: 7px; top: 50%; transform: translate(-44%,-50%) rotate(-90deg); }
+.signal-section { margin-top: 30px; }.section-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }.signal-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }.signal-grid article { display: grid; min-height: 118px; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; padding: 16px; background: #fff; border: 1px solid #e1e8f0; border-radius: 13px; }.signal-icon { display: grid; width: 39px; height: 39px; place-items: center; color: #137f6b; background: #e6f7f1; border-radius: 10px; font-size: 17px; }.signal-icon.salary { color: #1767dc; background: #e9f2ff; }.signal-icon.skill { color: #6c55ca; background: #f0edfc; }.signal-icon.down { color: #d26870; background: #fff0f1; }.signal-grid small,.signal-grid strong,.signal-grid p { display: block; }.signal-grid small { color: #708198; font-size: 10px; }.signal-grid strong { margin-top: 5px; font-size: 14px; }.signal-grid p { margin: 4px 0 0; color: #6d7d91; font-size: 10px; }.signal-grid em { align-self: start; color: #13836d; font-size: 11px; font-style: normal; font-weight: 700; }.signal-grid em.down { color: #cf5d66; }.bottom-grid { grid-template-columns: .8fr 1.2fr; margin-top: 14px; }.ranking-card { height: 365px; }.ranking-table { display: grid; margin-top: 18px; }.ranking-table>div { display: grid; min-height: 52px; grid-template-columns: 1.7fr repeat(4,1fr); align-items: center; border-bottom: 1px solid #edf1f5; color: #455a74; font-size: 12px; }.ranking-table .table-head { min-height: 34px; color: #65768c; background: #f7f9fb; border: 0; border-radius: 6px; }.ranking-table>div>* { padding: 0 8px; }.ranking-table>div>span:first-child { display: flex; align-items: center; }.ranking-table b { display: inline-grid; width: 22px; height: 22px; margin-right: 8px; place-items: center; background: #f0f3f7; border-radius: 6px; }.ranking-table b.first { color: #fff; background: #1c6bdd; }.ranking-table strong { color: #1767dc; }.personal-cta { display: flex; align-items: center; justify-content: space-between; gap: 30px; margin-top: 14px; padding: 24px 28px; color: #fff; background: linear-gradient(120deg,#14325c,#1767dc); border-radius: 16px; box-shadow: 0 16px 30px rgba(21,72,142,.18); }.personal-cta p { color: #bbd4f5; }.personal-cta h2 { margin: 0 0 8px; font-size: 22px; }.personal-cta span { color: #d1e0f4; font-size: 13px; }.personal-cta button { color: #1767dc; background: #fff; box-shadow: none; white-space: nowrap; }
+.market-ai-dialog { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; width: min(420px,calc(100vw - 32px)); height: min(590px,calc(100vh - 125px)); flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #c9d8eb; border-radius: 15px; box-shadow: 0 24px 70px rgba(18,48,89,.24); }.market-ai-dialog>header { display: flex; align-items: center; gap: 10px; padding: 18px; }.market-ai-dialog>header>span { display: grid; width: 42px; height: 42px; place-items: center; color: #fff; background: linear-gradient(145deg,#153a6d,#176bff); border-radius: 12px; font-size: 12px; font-weight: 800; }.market-ai-dialog header small,.market-ai-dialog header strong { display: block; }.market-ai-dialog header small { color: #55708f; font-size: 9px; font-weight: 800; letter-spacing: .14em; }.market-ai-dialog header strong { margin-top: 4px; font-size: 19px; }.market-ai-dialog header i { width: 7px; height: 7px; margin-left: auto; background: #22af8e; border-radius: 50%; box-shadow: 0 0 0 4px #e1f7f1; }.market-ai-dialog header em { color: #17846e; font-size: 12px; font-style: normal; }.market-ai-dialog header button { display: grid; width: 29px; height: 29px; place-items: center; color: #61738a; background: #edf3fa; border: 0; border-radius: 8px; font-size: 20px; cursor: pointer; }.ai-message-list { display: grid; flex: 1; align-content: start; gap: 10px; min-height: 0; padding: 4px 18px 12px; overflow-y: auto; }.ai-message-list>div { max-width: 91%; padding: 12px 14px; border-radius: 5px 13px 13px; font-size: 13px; line-height: 1.65; }.ai-message-list .assistant { color: #415b78; background: #edf4fc; }.ai-message-list .user { justify-self: end; color: #fff; background: #1b66cc; border-radius: 13px 5px 13px 13px; }.ai-composer { margin: 0 18px 18px; padding: 11px 12px; background: #fff; border: 1px solid #cfdbea; border-radius: 11px; box-shadow: 0 6px 16px rgba(38,72,117,.05); }.ai-composer textarea { width: 100%; height: 48px; resize: none; border: 0; outline: 0; font-size: 13px; }.ai-composer>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.ai-composer span { color: #697b91; font-size: 10px; }.ai-composer button { padding: 8px 12px; color: #fff; background: #1767dc; border: 0; border-radius: 7px; font-size: 11px; font-weight: 700; cursor: pointer; }.ai-composer button:disabled { opacity: .65; }.ai-error { margin: 0 0 8px; color: #c75560; font-size: 11px; }.ai-launcher { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; align-items: center; gap: 9px; padding: 10px 14px 10px 10px; color: #fff; background: linear-gradient(135deg,#143864,#176bff); border: 1px solid rgba(255,255,255,.18); border-radius: 28px; box-shadow: 0 16px 38px rgba(19,69,140,.28); cursor: pointer; }.ai-launcher span { display: grid; width: 31px; height: 31px; place-items: center; background: rgba(255,255,255,.14); border-radius: 50%; font-size: 11px; font-weight: 800; }.ai-launcher b { font-size: 13px; }.ai-launcher i { width: 7px; height: 7px; background: #57ddb2; border-radius: 50%; }
+@media (max-width: 1080px) { .market-hero { grid-template-columns: 1fr 420px; }.kpi-grid { grid-template-columns: repeat(2,1fr); }.market-detail-grid { grid-template-columns: 1fr 1fr; }.matrix-card { grid-column: 1/-1; }.signal-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 760px) { .market-page { width: calc(100% - 24px); padding: 26px 0 86px; }.market-hero { display: block; min-height: 0; }.market-hero h1 { font-size: 38px; }.hero-description { font-size: 14px; }.hero-actions { align-items: flex-start; flex-direction: column; }.hero-visual { height: 260px; margin-top: 14px; }.filter-card { grid-template-columns: 1fr 1fr; }.filter-submit { grid-column: 1/-1; }.primary-grid,.market-detail-grid,.bottom-grid { grid-template-columns: 1fr; }.dashboard-grid :deep(.panel),.ranking-card { height: auto; min-height: 350px; }.matrix-card { grid-column: auto; }.signal-grid { grid-template-columns: 1fr; }.personal-cta { align-items: flex-start; flex-direction: column; }.market-ai-dialog { right: 12px; bottom: 70px; width: calc(100vw - 24px); height: min(560px,calc(100vh - 105px)); }.ai-launcher { right: 14px; bottom: 72px; } }
+@media (max-width: 460px) { .market-hero h1 { font-size: 33px; }.kpi-grid,.filter-card { grid-template-columns: 1fr; }.filter-submit { grid-column: auto; }.histogram { gap: 5px; }.histogram span { font-size: 9px; }.section-heading { align-items: flex-start; flex-direction: column; gap: 5px; }.ranking-card { overflow-x: auto; }.ranking-table { min-width: 650px; }.market-ai-dialog>header { padding: 15px; }.ai-composer>div { align-items: stretch; flex-direction: column; }.ai-composer button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto!important; transition-duration: .01ms!important; animation-duration: .01ms!important; } }
 
-.pulse-strip {
-  max-width: 1280px;
-  margin: -2rem auto 0;
-  padding: 0 2rem;
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.9rem;
-}
-
-.pulse-item {
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
-  padding: 0.85rem 1rem;
-  background:
-    linear-gradient(120deg, rgba(34, 211, 238, 0.12), rgba(99, 102, 241, 0.1)),
-    rgba(255, 255, 255, 0.88);
-}
-
-.pulse-item span {
-  display: block;
-  font-size: 0.8rem;
-  color: #64748b;
-}
-
-.pulse-item strong {
-  display: block;
-  margin-top: 0.35rem;
-  font-size: 1.05rem;
-  color: #0f172a;
-}
-
-.snapshot {
-  max-width: 1280px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0 2rem;
-}
-
-.snapshot-head {
-  margin-bottom: 1.25rem;
-}
-
-.snapshot-head h2 {
-  font-size: 2rem;
-  margin: 0;
-  color: var(--color-heading);
-}
-
-.snapshot-head p {
-  margin-top: 0.4rem;
-  color: var(--color-text-mute);
-}
-
-.industry-chips {
-  display: flex;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-  margin-top: 0.75rem;
-}
-
-.industry-chips span {
-  font-size: 0.78rem;
-  line-height: 1;
-  padding: 0.4rem 0.6rem;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(96, 165, 250, 0.22);
-}
-
-.snapshot-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.snapshot-card {
-  background: var(--color-card-bg);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: var(--radius-md);
-  padding: 1rem 1.1rem;
-}
-
-.snapshot-label {
-  display: block;
-  color: var(--color-text-mute);
-  font-size: 0.9rem;
-}
-
-.snapshot-value {
-  margin-top: 0.4rem;
-  display: block;
-  font-size: 1.55rem;
-  color: #0f172a;
-  line-height: 1.1;
-}
-
-.insight-panels {
-  margin-top: 1rem;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.insight-panel {
-  background: var(--color-card-bg);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: var(--radius-md);
-  padding: 1rem 1.1rem;
-}
-
-.insight-panel h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  color: #0f172a;
-}
-
-.insight-panel ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.insight-panel li {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.75rem;
-  align-items: center;
-  color: #334155;
-}
-
-.bar-track {
-  height: 8px;
-  min-width: 140px;
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #22d3ee, #6366f1);
-}
-
-/* 惊艳深空渐变 Hero 区域 */
-.hero {
-  height: 65vh;
-  min-height: 500px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 0 1.5rem;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 顶部背景微光点缀 */
-.hero::before {
-  content: '';
-  position: absolute;
-  top: -30%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 80vw;
-  height: 80vw;
-  background: radial-gradient(circle, hsla(var(--color-primary-h), var(--color-primary-s), var(--color-primary-l), 0.15) 0%, transparent 60%);
-  z-index: -1;
-  pointer-events: none;
-}
-
-.hero h1 {
-  font-size: 4.5rem;
-  font-weight: 800;
-  margin-bottom: 1.5rem;
-  letter-spacing: -0.04em;
-  line-height: 1.1;
-  color: var(--color-heading);
-}
-
-.gradient-text {
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  display: inline-block;
-}
-
-.hero-subtitle {
-  font-size: 1.25rem;
-  color: var(--color-text-mute);
-  max-width: 650px;
-  margin: 0 auto 3rem;
-  line-height: 1.7;
-}
-
-.hero-actions {
-  margin-top: 1rem;
-  display: flex;
-  justify-content: center;
-  gap: 0.8rem;
-}
-
-.ghost-btn {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  color: #0f172a;
-  background: rgba(255, 255, 255, 0.82);
-  border-radius: 999px;
-  padding: 0.55rem 1.1rem;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.ghost-btn:hover {
-  border-color: rgba(56, 189, 248, 0.75);
-  color: #0369a1;
-  transform: translateY(-1px);
-}
-
-
-
-/* 具有呼吸感的超级搜索框 */
-.search-tabs {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.search-tabs button {
-  background: transparent;
-  border: none;
-  color: var(--color-text-mute);
-  font-size: 1.1rem;
-  font-weight: 600;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  position: relative;
-  transition: color var(--transition-fast);
-}
-
-.search-tabs button::after {
-  content: '';
-  position: absolute;
-  bottom: 0; left: 50%;
-  transform: translateX(-50%);
-  width: 0; height: 3px;
-  background: var(--color-primary);
-  border-radius: 2px;
-  transition: width var(--transition-fast);
-}
-
-.search-tabs button.active { color: var(--color-text); }
-.search-tabs button.active::after { width: 80%; }
-.search-tabs button.ai-tab.active { color: #818cf8; }
-.search-tabs button.ai-tab.active::after { background: linear-gradient(90deg, #38bdf8, #818cf8); }
-
-.search-box {
-  display: flex;
-  max-width: 700px;
-  width: 100%;
-  margin: 0 auto;
-  background: var(--color-glass-bg);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: var(--radius-huge);
-  padding: 0.5rem;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  transition: all var(--transition-normal);
-}
-
-.search-box:focus-within {
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12), 0 18px 42px rgba(15, 23, 42, 0.12);
-  transform: translateY(-2px);
-}
-
-.search-box.ai-focus:focus-within {
-  border-color: rgba(129, 140, 248, 0.6);
-  box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.12), 0 18px 42px rgba(15, 23, 42, 0.12);
-}
-
-.search-box input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  padding: 1rem 1.5rem;
-  color: var(--color-text);
-  font-size: 1.05rem;
-  outline: none;
-}
-
-.search-box input::placeholder {
-  color: rgba(100, 116, 139, 0.68);
-  font-size: 0.95rem;
-}
-
-.search-box .action-btn {
-  background: var(--color-primary);
-  color: #fff;
-  padding: 0 2.5rem;
-  border-radius: var(--radius-huge);
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  transition: all var(--transition-fast);
-  box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3);
-  border: none;
-  cursor: pointer;
-}
-
-.search-box .action-btn.ai-btn {
-  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
-  box-shadow: 0 4px 15px rgba(129, 140, 248, 0.4);
-}
-
-.search-box .action-btn:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.5);
-}
-
-.search-box .action-btn.ai-btn:hover {
-  box-shadow: 0 6px 20px rgba(129, 140, 248, 0.6);
-}
-
-.search-box .action-btn:active {
-  transform: scale(0.97);
-}
-
-/* 功能特性 悬浮瀑布卡片 (Hover Uplift) */
-.features {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 2.5rem;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 0 2rem;
-  width: 100%;
-}
-
-.feature-card {
-  background: var(--color-card-bg);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  padding: 2.5rem 2rem;
-  border-radius: var(--radius-lg);
-  transition: all var(--transition-normal);
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-}
-
-/* 高级折射边缘内发光 */
-.feature-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-  pointer-events: none;
-}
-
-.feature-card:hover {
-  transform: translateY(-8px);
-  border-color: rgba(14, 165, 233, 0.3);
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12), 0 0 20px rgba(14, 165, 233, 0.08);
-  background: rgba(255, 255, 255, 0.96);
-}
-
-.icon {
-  font-size: 3rem;
-  margin-bottom: 1.5rem;
-  display: inline-block;
-  transition: transform var(--transition-normal);
-}
-
-.feature-card:hover .icon {
-  transform: scale(1.1) rotate(-5deg);
-}
-
-.feature-card h3 {
-  font-size: 1.6rem;
-  margin-bottom: 0.75rem;
-  color: var(--color-heading);
-}
-
-.feature-card p {
-  color: var(--color-text-mute);
-  font-size: 1.05rem;
-  line-height: 1.6;
-}
-
-@media (max-width: 768px) {
-  .pulse-strip {
-    grid-template-columns: 1fr 1fr;
-    padding: 0 1rem;
-    margin-top: -2.5rem;
-  }
-  .hero-actions {
-    flex-wrap: wrap;
-  }
-  .snapshot {
-    padding: 0 1rem;
-  }
-  .snapshot-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .insight-panels {
-    grid-template-columns: 1fr;
-  }
-  .bar-track {
-    min-width: 90px;
-  }
-  .hero h1 { font-size: 3rem; }
-  .hero-subtitle { font-size: 1.1rem; }
-  .search-box { flex-direction: column; border-radius: var(--radius-md); padding: 0; }
-  .search-box input { border-radius: var(--radius-md) var(--radius-md) 0 0; padding: 1.2rem; }
-  .search-box button { border-radius: 0 0 var(--radius-md) var(--radius-md); padding: 1.2rem; }
-}
+/* Readability baseline: card metadata and secondary numbers remain legible. */
+.data-card header p,.section-heading p { font-size: 12px; }.data-card header>span,.section-heading>span { color: #52657d; font-size: 13px; }.histogram b { color: #43566f; font-size: 13px; }.histogram span { color: #4e6179; font-size: 12px; }.salary-summary small { color: #5c6f87; font-size: 12px; }.salary-summary strong { font-size: 19px; }.structure-heading { color: #435870; font-size: 13px; }.structure-legend,.experience-list { color: #4f627a; font-size: 12px; }.experience-ring small { color: #53667d; font-size: 11px; }.zone-label { font-size: 12px; }.city-bubble b { font-size: 13px; }.city-bubble span { font-size: 10px; }.axis-label-x,.axis-label-y { color: #53667d; font-size: 11px; }.signal-grid small { color: #52657d; font-size: 12px; }.signal-grid strong { font-size: 16px; }.signal-grid p { color: #566981; font-size: 12px; }.signal-grid em { font-size: 13px; }.ranking-table>div { color: #344a64; font-size: 14px; }.ranking-table .table-head { color: #52657d; }.ai-composer span { color: #53667d; font-size: 12px; }.ai-composer button { font-size: 13px; }
 </style>

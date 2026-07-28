@@ -15,6 +15,7 @@ celery_app = Celery(
         "jobCollectionWebApi.tasks.ai_tasks",
         "jobCollectionWebApi.tasks.notification_tasks",
         "jobCollectionWebApi.tasks.ai_task_cleanup",
+        "jobCollectionWebApi.tasks.agent_tasks",
     ],
 )
 
@@ -46,6 +47,7 @@ celery_app.conf.update(
         # Realtime queue — user-facing, latency-sensitive
         "parse_resume_task": {"queue": "realtime"},
         "tasks.ai_tasks.*": {"queue": "realtime"},
+        "tasks.agent_tasks.*": {"queue": "realtime"},
 
         # Batch queue — background, can tolerate delay
         "jobCollectionWebApi.tasks.job_parser.*": {"queue": "batch"},

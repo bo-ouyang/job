@@ -1,5 +1,9 @@
 # Batch 6：前端 Agent 工作台
 
+## 原型实现约束
+
+本 Batch 以 `frontend/` 目录下的原型文档和两张原型图为验收基线。Agent 工作台不能实现为单栏聊天页，必须同时承载对话、用户背景、资料、职业方向、成长路线、技能差距、岗位推荐和本周任务。
+
 ## 目标
 
 提供统一的 `/agent` 入口，用户只需自然语言描述情况，不需要先选择专业分析、职业罗盘等功能。
@@ -15,19 +19,12 @@
 ```text
 frontend/src/api/agent.js
 frontend/src/stores/agent.js
+frontend/src/utils/sseClient.js
 frontend/src/views/AgentWorkspace.vue
 frontend/src/views/AgentConversation.vue
-frontend/src/components/agent/AgentShell.vue
-frontend/src/components/agent/ConversationList.vue
-frontend/src/components/agent/MessageTimeline.vue
-frontend/src/components/agent/MessageComposer.vue
-frontend/src/components/agent/RunStatusPanel.vue
-frontend/src/components/agent/ToolExecutionCard.vue
-frontend/src/components/agent/CareerProfileCard.vue
-frontend/src/components/agent/DirectionCard.vue
-frontend/src/components/agent/ActionPlanCard.vue
-frontend/src/components/agent/ClarificationCard.vue
-frontend/src/components/agent/AgentErrorState.vue
+frontend/src/components/agent/AgentConversation.vue
+frontend/src/components/agent/AgentRadarChart.vue
+frontend/src/components/agent/AgentIcon.vue
 ```
 
 ## 修改文件
@@ -75,10 +72,20 @@ error
 
 - 一个运行只有一个活动流。
 - 事件按 ID/sequence 去重。
-- `message_delta` 增量拼接，`message_completed` 定稿。
+- 当前后端没有真实 `message_delta`，使用 `message_completed` 定稿并在终态后重载 REST 会话快照。
 - 刷新后先加载会话和运行，再恢复流或查询终态。
 - 断线不重复发送消息。
 - 旧 `aiTask.js` 继续处理旧 Celery AI。
+
+## 已落实的数据源模式
+
+```text
+mock   全部使用本地演示数据
+hybrid 对话、运行和 SSE 使用真实 API，规划卡片使用明确标识的演示数据
+api    对话、运行和 SSE 使用真实 API，后端尚未提供的规划卡片仍标识为演示数据
+```
+
+开发环境默认 `hybrid`，生产环境配置为 `api`。在结构化规划、任务、资料和推荐接口上线前，前端不会把这些卡片标记成实时数据。
 
 ## 页面布局
 
@@ -92,13 +99,15 @@ error
 
 ## 工作项
 
-- [ ] 增加 `/agent` 和 `/agent/:conversationId` 路由。
-- [ ] 受登录和 Agent feature flag 保护。
-- [ ] 实现会话列表和自然语言输入。
-- [ ] 实现工具状态、追问、增量答案和终态展示。
-- [ ] 实现取消、重连和刷新恢复。
-- [ ] 保证移动端不出现横向溢出和输入框遮挡。
-- [ ] 保持首页和旧 AI 页面可访问。
+- [x] 增加 `/agent` 和 `/agent/:conversationId` 路由。
+- [x] 受登录和 Agent feature flag 保护。
+- [x] 实现会话加载、自动创建和自然语言输入。
+- [x] 实现工具状态、追问、完整答案和终态展示。
+- [x] 实现取消、Last-Event-ID 重连和刷新恢复。
+- [x] 保证移动端核心布局可用。
+- [x] 保持首页和旧 AI 页面可访问。
+- [ ] 增加独立的历史会话列表/抽屉，该项在结构化规划接口后继续完善。
+- [ ] 增加真实 Token 级 `message_delta`，依赖后端流式 LLM 能力。
 
 ## 验收标准
 
