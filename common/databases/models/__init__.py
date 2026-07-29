@@ -29,7 +29,12 @@ from .ai_task import AiTask
 from .agent_conversation import AgentConversation
 from .agent_message import AgentMessage
 from .agent_run import AgentRun
-from .career_profile import CareerProfile
+from .career_profile import (
+    CareerProfile,
+    CareerProfileChangeLog,
+    CareerProfileCourse,
+    CareerProfileSkill,
+)
 
 __all__ = [
     'Base',
@@ -78,4 +83,7 @@ __all__ = [
     'AgentMessage',
     'AgentRun',
     'CareerProfile',
+    'CareerProfileCourse',
+    'CareerProfileSkill',
+    'CareerProfileChangeLog',
 ]

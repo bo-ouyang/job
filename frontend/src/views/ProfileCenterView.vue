@@ -14,42 +14,41 @@ const profile = reactive({
 const courses = ref([]);
 const skills = ref([]);
 
-const fallback = {
-  profile: {
-    name: "林晓雨", phone: "", email: "", city: "杭州", school: "浙江理工大学",
-    schoolLevel: "普通本科", education: "本科", major: "计算机科学与技术",
-    graduationYear: "2027", gpa: "3.6 / 4.0", targetCities: ["杭州", "上海"],
-    targetRoles: ["AI 产品经理", "数据产品经理"], targetIndustries: ["互联网 / AI"],
-    expectedSalary: "15K–22K", completion: 78,
-  },
-  courses: [
-    { name: "数据结构", category: "专业核心", level: "熟练", core: true, source: "手动添加" },
-    { name: "数据库原理", category: "专业核心", level: "掌握", core: true, source: "简历确认" },
-    { name: "产品设计基础", category: "跨学科", level: "掌握", core: false, source: "手动添加" },
-  ],
-  skills: [
-    { name: "Python", category: "技术", level: 4, evidence: "课程与项目", source: "简历确认" },
-    { name: "SQL", category: "数据", level: 3, evidence: "课程项目", source: "手动添加" },
-    { name: "需求分析", category: "产品", level: 3, evidence: "校园项目", source: "简历确认" },
-  ],
-};
+const normalizeSource = (value) => (
+  ["manual", "resume", "system", "import"].includes(value) ? value : "manual"
+);
+const normalizeCourse = (item) => ({
+  ...item,
+  source: normalizeSource(item.source),
+  confirmationStatus: item.confirmationStatus || "confirmed",
+  isCore: item.isCore ?? item.core ?? false,
+});
+const normalizeSkill = (item) => ({
+  ...item,
+  source: normalizeSource(item.source),
+  confirmationStatus: item.confirmationStatus || "confirmed",
+  proficiencyLevel: item.proficiencyLevel ?? item.level ?? 1,
+});
 
 const loadProfile = async () => {
   loading.value = true;
   const [profileResult, courseResult, skillResult] = await Promise.allSettled([
     profileAPI.getProfile(), profileAPI.getCourses(), profileAPI.getSkills(),
   ]);
-  Object.assign(profile, profileResult.status === "fulfilled" && profileResult.value?.data
-    ? profileResult.value.data : fallback.profile);
+  if (profileResult.status === "fulfilled" && profileResult.value?.data) {
+    Object.assign(profile, profileResult.value.data);
+  } else {
+    message.value = "个人资料暂时无法加载，请稍后重试。";
+  }
   courses.value = courseResult.status === "fulfilled" && Array.isArray(courseResult.value?.data)
-    ? courseResult.value.data : fallback.courses;
+    ? courseResult.value.data.map(normalizeCourse) : [];
   skills.value = skillResult.status === "fulfilled" && Array.isArray(skillResult.value?.data)
-    ? skillResult.value.data : fallback.skills;
+    ? skillResult.value.data.map(normalizeSkill) : [];
   loading.value = false;
 };
 
-const addCourse = () => courses.value.push({ name: "新课程", category: "专业课程", level: "了解", core: false, source: "手动添加" });
-const addSkill = () => skills.value.push({ name: "新技能", category: "专业技能", level: 1, evidence: "", source: "手动添加" });
+const addCourse = () => courses.value.push({ name: "新课程", category: "专业课程", level: "了解", isCore: false, source: "manual", confirmationStatus: "confirmed" });
+const addSkill = () => skills.value.push({ name: "新技能", category: "专业技能", proficiencyLevel: 1, evidence: "", source: "manual", confirmationStatus: "confirmed" });
 const removeItem = (items, index) => items.splice(index, 1);
 
 const saveProfile = async () => {
@@ -59,8 +58,8 @@ const saveProfile = async () => {
   try {
     await Promise.all([
       profileAPI.updateProfile({ ...profile }),
-      profileAPI.saveCourses(courses.value),
-      profileAPI.saveSkills(skills.value),
+      profileAPI.saveCourses(courses.value.map(normalizeCourse)),
+      profileAPI.saveSkills(skills.value.map(normalizeSkill)),
     ]);
     message.value = "个人资料已保存，后续职业分析将使用最新信息。";
   } catch (error) {
@@ -87,7 +86,7 @@ onMounted(loadProfile);
 
         <section id="courses" class="profile-card" data-section="courses"><header><div><p>MAJOR COURSES</p><h2>专业课程</h2></div><button @click="addCourse">＋ 添加课程</button></header><div class="item-table course-table"><div class="table-head"><span>课程名称</span><span>分类</span><span>掌握程度</span><span>来源</span><span /></div><div v-for="(item, index) in courses" :key="`${item.name}-${index}`"><input v-model="item.name" /><input v-model="item.category" /><select v-model="item.level"><option>了解</option><option>掌握</option><option>熟练</option><option>精通</option></select><span>{{ item.source || "手动添加" }}</span><button aria-label="删除课程" @click="removeItem(courses, index)">×</button></div></div></section>
 
-        <section id="skills" class="profile-card" data-section="skills"><header><div><p>PROFESSIONAL SKILLS</p><h2>专业技能</h2></div><button @click="addSkill">＋ 添加技能</button></header><div class="skill-items"><article v-for="(item, index) in skills" :key="`${item.name}-${index}`"><div><input v-model="item.name" /><span>{{ item.category }}</span></div><label><span>熟练度</span><input v-model.number="item.level" type="range" min="1" max="5" /><b>{{ item.level }}/5</b></label><p>证据：<input v-model="item.evidence" placeholder="课程、项目或实习" /></p><footer><span>{{ item.source || "手动添加" }}</span><button @click="removeItem(skills, index)">删除</button></footer></article></div></section>
+        <section id="skills" class="profile-card" data-section="skills"><header><div><p>PROFESSIONAL SKILLS</p><h2>专业技能</h2></div><button @click="addSkill">＋ 添加技能</button></header><div class="skill-items"><article v-for="(item, index) in skills" :key="`${item.name}-${index}`"><div><input v-model="item.name" /><span>{{ item.category }}</span></div><label><span>熟练度</span><input v-model.number="item.proficiencyLevel" type="range" min="1" max="5" /><b>{{ item.proficiencyLevel }}/5</b></label><p>证据：<input v-model="item.evidence" placeholder="课程、项目或实习" /></p><footer><span>{{ item.source || "manual" }}</span><button @click="removeItem(skills, index)">删除</button></footer></article></div></section>
 
         <section id="intentions" class="profile-card" data-section="intentions"><header><div><p>CAREER INTENTIONS</p><h2>求职意向</h2></div><span>可在职业分析页临时调整筛选</span></header><div class="intention-grid"><div><small>意向城市</small><strong>{{ profile.targetCities?.join('、') || '暂未设置' }}</strong></div><div><small>目标岗位</small><strong>{{ profile.targetRoles?.join('、') || '暂未设置' }}</strong></div><div><small>目标行业</small><strong>{{ profile.targetIndustries?.join('、') || '暂未设置' }}</strong></div><div><small>期望薪资</small><strong>{{ profile.expectedSalary || '暂未设置' }}</strong></div></div></section>
 

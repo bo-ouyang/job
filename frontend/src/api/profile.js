@@ -1,23 +1,23 @@
-import request from "@/utils/request";
+import v2Request from "@/utils/v2Request";
 
 export const profileAPI = {
   getProfile() {
-    return request.get("/profile");
+    return v2Request.get("/profile");
   },
   updateProfile(payload) {
-    return request.patch("/profile", payload);
+    return v2Request.patch("/profile", payload);
   },
   getCourses() {
-    return request.get("/profile/courses");
+    return v2Request.get("/profile/courses");
   },
   saveCourses(payload) {
-    return request.put("/profile/courses", payload);
+    return v2Request.put("/profile/courses", payload);
   },
   getSkills() {
-    return request.get("/profile/skills");
+    return v2Request.get("/profile/skills");
   },
   saveSkills(payload) {
-    return request.put("/profile/skills", payload);
+    return v2Request.put("/profile/skills", payload);
   },
 };
 

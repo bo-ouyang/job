@@ -38,12 +38,28 @@ const questionPrice = computed(() => pricing.value.marketQuestion?.amount || "")
 const priceHint = computed(() => questionPrice.value
   ? `预计 ¥${questionPrice.value}/次`
   : "价格以发送前确认为准");
+const sourceNotice = computed(() => {
+  if (dataSource.value === "fallback") {
+    return `数据服务已降级，当前展示最近一次可用数据 · ${formatUpdatedAt(updatedAt.value)}`;
+  }
+  if (["mixed", "synthetic"].includes(dataSource.value)) {
+    const count = dashboard.value?.dataStatus?.syntheticDimensions?.length || 0;
+    const prefix = dataSource.value === "synthetic" ? "当前展示测试数据" : "部分展示使用测试数据";
+    return `${prefix}（${count} 个维度），数据缺口已记录，真实数据接入后会自动替换。`;
+  }
+  return "";
+});
 
 const formatUpdatedAt = (value) => {
   if (!value) return "更新时间待同步";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return `更新于 ${date.toLocaleString("zh-CN", { hour12: false })}`;
+};
+const formatSalary = (value) => {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number") return `¥${value.toLocaleString("zh-CN")}`;
+  return String(value);
 };
 
 const refreshDashboard = async () => {
@@ -137,7 +153,7 @@ onMounted(() => {
       <button class="filter-submit" :disabled="loading">{{ loading ? "加载中…" : "应用筛选" }}</button>
     </form>
 
-    <p v-if="dataSource === 'fallback'" class="source-notice" data-test="market-source"><span>i</span> 数据服务已降级，当前展示最近一次可用数据 · {{ formatUpdatedAt(updatedAt) }}</p>
+    <p v-if="sourceNotice" class="source-notice" data-test="market-source"><span>i</span> {{ sourceNotice }}</p>
 
     <section class="kpi-grid" :aria-busy="loading">
       <KpiCard v-for="item in market.kpis" :key="item.label" :item="item" />
@@ -154,7 +170,7 @@ onMounted(() => {
         <div class="histogram" aria-label="全行业薪资区间柱状图">
           <div v-for="item in market.salaryDistribution" :key="item.label" :class="{ featured: item.featured }"><b>{{ item.value }}%</b><i :style="{ height: `${Math.max(8, item.value * 3)}px` }" /><span>{{ item.label }}</span></div>
         </div>
-        <footer class="salary-summary"><div><small>薪资中位数</small><strong>{{ market.salarySummary?.median || '—' }}</strong></div><div><small>P75 薪资</small><strong>{{ market.salarySummary?.p75 || '—' }}</strong></div></footer>
+        <footer class="salary-summary"><div><small>薪资中位数</small><strong>{{ formatSalary(market.salarySummary?.median) }}</strong></div><div><small>P75 薪资</small><strong>{{ formatSalary(market.salarySummary?.p75) }}</strong></div></footer>
       </article>
 
       <article class="data-card talent-card">

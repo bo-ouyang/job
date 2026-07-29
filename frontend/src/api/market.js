@@ -1,11 +1,11 @@
-import request from "@/utils/request";
+import v2Request from "@/utils/v2Request";
 
 export const marketAPI = {
   getDashboard(params = {}) {
-    return request.get("/analysis/market/dashboard", { params });
+    return v2Request.get("/market/dashboard", { params });
   },
   askQuestion(payload, idempotencyKey) {
-    return request.post("/analysis/market/questions", payload, {
+    return v2Request.post("/market/questions", payload, {
       headers: { "Idempotency-Key": idempotencyKey },
     });
   },

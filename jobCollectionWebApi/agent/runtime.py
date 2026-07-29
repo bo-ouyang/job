@@ -30,6 +30,7 @@ from core.metrics import (
     agent_tool_failures,
 )
 from services.llm_client import LLMClient, llm_client
+from services.ai_access_service import ai_access_service
 
 
 class AgentRuntime:
@@ -42,6 +43,7 @@ class AgentRuntime:
         policies: Optional[AgentPolicies] = None,
         publisher: Optional[AgentEventPublisher] = None,
         repository=crud_agent,
+        billing_service=ai_access_service,
     ):
         self.db = db
         self.client = client or llm_client
@@ -49,6 +51,7 @@ class AgentRuntime:
         self.policies = policies or AgentPolicies.from_settings()
         self.publisher = publisher or agent_event_publisher
         self.repository = repository
+        self.billing_service = billing_service
         self.deadline = 0.0
         self.execution_token = None
 
@@ -316,6 +319,21 @@ class AgentRuntime:
         state: RuntimeState,
     ) -> Dict[str, Any]:
         result_data = answer.model_dump(mode="json")
+        charge_amount = float(getattr(run, "charge_amount", 0) or 0)
+        charged_at = getattr(run, "charged_at", None)
+        charged_now = charge_amount > 0 and charged_at is None
+        if charged_now:
+            order_no = f"agent_run:{run.id}"
+            await self.billing_service.charge_usage(
+                self.db,
+                user_id=user_id,
+                feature_key=getattr(run, "billing_feature_key", None) or "career_advice",
+                amount=charge_amount,
+                detail_suffix=order_no,
+                order_no=order_no,
+                commit=False,
+            )
+            charged_at = datetime.utcnow()
         message = await self.repository.create_runtime_message(
             self.db,
             conversation_id=run.conversation_id,
@@ -343,6 +361,7 @@ class AgentRuntime:
                 "step_count": state.step_count,
                 "tool_call_count": state.tool_call_count,
                 "state_snapshot": state.model_dump(mode="json"),
+                "charged_at": charged_at,
             },
             execution_token=self.execution_token,
         )
@@ -350,6 +369,13 @@ class AgentRuntime:
             await self.db.rollback()
             raise AgentCancelledError("保存结果时运行已取消")
         await self.db.commit()
+        if charged_now:
+            record_metrics = getattr(self.billing_service, "record_charge_metrics", None)
+            if record_metrics is not None:
+                record_metrics(
+                    getattr(run, "billing_feature_key", None) or "career_advice",
+                    charge_amount,
+                )
         return {"run_id": str(run.id), "status": "completed", "message_id": str(message.id)}
 
     def _check_budget(self, state: RuntimeState) -> None:
@@ -421,11 +447,10 @@ class AgentRuntime:
     def _profile_data(profile) -> Dict[str, Any]:
         if profile is None:
             return {}
-        return {
+        profile_data = {
             key: getattr(profile, key, None)
             for key in (
                 "education",
-                "skills",
                 "experience",
                 "preferences",
                 "constraints",
@@ -433,6 +458,38 @@ class AgentRuntime:
             )
             if getattr(profile, key, None) is not None
         }
+        courses = [
+            {
+                "name": item.name,
+                "category": item.category,
+                "level": item.level,
+                "evidence": item.evidence,
+            }
+            for item in (getattr(profile, "courses", None) or [])
+            if getattr(item, "confirmation_status", None) == "confirmed"
+        ]
+        normalized_skills = [
+            {
+                "name": item.name,
+                "category": item.category,
+                "proficiency_level": item.proficiency_level,
+                "years_experience": (
+                    float(item.years_experience)
+                    if item.years_experience is not None
+                    else None
+                ),
+                "evidence": item.evidence,
+            }
+            for item in (getattr(profile, "normalized_skills", None) or [])
+            if getattr(item, "confirmation_status", None) == "confirmed"
+        ]
+        if courses:
+            profile_data["courses"] = courses
+        if normalized_skills:
+            profile_data["skills"] = normalized_skills
+        elif getattr(profile, "skills", None) is not None:
+            profile_data["skills"] = profile.skills
+        return profile_data
 
     @classmethod
     def _sanitize(cls, value: Any, depth: int = 0) -> Any:

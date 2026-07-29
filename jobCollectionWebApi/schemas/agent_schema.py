@@ -76,6 +76,9 @@ class AgentRunResponse(BaseModel):
     state_snapshot: Optional[Dict[str, Any]] = None
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    billing_feature_key: Optional[str] = None
+    charge_amount: float = 0.0
+    charged_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

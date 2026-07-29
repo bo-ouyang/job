@@ -39,6 +39,7 @@ from schemas.agent_schema import (
     CareerProfileResponse,
     CareerProfileUpdate,
 )
+from services.ai_access_service import ai_access_service
 from jobCollectionWebApi.tasks.agent_tasks import execute_agent_run
 
 
@@ -391,6 +392,17 @@ async def submit_message(
             message="已有职业规划正在分析，请等待完成或先取消当前运行",
         )
 
+    billing_feature_key = (
+        "career_compass"
+        if obj_in.message_type == "career_report_request"
+        else "career_advice"
+    )
+    charge_amount = await ai_access_service.ensure_access(
+        db=db,
+        user_id=current_user.id,
+        feature_key=billing_feature_key,
+    )
+
     created_run = False
     try:
         message = await crud_agent.create_message(
@@ -408,6 +420,8 @@ async def submit_message(
             goal=obj_in.content,
             input_message_id=message.id,
             idempotency_key=idempotency_key,
+            billing_feature_key=billing_feature_key,
+            charge_amount=charge_amount,
         )
         # The worker must never observe a run before its transaction is committed.
         await db.commit()

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import and_, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from common.databases.models.agent_conversation import AgentConversation
 from common.databases.models.agent_message import AgentMessage
@@ -192,6 +193,8 @@ async def create_run(
     goal: Optional[str] = None,
     input_message_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    billing_feature_key: Optional[str] = None,
+    charge_amount: float = 0.0,
 ) -> AgentRun:
     run = AgentRun(
         conversation_id=conversation.id,
@@ -199,6 +202,8 @@ async def create_run(
         goal=goal,
         input_message_id=input_message_id,
         idempotency_key=idempotency_key,
+        billing_feature_key=billing_feature_key,
+        charge_amount=charge_amount,
         status="queued",
         step_count=0,
         tool_call_count=0,
@@ -234,6 +239,25 @@ async def get_run_by_idempotency_key(
             AgentRun.user_id == user_id,
             AgentRun.idempotency_key == idempotency_key,
         )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_run_by_user_idempotency_key(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    idempotency_key: str,
+) -> Optional[AgentRun]:
+    """Resolve V2 retries before a new conversation is created."""
+    result = await db.execute(
+        select(AgentRun)
+        .where(
+            AgentRun.user_id == user_id,
+            AgentRun.idempotency_key == idempotency_key,
+        )
+        .order_by(desc(AgentRun.created_at), desc(AgentRun.id))
+        .limit(1)
     )
     return result.scalar_one_or_none()
 
@@ -363,7 +387,14 @@ async def get_profile(
     *,
     user_id: int,
 ) -> Optional[CareerProfile]:
-    result = await db.execute(select(CareerProfile).where(CareerProfile.user_id == user_id))
+    result = await db.execute(
+        select(CareerProfile)
+        .options(
+            selectinload(CareerProfile.courses),
+            selectinload(CareerProfile.normalized_skills),
+        )
+        .where(CareerProfile.user_id == user_id)
+    )
     return result.scalar_one_or_none()
 
 

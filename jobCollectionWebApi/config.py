@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     #         self.API_KEYS = [key.strip() for key in api_keys.split(',')]
     # API 配置
     API_V1_STR: str = "/api/v1"
+    API_V2_STR: str = "/api/v2"
     PROJECT_NAME: str = "求职技能分析平台"
     
     # CORS 配置

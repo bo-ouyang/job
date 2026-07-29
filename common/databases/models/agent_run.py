@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -48,6 +48,9 @@ class AgentRun(Base):
     state_snapshot = Column(JSONB, nullable=True)
     error_code = Column(String(50), nullable=True)
     error_message = Column(Text, nullable=True)
+    billing_feature_key = Column(String(50), nullable=True)
+    charge_amount = Column(Numeric(10, 2), nullable=False, default=0)
+    charged_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)

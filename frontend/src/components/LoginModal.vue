@@ -20,10 +20,8 @@ const navigateAfterLogin = async () => {
 const activeTab = ref('account'); // 'scan' | 'phone' | 'account'
 const phone = ref('');
 const code = ref('');
-const DEFAULT_USERNAME = 'user123456';
-const DEFAULT_PASSWORD = '123456';
-const username = ref(DEFAULT_USERNAME);
-const password = ref(DEFAULT_PASSWORD);
+const username = ref('');
+const password = ref('');
 const isRegister = ref(false);
 const countdown = ref(0);
 const isLoading = ref(false);
@@ -47,8 +45,8 @@ const close = () => {
 const resetForm = () => {
     phone.value = '';
     code.value = '';
-    username.value = DEFAULT_USERNAME;
-    password.value = DEFAULT_PASSWORD;
+    username.value = '';
+    password.value = '';
     isRegister.value = false;
     errorMsg.value = '';
     debugCode.value = '';

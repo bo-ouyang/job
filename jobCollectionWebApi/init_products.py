@@ -11,9 +11,13 @@ from core.logger import sys_logger as logger
 
 async def init():
     print("Connecting to DB to ensure pricing products exist...")
-    async with db_manager.async_session() as session:
-        res = await ai_access_service.ensure_pricing_products(session)
-        print(f"Created {res} new pricing products in the database.")
+    await db_manager.initialize()
+    try:
+        async with db_manager.async_session() as session:
+            res = await ai_access_service.ensure_pricing_products(session)
+            print(f"Created {res} new pricing products in the database.")
+    finally:
+        await db_manager.close()
 
 if __name__ == "__main__":
     asyncio.run(init())

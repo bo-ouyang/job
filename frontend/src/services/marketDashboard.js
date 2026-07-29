@@ -16,7 +16,10 @@ export async function loadMarketDashboard(
     const response = await client.getDashboard(params);
     const data = unwrapPayload(response?.data);
     if (!data || typeof data !== "object") throw new Error("Invalid market payload");
-    return { data, source: "api", updatedAt: getUpdatedAt(data) };
+    const displaySource = ["mixed", "synthetic"].includes(data?.dataStatus?.source)
+      ? data.dataStatus.source
+      : "api";
+    return { data, source: displaySource, updatedAt: getUpdatedAt(data) };
   } catch {
     return {
       data: fallback,

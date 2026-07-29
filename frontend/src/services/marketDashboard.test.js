@@ -49,4 +49,21 @@ describe("market dashboard service", () => {
     expect(result.data).toEqual(sample);
     expect(result.source).toBe("api");
   });
+
+  it("preserves the backend mixed-data label for transparent UI notices", async () => {
+    const mixedSample = {
+      ...sample,
+      dataStatus: {
+        source: "mixed",
+        syntheticDimensions: ["market.monthly_job_trend"],
+      },
+    };
+    const client = {
+      getDashboard: vi.fn().mockResolvedValue({ data: mixedSample }),
+    };
+
+    const result = await loadMarketDashboard({}, { client, fallback: {} });
+
+    expect(result.source).toBe("mixed");
+  });
 });

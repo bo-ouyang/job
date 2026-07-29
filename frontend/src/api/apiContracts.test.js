@@ -7,8 +7,16 @@ const request = vi.hoisted(() => ({
   patch: vi.fn(),
   delete: vi.fn(),
 }));
+const v2Request = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  patch: vi.fn(),
+  delete: vi.fn(),
+}));
 
 vi.mock("@/utils/request", () => ({ default: request }));
+vi.mock("@/utils/v2Request", () => ({ default: v2Request }));
 
 import { applicationAPI } from "./application";
 import { commonAPI } from "./common";
@@ -65,19 +73,19 @@ describe("frontend API contracts", () => {
 
   it("uses the public market dashboard route", () => {
     marketAPI.getDashboard({ city: "杭州", range: "12m" });
-    expect(request.get).toHaveBeenCalledWith("/analysis/market/dashboard", {
+    expect(v2Request.get).toHaveBeenCalledWith("/market/dashboard", {
       params: { city: "杭州", range: "12m" },
     });
   });
 
   it("loads backend-managed AI pricing", () => {
     careerAPI.getPricing();
-    expect(request.get).toHaveBeenCalledWith("/ai/pricing");
+    expect(v2Request.get).toHaveBeenCalledWith("/ai/pricing");
   });
 
   it("keeps career generation idempotent", () => {
     careerAPI.generateReport({ city: "杭州" }, "request-1");
-    expect(request.post).toHaveBeenCalledWith(
+    expect(v2Request.post).toHaveBeenCalledWith(
       "/career-analysis/reports",
       { city: "杭州" },
       { headers: { "Idempotency-Key": "request-1" } },
@@ -87,7 +95,7 @@ describe("frontend API contracts", () => {
   it("exposes profile course and skill collections", () => {
     profileAPI.getCourses();
     profileAPI.getSkills();
-    expect(request.get).toHaveBeenNthCalledWith(1, "/profile/courses");
-    expect(request.get).toHaveBeenNthCalledWith(2, "/profile/skills");
+    expect(v2Request.get).toHaveBeenNthCalledWith(1, "/profile/courses");
+    expect(v2Request.get).toHaveBeenNthCalledWith(2, "/profile/skills");
   });
 });

@@ -53,6 +53,9 @@ erDiagram
     AgentConversation ||--o{ AgentRun : executes
     AgentMessage ||--o| AgentRun : triggers
     User ||--|| CareerProfile : owns
+    CareerProfile ||--o{ CareerProfileCourse : contains
+    CareerProfile ||--o{ CareerProfileSkill : contains
+    CareerProfile ||--o{ CareerProfileChangeLog : audits
 
     AgentConversation {
       bigint id PK
@@ -81,6 +84,9 @@ erDiagram
       int step_count
       int tool_call_count
       jsonb state_snapshot
+      string billing_feature_key
+      decimal charge_amount
+      datetime charged_at
     }
     CareerProfile {
       bigint id PK
@@ -93,6 +99,21 @@ erDiagram
       jsonb goals
       jsonb confidence
     }
+    CareerProfileCourse {
+      bigint profile_id FK
+      string normalized_name
+      string source
+      string confirmation_status
+      jsonb evidence
+    }
+    CareerProfileSkill {
+      bigint profile_id FK
+      string normalized_name
+      int proficiency_level
+      decimal years_experience
+      string confirmation_status
+      jsonb evidence
+    }
 ```
 
 关键约束：
@@ -102,10 +123,13 @@ erDiagram
 - Run 的 `execution_token + lease_expires_at` 用于数据库级执行权声明和过期接管。
 - `state_snapshot` 保存 Runtime 检查点；Redis Streams 只保存临时实时事件，不是最终事实来源。
 - 所有 Snowflake ID 在 API 层输出为字符串。
+- JSONB 画像继续兼容 V1；V2 规范化课程/技能只有确认状态为 `confirmed` 时才进入 Agent 上下文。
 
 ## 4. API 契约
 
 所有路径均以 `/api/v1/agent` 为前缀。
+
+新 UI 还通过 `/api/v2/market/questions`、`/api/v2/career-analysis/reports` 和 `/api/v2/career-analysis/questions` 适配到同一套 Agent 会话、Run、Worker 和 Runtime，并在创建会话前按用户级 `Idempotency-Key` 复用已有 Run。
 
 | 方法与路径 | 用途 |
 |---|---|
@@ -166,6 +190,7 @@ sequenceDiagram
       API->>Redis: 用户级每分钟限流
       API->>PG: pg_advisory_xact_lock(user_id)
       API->>PG: 统计活跃 Run
+      API->>PG: 校验钱包余额并锁定后端价格
       API->>PG: 写 Message + queued Run + commit
       API->>Celery: apply_async(queue=realtime)
       API-->>FE: 202 Message + Run
@@ -192,13 +217,14 @@ Celery 任务开启 `acks_late`、`reject_on_worker_lost`，软/硬时限分别�
 
 ```mermaid
 flowchart TD
-    Load["load_context<br/>读取会话、消息、CareerProfile"] --> Plan["understand_and_plan<br/>LLM 输出 AgentPlan"]
+    Load["load_context<br/>读取会话、消息、CareerProfile、已确认课程/技能"] --> Plan["understand_and_plan<br/>LLM 输出 AgentPlan"]
     Plan -->|"action=clarify"| Clarify["clarification_required<br/>保存问题，Run=waiting_user"]
     Plan -->|"action=analyze"| Validate["校验工具白名单、参数和预算"]
     Validate --> Tools["execute_tools<br/>依次执行去重后的工具调用"]
     Tools --> Evidence["evaluate_evidence<br/>至少一个可用真实样本"]
     Evidence --> Compose["compose_answer<br/>LLM 输出 AgentAnswer"]
-    Compose --> Save["save_result<br/>保存 Markdown + 结构化 metadata"]
+    Compose --> Bill["charge_usage<br/>按 agent_run:{id} 幂等扣款"]
+    Bill --> Save["save_result<br/>保存 Markdown + 结构化 metadata"]
     Save --> Done["completed"]
 ```
 
@@ -324,6 +350,7 @@ Pinia Agent Store 保存会话、消息、activeRun、事件、结构化结果�
 - 事件发布失败：运行继续，前端通过 Run 状态/SSE reconciliation 恢复。
 - LLM 配置、超时、熔断、结构化输出失败：Worker 将 Run 原子迁移为 failed。
 - Celery 派发失败：API 立即落库 failed，并发布失败事件。
+- 余额不足：提交阶段返回 HTTP 402；成功答案写入前执行带 Run 订单号的幂等扣款，扣款、助手消息和 completed 状态在同一数据库事务中提交，失败或取消会整体回滚。
 - 用户取消：状态原子迁移，后续 Runtime checkpoint 会停止执行。
 
 Prometheus 指标覆盖 Run 创建/完成/失败/取消、耗时、首事件延迟、工具调用/失败、活跃 SSE、SSE 重连、锁竞争和事件发布失败。
@@ -345,4 +372,3 @@ Prometheus 指标覆盖 Run 创建/完成/失败/取消、耗时、首事件延�
 - Redis Streams 回放、SSE 格式和终态对账。
 - Agent API 路由、强制幂等 Header 和 SSE 短会话鉴权。
 - 前端 capability gate、会话竞态、终态停连、waiting_user 恢复、401 刷新重试和旧快照丢弃。
-

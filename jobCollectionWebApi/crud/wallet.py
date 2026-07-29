@@ -72,6 +72,17 @@ class CRUDWallet(CRUDBase[UserWallet, WalletCreate, WalletUpdate]):
 
         if not wallet or wallet.status != WalletStatus.ACTIVE:
             return False
+
+        if order_no:
+            existing_result = await db.execute(
+                select(WalletTransaction.id).where(
+                    WalletTransaction.wallet_id == wallet.id,
+                    WalletTransaction.transaction_type == TransactionType.CONSUME,
+                    WalletTransaction.related_order_no == order_no,
+                )
+            )
+            if existing_result.scalar_one_or_none() is not None:
+                return True
             
         if wallet.balance < amount:
             return False

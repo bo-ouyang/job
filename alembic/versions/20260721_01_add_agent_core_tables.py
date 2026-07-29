@@ -18,7 +18,35 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _ensure_users_id_primary_key() -> None:
+    """Normalize legacy databases created without ORM constraints."""
+    bind = op.get_bind()
+    primary_key = sa.inspect(bind).get_pk_constraint("users")
+    constrained_columns = primary_key.get("constrained_columns") or []
+    if constrained_columns == ["id"]:
+        return
+    if constrained_columns:
+        raise RuntimeError(
+            "users has an unexpected primary key; expected users.id before Agent migration"
+        )
+
+    row_count, nonnull_id_count, distinct_id_count = bind.execute(
+        sa.text(
+            "SELECT COUNT(*), COUNT(id), COUNT(DISTINCT id) "
+            "FROM users"
+        )
+    ).one()
+    if row_count != nonnull_id_count or row_count != distinct_id_count:
+        raise RuntimeError(
+            "cannot add users.id primary key: legacy data contains null or duplicate ids"
+        )
+
+    op.create_primary_key("pk_users", "users", ["id"])
+
+
 def upgrade() -> None:
+    _ensure_users_id_primary_key()
+
     op.create_table(
         "agent_conversations",
         sa.Column("id", sa.BigInteger(), nullable=False),

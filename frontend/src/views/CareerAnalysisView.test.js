@@ -74,4 +74,25 @@ describe("CareerAnalysisView", () => {
     expect(wrapper.get("[data-test='generate-analysis']").text()).toContain("¥3.50");
     expect(wrapper.get("[data-test='career-ai-price']").text()).toContain("¥0.30");
   });
+
+  it("labels synthetic career analysis sections without replacing the real profile", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.getOverview.mockResolvedValue({
+      data: {
+        ...overview,
+        dataStatus: {
+          source: "mixed",
+          syntheticDimensions: ["career.agent_report", "career.city_comparison"],
+        },
+      },
+    });
+
+    const wrapper = mount(CareerAnalysisView);
+    await flushPromises();
+
+    expect(wrapper.get("[data-test='career-source']").text()).toContain(
+      "分析部分使用测试数据",
+    );
+    expect(wrapper.text()).toContain("林晓雨");
+  });
 });

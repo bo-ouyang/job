@@ -20,6 +20,7 @@ from agent.event_store import close_agent_event_resources
 # Import models to ensure they are registered with Base.metadata
 from common.databases.models import user, job, company, resume, favorite
 from api.v1.api import api_router
+from api.v2.api import api_router as api_v2_router
 from core.logger import sys_logger as logger
 from middleware.log_middleware import APILogMiddleware
 from common.search.conn import es_manager
@@ -228,6 +229,7 @@ from fastapi.staticfiles import StaticFiles
 
 # 包含 API 路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_v2_router, prefix=settings.API_V2_STR)
 
 # 挂载静态文件目录
 # 确保目录存在

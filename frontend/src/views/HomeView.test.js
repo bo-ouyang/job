@@ -36,6 +36,7 @@ const marketFixture = {
   citySalaries: [{ name: "杭州", value: 15.4 }],
   skills: [{ name: "Python", value: 68 }],
   salaryDistribution: [{ label: "12–18K", value: 31 }],
+  salarySummary: { median: 12680, p75: 21300 },
   talentStructure: { education: [{ label: "本科", value: 62 }], experience: [{ label: "1–3 年", value: 42 }] },
   cityMatrix: [{ city: "杭州", growth: 19.4, salary: 15.4 }],
   signals: [{ type: "需求加速", title: "AI 产品经理", delta: "+28.4%", tone: "up" }],
@@ -68,6 +69,8 @@ describe("HomeView V2", () => {
 
     expect(wrapper.text()).toContain("全行业就业市场");
     expect(wrapper.text()).toContain("1,284,760");
+    expect(wrapper.text()).toContain("¥12,680");
+    expect(wrapper.text()).toContain("¥21,300");
     expect(wrapper.text()).toContain("数据服务已降级，当前展示最近一次可用数据");
     expect(wrapper.find("[data-test='trend-chart']").exists()).toBe(true);
     expect(mocks.getPricing).toHaveBeenCalledOnce();
@@ -91,5 +94,26 @@ describe("HomeView V2", () => {
       query: { login: "true", redirect: "/", action: "market-ai" },
     });
     expect(mocks.askQuestion).not.toHaveBeenCalled();
+  });
+
+  it("labels mixed API data as test display data", async () => {
+    mocks.loadMarketDashboard.mockResolvedValue({
+      data: {
+        ...marketFixture,
+        dataStatus: {
+          source: "mixed",
+          syntheticDimensions: ["market.monthly_job_trend"],
+        },
+      },
+      source: "mixed",
+      updatedAt: marketFixture.updatedAt,
+    });
+
+    const wrapper = mount(HomeView, { global: { stubs: chartStubs } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-test='market-source']").text()).toContain(
+      "部分展示使用测试数据",
+    );
   });
 });

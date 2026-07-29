@@ -10,7 +10,7 @@
 核心运行形态不是单体进程，而是一个共享代码库中的多个服务：
 
 - Vue 3 单页前端负责用户交互、图表和实时状态展示。
-- FastAPI 提供 `/api/v1` REST API、WebSocket 和 Agent SSE。
+- FastAPI 同时提供兼容的 `/api/v1` 和新 UI 使用的 `/api/v2` REST API，并提供 WebSocket 和 Agent SSE。
 - Celery realtime worker 执行用户交互型 AI/Agent 任务。
 - Celery batch worker 执行解析、同步和批处理任务。
 - Starlette-Admin 提供独立运营后台。
@@ -23,7 +23,7 @@ flowchart LR
     User["用户浏览器"] --> Nginx["Nginx / 前端静态站点"]
     Operator["运营人员"] --> Admin["Starlette-Admin :8001"]
     Nginx --> FE["Vue 3 SPA"]
-    FE -->|"REST /api/v1"| API["FastAPI :8000"]
+    FE -->|"REST /api/v1 + /api/v2"| API["FastAPI :8000"]
     FE -->|"WebSocket 通知"| API
     FE -->|"Agent SSE"| API
 
@@ -50,9 +50,11 @@ flowchart LR
 |---|---|
 | `frontend/` | Vue 3、Vue Router、Pinia、Axios、ECharts、Element Plus |
 | `jobCollectionWebApi/api/v1/endpoints/` | FastAPI 路由、鉴权、输入输出和 HTTP 语义 |
+| `jobCollectionWebApi/api/v2/endpoints/` | 新 UI 页面聚合路由；V1 保持兼容 |
 | `jobCollectionWebApi/services/` | 搜索、分析、AI、支付外围能力的业务编排 |
 | `jobCollectionWebApi/crud/` | SQLAlchemy 数据访问与原子状态迁移 |
 | `jobCollectionWebApi/schemas/` | Pydantic 请求与响应契约 |
+| `jobCollectionWebApi/schemas/v2/` | CamelCase V2 页面契约和 `dataStatus` |
 | `jobCollectionWebApi/tasks/` | Celery realtime/batch 任务入口 |
 | `jobCollectionWebApi/agent/` | Agent Runtime、状态、工具、事件、SSE 和锁 |
 | `jobCollectionWebApi/core/` | 配置、缓存、Celery、指标、异常、日志、熔断器 |
@@ -75,9 +77,11 @@ flowchart TD
     Views --> Stores["Pinia stores"]
     Views --> APIs["api/*.js"]
     Stores --> APIs
-    APIs --> Request["Axios request.js"]
+    APIs --> Request["Axios request.js（V1）"]
+    APIs --> V2Request["Axios v2Request.js（V2）"]
     Stores --> SSE["sseClient.js"]
     Request --> Backend["FastAPI /api/v1"]
+    V2Request --> BackendV2["FastAPI /api/v2"]
     SSE --> Backend
 ```
 
@@ -85,6 +89,7 @@ flowchart TD
 - `stores/` 保存认证、简历、收藏、传统 AI 任务和 Agent 会话状态。
 - `api/` 是后端路径的唯一调用适配层，页面不应自行拼接 API 根地址。
 - `request.js` 自动附加 Bearer Token，解包 `{code, msg, data}` 成功响应，并在 401 时串行刷新 Token 后重试。
+- `v2Request.js` 复用同一 Access/Refresh Token 链路，专门服务首页、职业分析和个人画像新 UI。
 - Agent 实时流不使用浏览器原生 `EventSource`，而是使用 `fetch`，以便附加 Authorization 和 `Last-Event-ID`。
 
 ### 4.2 路由域
@@ -95,7 +100,7 @@ flowchart TD
 
 ### 4.3 前后端契约约束
 
-- API 根路径为 `/api/v1`；开发环境由 Vite `/api` 代理到 `127.0.0.1:8000`。
+- 旧业务根路径为 `/api/v1`，新 UI 页面聚合根路径为 `/api/v2`；开发环境由 Vite `/api` 代理到 `127.0.0.1:8000`。
 - Snowflake/BigInteger ID 在响应中序列化为字符串，避免 JavaScript 超过 `Number.MAX_SAFE_INTEGER` 后精度丢失。
 - 职位 `tags` 同时兼容 JSONB 数组和历史 JSON 字符串，由 `jobData.js` 统一归一化。
 - 数据库存储薪资单位为元；前端展示层统一换算为 `K`，不得直接给原始数值追加 `K`。
@@ -111,7 +116,7 @@ flowchart LR
     CORS --> Security["SecurityHeaders + WAF"]
     Security --> Log["APILogMiddleware"]
     Log --> Unified["UnifiedResponseMiddleware"]
-    Unified --> Endpoint["api/v1/endpoints"]
+    Unified --> Endpoint["api/v1 + api/v2 endpoints"]
     Endpoint --> Service["services"]
     Endpoint --> CRUD["crud"]
     Service --> CRUD
@@ -123,6 +128,8 @@ flowchart LR
 `get_db` 为普通请求提供 AsyncSession：成功请求自动提交，异常自动回滚。SSE 使用短生命周期鉴权依赖，先验证用户再释放数据库会话，避免长连接长期占用连接池。
 
 ### 5.2 API 领域
+
+V1 继续承载兼容业务接口；V2 当前承载 `/market`、`/profile`、`/career-analysis`、`/ai/pricing` 和 `/meta/data-gaps` 页面契约。完整映射与废弃策略见 `API_V2_MIGRATION.md`。
 
 | 前缀 | 主要能力 |
 |---|---|
@@ -141,7 +148,7 @@ flowchart LR
 
 | 存储 | 权威职责 |
 |---|---|
-| PostgreSQL | 用户、职位、公司、行业、简历、收藏、投递、支付、AI 任务、Agent 会话与运行状态 |
+| PostgreSQL | 用户、职位、公司、行业、简历、收藏、投递、支付、AI 任务、Agent 会话与运行状态，以及规范化课程、技能和画像变更记录 |
 | Elasticsearch | 职位全文检索、筛选、统计聚合、城市/行业对比 |
 | Redis | API 缓存、速率限制、分布式锁、Celery broker/result、WebSocket Pub/Sub、Agent Redis Streams |
 | 本地/挂载目录 | 上传文件与静态资源，生产环境由 Nginx `/static/` 暴露 |
@@ -242,7 +249,7 @@ sequenceDiagram
 ## 10. 当前边界和维护约束
 
 - `jobCollection/` 是上游采集系统，本轮不修复；业务 API 与 Agent 只消费已经落库/入 ES 的数据。
-- Agent 对话和结果来自真实后端；工作台上的方向卡片、周计划、机会卡等 dashboard 模块当前仍使用 mock 数据，代码中 `isDashboardMock` 固定为 `true`。
+- 新 UI 的个人资料、课程、技能、职业分析和 AI 问答均已预留并切换 V2 数据接口；数据库缺失维度返回空集合和 `dataStatus`，不得伪造为真实数据。
 - 当前维护测试集中在 `tests/`；历史 `pytest/` 套件依赖额外测试环境，不能替代现有回归。
 - 新增接口或字段时，应同时更新 Pydantic Schema、前端 `api/` 封装和契约测试。
 - 修改数据库模型必须提供 Alembic 迁移，禁止仅依赖运行时 `create_all`。
@@ -251,8 +258,8 @@ sequenceDiagram
 
 本次集成后的基线验证：
 
-- 后端维护测试：46 项通过。
-- 前端 Vitest：27 项通过。
-- Vite 生产构建：1608 个模块成功构建。
+- 后端维护测试：67 项通过。
+- 前端 Vitest：42 项通过。
+- Vite 生产构建：1617 个模块成功构建。
 - Docker Compose：使用非敏感占位必填变量成功完成配置解析。
 - Python 源码 AST 与 Vue SFC 编译检查通过。

@@ -46,6 +46,17 @@ class FakePublisher:
         return None
 
 
+class FakeBillingService:
+    def __init__(self):
+        self.charges = []
+        self.committed_charges = 0
+
+    async def charge_usage(self, db, **kwargs):
+        self.charges.append(kwargs)
+        if kwargs.get("commit", True):
+            self.committed_charges += 1
+
+
 class FakeRepository:
     def __init__(self, cancel_on_status=None):
         self.run = SimpleNamespace(
@@ -203,6 +214,64 @@ def test_runtime_completes_with_real_tool_evidence():
         "message_completed",
         "run_completed",
     ]
+
+
+def test_runtime_charges_successful_run_once_with_stable_order_number():
+    db = FakeDB()
+    repository = FakeRepository()
+    repository.run.billing_feature_key = "career_advice"
+    repository.run.charge_amount = 1.5
+    repository.run.charged_at = None
+    billing = FakeBillingService()
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=FakePublisher(),
+        repository=repository,
+        billing_service=billing,
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    assert billing.charges == [
+        {
+            "user_id": 300,
+            "feature_key": "career_advice",
+            "amount": 1.5,
+            "detail_suffix": "agent_run:100",
+            "order_no": "agent_run:100",
+            "commit": False,
+        }
+    ]
+    assert billing.committed_charges == 0
+    assert repository.transitions[-1]["values"]["charged_at"] is not None
+
+
+def test_late_cancellation_rolls_back_agent_charge_with_result():
+    db = FakeDB()
+    repository = FakeRepository(cancel_on_status="completed")
+    repository.run.billing_feature_key = "career_advice"
+    repository.run.charge_amount = 1.5
+    repository.run.charged_at = None
+    billing = FakeBillingService()
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=FakePublisher(),
+        repository=repository,
+        billing_service=billing,
+    )
+
+    with pytest.raises(AgentCancelledError):
+        asyncio.run(runtime.execute(100, 300))
+
+    assert billing.committed_charges == 0
+    assert db.rollbacks == 1
 
 
 def test_runtime_requests_one_clarification():

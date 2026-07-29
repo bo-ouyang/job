@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,6 +133,35 @@ class AIAccessService:
 
         return max(float(policy.default_price), 0.0)
 
+    async def get_public_pricing(
+        self,
+        db: AsyncSession,
+        feature_keys: Optional[List[str]] = None,
+    ) -> Dict[str, dict]:
+        """Return backend-owned prices without exposing wallet or internal policy data."""
+        requested = feature_keys or list(self._policy_map)
+        result: Dict[str, dict] = {}
+        for feature_key in requested:
+            policy = self._get_policy(feature_key)
+            product = await crud_product.product.get_by_code(db, policy.product_code)
+            enabled = bool(product.is_active) if product is not None else not settings.AI_BILLING_REQUIRE_PRODUCT
+            if not settings.AI_BILLING_ENABLED:
+                amount = 0.0
+            elif product is not None and product.is_active:
+                amount = max(float(product.price), 0.0)
+            elif settings.AI_BILLING_REQUIRE_PRODUCT:
+                amount = None
+            else:
+                amount = max(float(policy.default_price), 0.0)
+            result[feature_key] = {
+                "amount": amount,
+                "currency": "CNY",
+                "enabled": enabled,
+                "product_code": policy.product_code,
+                "description": policy.description,
+            }
+        return result
+
     async def ensure_access(self, db: AsyncSession, user_id: int, feature_key: str) -> float:
         policy = self._get_policy(feature_key)
         await self._enforce_rate_limit(user_id=user_id, policy=policy)
@@ -162,6 +191,8 @@ class AIAccessService:
         feature_key: str,
         amount: float,
         detail_suffix: str = "",
+        order_no: Optional[str] = None,
+        commit: bool = True,
     ) -> None:
         if amount <= 0:
             return
@@ -176,6 +207,7 @@ class AIAccessService:
             user_id=user_id,
             amount=amount,
             description=description,
+            order_no=order_no,
         )
         if not success:
             ai_billing_rejections.labels(feature=feature_key, reason="wallet_error").inc()
@@ -186,11 +218,14 @@ class AIAccessService:
                 message=f"Wallet charge failed for {policy.description}",
             )
         
-        # Record metrics on success
+        if commit:
+            await db.commit()
+            self.record_charge_metrics(feature_key, amount)
+
+    @staticmethod
+    def record_charge_metrics(feature_key: str, amount: float) -> None:
         ai_billing_charges.labels(feature=feature_key).inc()
         ai_billing_amount.labels(feature=feature_key).inc(amount)
-        
-        await db.commit()
 
 
 ai_access_service = AIAccessService()
