@@ -15,6 +15,7 @@ from agent.errors import (
     AgentEvidenceUnavailableError,
     AgentLimitExceededError,
     LLMConfigurationError,
+    LLMTimeoutError,
 )
 from agent.policies import AgentPolicies
 from agent.runtime import AgentRuntime
@@ -115,6 +116,23 @@ class ScriptedClient:
         raise AssertionError("unexpected schema")
 
 
+class TimeoutOnceAnswerClient(ScriptedClient):
+    def __init__(self, plan, answer):
+        super().__init__(plan, answer)
+        self.answer_attempts = 0
+
+    async def complete_structured(self, system_prompt, user_prompt, schema):
+        self.calls.append(schema)
+        if schema is AgentPlan:
+            return self.plan
+        if schema is AgentAnswer:
+            self.answer_attempts += 1
+            if self.answer_attempts == 1:
+                raise LLMTimeoutError("transient model timeout")
+            return self.answer
+        raise AssertionError("unexpected schema")
+
+
 class SuccessfulSearchTool(AgentTool[SearchJobsInput]):
     name = "search_jobs"
     description = "test search"
@@ -127,6 +145,15 @@ class SuccessfulSearchTool(AgentTool[SearchJobsInput]):
             filters=input_data.model_dump(),
             source="mock",
         )
+
+
+class CapturingSearchTool(SuccessfulSearchTool):
+    def __init__(self):
+        self.input_data = None
+
+    async def execute(self, input_data, context):
+        self.input_data = input_data
+        return await super().execute(input_data, context)
 
 
 class FailedSearchTool(SuccessfulSearchTool):
@@ -142,6 +169,34 @@ class EmptySearchTool(SuccessfulSearchTool):
             filters=input_data.model_dump(),
             source="mock",
         )
+
+
+class ExpiringMessage:
+    def __init__(self, role, content):
+        self._role = role
+        self._content = content
+        self.expired = False
+
+    @property
+    def role(self):
+        if self.expired:
+            raise RuntimeError("message ORM state expired")
+        return self._role
+
+    @property
+    def content(self):
+        if self.expired:
+            raise RuntimeError("message ORM state expired")
+        return self._content
+
+
+class ExpiringSearchTool(SuccessfulSearchTool):
+    def __init__(self, message):
+        self.message = message
+
+    async def execute(self, input_data, context):
+        self.message.expired = True
+        return await super().execute(input_data, context)
 
 
 def make_registry(tool):
@@ -186,6 +241,25 @@ def answer_result():
     )
 
 
+def test_agent_answer_formats_alternate_skill_gap_fields_without_placeholder_repetition():
+    answer = AgentAnswer(
+        summary="当前市场更看重框架和部署经验。",
+        skill_gaps=[
+            {"skill": "Django", "reason": "高频岗位要求，但目前缺少项目经验"},
+            {"title": "Redis", "description": "需要补充缓存与队列实战"},
+            {"name": "Linux 部署", "gap": "尚未独立完成线上部署"},
+            {},
+        ],
+    )
+
+    markdown = answer.to_markdown()
+
+    assert "**Django**：高频岗位要求，但目前缺少项目经验" in markdown
+    assert "**Redis**：需要补充缓存与队列实战" in markdown
+    assert "**Linux 部署**：尚未独立完成线上部署" in markdown
+    assert "待提升能力" not in markdown
+
+
 def test_runtime_completes_with_real_tool_evidence():
     db = FakeDB()
     repository = FakeRepository()
@@ -214,6 +288,89 @@ def test_runtime_completes_with_real_tool_evidence():
         "message_completed",
         "run_completed",
     ]
+
+
+def test_runtime_retries_one_transient_answer_model_timeout_within_run_budget():
+    client = TimeoutOnceAnswerClient(analyze_plan(), answer_result())
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=client,
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=FakePublisher(),
+        repository=FakeRepository(),
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    assert client.answer_attempts == 2
+
+
+def test_market_question_does_not_inherit_unmentioned_profile_filters():
+    repository = FakeRepository()
+    repository.messages = [
+        SimpleNamespace(
+            role="user",
+            content="我现在想去上海应聘 Python 后端开发，分析当前市场行情",
+            message_type="market_question",
+        )
+    ]
+    plan = AgentPlan.model_validate(
+        {
+            "intent": "上海 Python 后端市场行情",
+            "action": "analyze",
+            "tools": [
+                {
+                    "name": "search_jobs",
+                    "arguments": {
+                        "keyword": "Python 后端",
+                        "cities": ["上海"],
+                        "education": "本科",
+                        "experience": "应届生",
+                        "skills": ["Django"],
+                    },
+                }
+            ],
+        }
+    )
+    tool = CapturingSearchTool()
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(plan, answer_result()),
+        registry=make_registry(tool),
+        policies=make_policies(),
+        publisher=FakePublisher(),
+        repository=repository,
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    assert tool.input_data.cities == ["上海"]
+    assert tool.input_data.education is None
+    assert tool.input_data.experience is None
+    assert tool.input_data.skills == []
+
+
+def test_runtime_does_not_reuse_expired_orm_messages_after_tool_transactions():
+    db = FakeDB()
+    repository = FakeRepository()
+    message = ExpiringMessage("user", "杭州人工智能岗位趋势如何？")
+    repository.messages = [message]
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(ExpiringSearchTool(message)),
+        policies=make_policies(),
+        publisher=FakePublisher(),
+        repository=repository,
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert message.expired is True
+    assert result["status"] == "completed"
 
 
 def test_runtime_charges_successful_run_once_with_stable_order_number():
@@ -377,3 +534,10 @@ def test_production_llm_client_rejects_mock_provider(monkeypatch):
     monkeypatch.setattr(llm_module.settings, "AI_API_KEY", "test")
     with pytest.raises(LLMConfigurationError):
         LLMClient()._ensure_configured()
+
+
+def test_celery_agent_task_allows_the_extended_model_runtime_budget():
+    from tasks.agent_tasks import execute_agent_run
+
+    assert execute_agent_run.soft_time_limit >= 135
+    assert execute_agent_run.time_limit >= 150

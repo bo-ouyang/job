@@ -1,9 +1,16 @@
+"""把搜索服务返回的岗位记录转换为稳定、紧凑的 Agent 证据。"""
+
 from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
 
 def normalize_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    """规范单条岗位记录的字段、类型和技能标签。
+
+    搜索后端可能返回不同形态的数据，本函数屏蔽这些差异，并只保留回答所需字段。
+    """
+
     tags = job.get("tags") or []
     if not isinstance(tags, list):
         tags = [str(tags)]
@@ -27,6 +34,8 @@ def normalize_job(job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def latest_publish_date(jobs: Iterable[Dict[str, Any]]) -> Optional[datetime]:
+    """返回岗位样本中的最新发布日期，无法解析的日期会被忽略。"""
+
     values: List[datetime] = []
     for job in jobs:
         raw = job.get("publish_date")
@@ -41,6 +50,8 @@ def latest_publish_date(jobs: Iterable[Dict[str, Any]]) -> Optional[datetime]:
 
 
 def build_search_summary(jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """从岗位样本汇总热门职位、城市、技能和基础薪资范围。"""
+
     titles = Counter(job["title"] for job in jobs if job.get("title"))
     cities = Counter(job["city"] for job in jobs if job.get("city"))
     skills = Counter(skill for job in jobs for skill in job.get("skills", []))

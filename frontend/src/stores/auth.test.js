@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   logout: vi.fn(),
+  getBalance: vi.fn(),
   push: vi.fn(),
   resetAi: vi.fn(),
   resetAgent: vi.fn(),
@@ -10,6 +11,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/api/auth", () => ({
   authAPI: { logout: mocks.logout },
+}));
+
+vi.mock("@/api/wallet", () => ({
+  walletAPI: { getBalance: mocks.getBalance },
 }));
 
 vi.mock("@/router", () => ({
@@ -42,5 +47,19 @@ describe("auth logout navigation", () => {
 
     expect(store.isAuthenticated).toBe(false);
     expect(mocks.push).toHaveBeenCalledWith({ name: "home" });
+  });
+
+  it("replaces the cached login balance with the live wallet balance", async () => {
+    localStorage.setItem("token", "token");
+    localStorage.setItem("user", JSON.stringify({ id: 7, balance: 88 }));
+    mocks.getBalance.mockResolvedValue({
+      data: { balance: "12.34", status: "active" },
+    });
+    const store = useAuthStore();
+
+    await store.refreshWalletBalance();
+
+    expect(store.walletBalance).toBe(12.34);
+    expect(store.walletStatus).toBe("active");
   });
 });

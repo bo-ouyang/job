@@ -204,10 +204,36 @@ export const useAiTaskStore = defineStore(
       const deadline = Date.now() + timeout;
       let lastError = null;
 
+      const terminalResult = () => {
+        const current = tasks.value[taskId];
+        const result = current?.result;
+        const hasFullResult = Boolean(
+          result?.result_payload ||
+            result?.result_data ||
+            result?.report ||
+            result?.advice ||
+            result?.analysis_result,
+        );
+        if (current?.status === "completed" && hasFullResult) {
+          return { completed: true, result };
+        }
+        if (current?.status === "failed" || current?.status === "cancelled") {
+          const failure = new Error(current.error || "AI 任务执行失败");
+          failure.isBusinessFailure = true;
+          throw failure;
+        }
+        return null;
+      };
+
       while (Date.now() < deadline) {
         try {
+          const beforeRequest = terminalResult();
+          if (beforeRequest?.completed) return beforeRequest.result;
           const res = await aiAPI.getTaskResult(taskId);
           const data = res.data;
+
+          const afterRequest = terminalResult();
+          if (afterRequest?.completed) return afterRequest.result;
 
           if (data.status === "completed") {
             markCompleted(taskId, data.result, {
@@ -218,17 +244,17 @@ export const useAiTaskStore = defineStore(
 
           if (data.status === "failed") {
             markFailed(taskId, data.error);
-            throw new Error(data.error || "AI 任务执行失败");
+            const failure = new Error(data.error || "AI 任务执行失败");
+            failure.isBusinessFailure = true;
+            throw failure;
           }
 
           // Update intermediate status
-          if (tasks.value[taskId]) {
+          if (tasks.value[taskId] && !["completed", "failed", "cancelled"].includes(tasks.value[taskId].status)) {
             tasks.value[taskId].status = data.status;
           }
         } catch (e) {
-          const msg = String(e?.message || "");
-          const isBusinessFailure = msg.includes("任务执行失败");
-          if (isBusinessFailure) {
+          if (e?.isBusinessFailure) {
             throw e;
           }
           lastError = e;

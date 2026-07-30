@@ -1,8 +1,11 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 
 import { marketAPI } from "@/api/market";
+import { agentAPI } from "@/api/agent";
 import { careerAPI } from "@/api/career";
 import HomePanel from "@/components/home/HomePanel.vue";
 import KpiCard from "@/components/home/KpiCard.vue";
@@ -24,12 +27,12 @@ const aiOpen = ref(true);
 const aiSending = ref(false);
 const aiQuestion = ref("");
 const aiError = ref("");
-const aiMessages = ref([
-  {
-    role: "assistant",
-    content: "你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。",
-  },
-]);
+const marketAiWelcome = {
+  role: "assistant",
+  content: "你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。",
+};
+const aiMessages = ref([{ ...marketAiWelcome }]);
+let pollGeneration = 0;
 const filters = reactive({ range: "12m", city: "", industry: "", education: "" });
 
 const market = computed(() => dashboard.value || homeMockData);
@@ -60,6 +63,69 @@ const formatSalary = (value) => {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "number") return `¥${value.toLocaleString("zh-CN")}`;
   return String(value);
+};
+
+const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration));
+
+const renderAssistantContent = (content) => DOMPurify.sanitize(
+  marked.parse(String(content || ""), { breaks: true }),
+);
+
+const historyMessages = (items) => {
+  const messages = [];
+  for (const item of items || []) {
+    const conversationMessages = (item.messages || [])
+      .filter((message) => ["user", "assistant"].includes(message.role))
+      .map((message) => ({
+        id: String(message.id),
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt || "",
+      }));
+    messages.push(...conversationMessages);
+    if (
+      item.latestRunStatus === "failed"
+      && !conversationMessages.some((message) => message.role === "assistant")
+    ) {
+      messages.push({
+        id: `failed-${item.latestRunId || item.conversationId}`,
+        role: "assistant",
+        content: "上次行业问数分析失败，请重新发送问题。",
+        createdAt: item.updatedAt || item.createdAt || "",
+      });
+    }
+  }
+  return messages.sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+};
+
+const loadAiHistory = async ({ resumeActive = false } = {}) => {
+  if (!authStore.isAuthenticated) return [];
+  const response = await marketAPI.getHistory({ limit: 30 });
+  const items = response?.data?.items || [];
+  aiMessages.value = [{ ...marketAiWelcome }, ...historyMessages(items)];
+  if (resumeActive) {
+    const active = items.find((item) => ["queued", "running"].includes(item.latestRunStatus));
+    if (active?.latestRunId) void pollMarketRun(active.latestRunId);
+  }
+  return items;
+};
+
+const pollMarketRun = async (runId) => {
+  const generation = ++pollGeneration;
+  for (let attempt = 0; attempt < 110; attempt += 1) {
+    const response = await agentAPI.getRun(String(runId));
+    if (generation !== pollGeneration) return null;
+    const run = response?.data || {};
+    if (!["queued", "running"].includes(run.status)) {
+      await loadAiHistory();
+      if (run.status === "failed") {
+        throw new Error("行业问数分析失败，请重新发送问题。");
+      }
+      return run;
+    }
+    await wait(1200);
+  }
+  throw new Error("分析仍在进行中，请稍后重新打开对话框查看结果。");
 };
 
 const refreshDashboard = async () => {
@@ -111,10 +177,13 @@ const sendAiQuestion = async () => {
       { question, context: { filters: { ...filters } } },
       idempotencyKey,
     );
-    const content = response?.data?.answer || response?.data?.content || "分析任务已创建，请稍后查看结果。";
-    aiMessages.value.push({ role: "assistant", content });
+    const runId = response?.data?.runId || response?.data?.run_id;
+    if (!runId) throw new Error("分析任务创建失败，请稍后重试。");
+    await pollMarketRun(runId);
   } catch (error) {
-    aiError.value = error?.response?.data?.detail || "问题暂时发送失败，请稍后重试。";
+    aiError.value = error?.response?.data?.detail
+      || error?.message
+      || "问题暂时发送失败，请稍后重试。";
   } finally {
     aiSending.value = false;
   }
@@ -124,6 +193,21 @@ onMounted(() => {
   refreshDashboard();
   loadPricing();
 });
+
+watch(
+  () => authStore.isAuthenticated,
+  (authenticated) => {
+    if (authenticated) {
+      loadAiHistory({ resumeActive: true }).catch(() => {
+        aiError.value = "聊天记录暂时加载失败，请稍后重试。";
+      });
+    } else {
+      pollGeneration += 1;
+      aiMessages.value = [{ ...marketAiWelcome }];
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -202,7 +286,16 @@ onMounted(() => {
 
     <aside v-show="aiOpen" class="market-ai-dialog" data-test="market-ai-dialog" aria-label="AI 行业问数">
       <header><span>AI</span><div><small>MARKET DATA COPILOT</small><strong>AI 行业问数</strong></div><i /><em>在线</em><button data-test="market-ai-close" aria-label="收起 AI 对话框" @click="aiOpen = false">×</button></header>
-      <div class="ai-message-list"><div v-for="(message, index) in aiMessages" :key="index" :class="message.role">{{ message.content }}</div></div>
+      <div class="ai-message-list">
+        <div v-for="(message, index) in aiMessages" :key="index" :class="message.role">
+          <div
+            v-if="message.role === 'assistant'"
+            class="ai-markdown"
+            v-html="renderAssistantContent(message.content)"
+          />
+          <template v-else>{{ message.content }}</template>
+        </div>
+      </div>
       <form class="ai-composer" @submit.prevent="sendAiQuestion"><textarea v-model="aiQuestion" data-test="market-ai-input" placeholder="例如：新能源行业未来一年需要哪些技能？" /><p v-if="aiError" class="ai-error">{{ aiError }}</p><div><span>发送时需要登录 · {{ priceHint }}</span><button data-test="market-ai-send" :disabled="aiSending">{{ aiSending ? "发送中…" : "发送问题 ↑" }}</button></div></form>
     </aside>
     <button v-show="!aiOpen" class="ai-launcher" data-test="market-ai-launcher" aria-label="打开 AI 行业问数" @click="aiOpen = true"><span>AI</span><b>问行业数据</b><i /></button>
@@ -216,7 +309,7 @@ onMounted(() => {
 .histogram { display: grid; height: 220px; grid-template-columns: repeat(6,1fr); align-items: end; gap: 10px; margin-top: 22px; padding: 15px 5px 0; border-bottom: 1px solid #dfe6ee; background: repeating-linear-gradient(to bottom,#fff 0,#fff 52px,#edf1f5 53px); }.histogram>div { display: grid; height: 100%; grid-template-rows: 26px 1fr 38px; align-items: end; text-align: center; }.histogram b { color: #60728a; font-size: 11px; }.histogram i { display: block; width: 100%; min-height: 8px; max-height: 135px; background: linear-gradient(180deg,#7db3e9,#d7e8f7); border-radius: 7px 7px 2px 2px; }.histogram .featured i { background: linear-gradient(180deg,#176bff,#83b4f5); box-shadow: 0 6px 15px rgba(23,107,255,.16); }.histogram span { align-self: center; color: #66778d; font-size: 10px; }.salary-summary { display: flex; gap: 34px; margin-top: 17px; }.salary-summary div { padding-right: 34px; border-right: 1px solid #e3e9ef; }.salary-summary small,.salary-summary strong { display: block; }.salary-summary small { color: #78899f; font-size: 10px; }.salary-summary strong { margin-top: 4px; font-size: 16px; }.talent-card>section { margin-top: 25px; }.structure-heading { display: flex; justify-content: space-between; color: #596c84; font-size: 11px; }.structure-heading b { color: #1b6ad5; }.stacked-bar { display: flex; height: 14px; margin: 12px 0; overflow: hidden; border-radius: 10px; }.stacked-bar i:nth-child(1) { background: #cdd8e6; }.stacked-bar i:nth-child(2) { background: #176bff; }.stacked-bar i:nth-child(3) { background: #18a88c; }.stacked-bar i:nth-child(4) { background: #7561d5; }.structure-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; color: #687991; font-size: 10px; }.experience-block { position: relative; }.experience-ring { position: absolute; left: 5px; top: 37px; display: grid; width: 84px; height: 84px; place-items: center; background: radial-gradient(circle,#fff 51%,transparent 53%),conic-gradient(#176bff 0 42%,#18a88c 42% 69%,#7561d5 69% 82%,#d5deea 82%); border-radius: 50%; }.experience-ring strong,.experience-ring small { grid-area: 1/1; }.experience-ring strong { margin-top: -12px; color: #176bff; font-size: 18px; }.experience-ring small { margin-top: 20px; color: #718299; font-size: 9px; }.experience-list { display: grid; gap: 8px; margin: 15px 0 0 108px; color: #63758c; font-size: 10px; }.experience-list span { position: relative; padding-left: 15px; }.experience-list i { position: absolute; left: 0; top: 4px; max-width: 9px; height: 7px; background: #176bff; border-radius: 2px; }
 .matrix-plot { position: relative; height: 285px; margin-top: 20px; overflow: hidden; background: linear-gradient(90deg,rgba(236,241,247,.7) 50%,rgba(232,244,255,.8) 50%); border: 1px solid #e3eaf2; border-radius: 10px; }.axis-x,.axis-y { position: absolute; background: #cbd7e5; }.axis-x { right: 12px; left: 12px; top: 50%; height: 1px; }.axis-y { top: 12px; bottom: 12px; left: 50%; width: 1px; }.zone-label { position: absolute; top: 10px; right: 12px; color: #13846f; font-size: 10px; }.city-bubble { position: absolute; display: grid; place-items: center; color: #fff; background: rgba(23,107,255,.9); border: 4px solid rgba(255,255,255,.84); border-radius: 50%; box-shadow: 0 7px 17px rgba(31,87,164,.18); transform: translate(-50%,50%); }.city-bubble b,.city-bubble span { display: block; }.city-bubble b { font-size: 11px; }.city-bubble span { margin-top: -5px; font-size: 8px; }.city-bubble.green { background: #18a88c; }.city-bubble.violet { background: #7561d5; }.city-bubble.navy { background: #2c5b94; }.city-bubble.amber { background: #dda036; }.axis-label-x,.axis-label-y { position: absolute; color: #73849b; font-size: 9px; font-style: normal; }.axis-label-x { right: 12px; bottom: 7px; }.axis-label-y { left: 7px; top: 50%; transform: translate(-44%,-50%) rotate(-90deg); }
 .signal-section { margin-top: 30px; }.section-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }.signal-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }.signal-grid article { display: grid; min-height: 118px; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; padding: 16px; background: #fff; border: 1px solid #e1e8f0; border-radius: 13px; }.signal-icon { display: grid; width: 39px; height: 39px; place-items: center; color: #137f6b; background: #e6f7f1; border-radius: 10px; font-size: 17px; }.signal-icon.salary { color: #1767dc; background: #e9f2ff; }.signal-icon.skill { color: #6c55ca; background: #f0edfc; }.signal-icon.down { color: #d26870; background: #fff0f1; }.signal-grid small,.signal-grid strong,.signal-grid p { display: block; }.signal-grid small { color: #708198; font-size: 10px; }.signal-grid strong { margin-top: 5px; font-size: 14px; }.signal-grid p { margin: 4px 0 0; color: #6d7d91; font-size: 10px; }.signal-grid em { align-self: start; color: #13836d; font-size: 11px; font-style: normal; font-weight: 700; }.signal-grid em.down { color: #cf5d66; }.bottom-grid { grid-template-columns: .8fr 1.2fr; margin-top: 14px; }.ranking-card { height: 365px; }.ranking-table { display: grid; margin-top: 18px; }.ranking-table>div { display: grid; min-height: 52px; grid-template-columns: 1.7fr repeat(4,1fr); align-items: center; border-bottom: 1px solid #edf1f5; color: #455a74; font-size: 12px; }.ranking-table .table-head { min-height: 34px; color: #65768c; background: #f7f9fb; border: 0; border-radius: 6px; }.ranking-table>div>* { padding: 0 8px; }.ranking-table>div>span:first-child { display: flex; align-items: center; }.ranking-table b { display: inline-grid; width: 22px; height: 22px; margin-right: 8px; place-items: center; background: #f0f3f7; border-radius: 6px; }.ranking-table b.first { color: #fff; background: #1c6bdd; }.ranking-table strong { color: #1767dc; }.personal-cta { display: flex; align-items: center; justify-content: space-between; gap: 30px; margin-top: 14px; padding: 24px 28px; color: #fff; background: linear-gradient(120deg,#14325c,#1767dc); border-radius: 16px; box-shadow: 0 16px 30px rgba(21,72,142,.18); }.personal-cta p { color: #bbd4f5; }.personal-cta h2 { margin: 0 0 8px; font-size: 22px; }.personal-cta span { color: #d1e0f4; font-size: 13px; }.personal-cta button { color: #1767dc; background: #fff; box-shadow: none; white-space: nowrap; }
-.market-ai-dialog { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; width: min(420px,calc(100vw - 32px)); height: min(590px,calc(100vh - 125px)); flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #c9d8eb; border-radius: 15px; box-shadow: 0 24px 70px rgba(18,48,89,.24); }.market-ai-dialog>header { display: flex; align-items: center; gap: 10px; padding: 18px; }.market-ai-dialog>header>span { display: grid; width: 42px; height: 42px; place-items: center; color: #fff; background: linear-gradient(145deg,#153a6d,#176bff); border-radius: 12px; font-size: 12px; font-weight: 800; }.market-ai-dialog header small,.market-ai-dialog header strong { display: block; }.market-ai-dialog header small { color: #55708f; font-size: 9px; font-weight: 800; letter-spacing: .14em; }.market-ai-dialog header strong { margin-top: 4px; font-size: 19px; }.market-ai-dialog header i { width: 7px; height: 7px; margin-left: auto; background: #22af8e; border-radius: 50%; box-shadow: 0 0 0 4px #e1f7f1; }.market-ai-dialog header em { color: #17846e; font-size: 12px; font-style: normal; }.market-ai-dialog header button { display: grid; width: 29px; height: 29px; place-items: center; color: #61738a; background: #edf3fa; border: 0; border-radius: 8px; font-size: 20px; cursor: pointer; }.ai-message-list { display: grid; flex: 1; align-content: start; gap: 10px; min-height: 0; padding: 4px 18px 12px; overflow-y: auto; }.ai-message-list>div { max-width: 91%; padding: 12px 14px; border-radius: 5px 13px 13px; font-size: 13px; line-height: 1.65; }.ai-message-list .assistant { color: #415b78; background: #edf4fc; }.ai-message-list .user { justify-self: end; color: #fff; background: #1b66cc; border-radius: 13px 5px 13px 13px; }.ai-composer { margin: 0 18px 18px; padding: 11px 12px; background: #fff; border: 1px solid #cfdbea; border-radius: 11px; box-shadow: 0 6px 16px rgba(38,72,117,.05); }.ai-composer textarea { width: 100%; height: 48px; resize: none; border: 0; outline: 0; font-size: 13px; }.ai-composer>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.ai-composer span { color: #697b91; font-size: 10px; }.ai-composer button { padding: 8px 12px; color: #fff; background: #1767dc; border: 0; border-radius: 7px; font-size: 11px; font-weight: 700; cursor: pointer; }.ai-composer button:disabled { opacity: .65; }.ai-error { margin: 0 0 8px; color: #c75560; font-size: 11px; }.ai-launcher { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; align-items: center; gap: 9px; padding: 10px 14px 10px 10px; color: #fff; background: linear-gradient(135deg,#143864,#176bff); border: 1px solid rgba(255,255,255,.18); border-radius: 28px; box-shadow: 0 16px 38px rgba(19,69,140,.28); cursor: pointer; }.ai-launcher span { display: grid; width: 31px; height: 31px; place-items: center; background: rgba(255,255,255,.14); border-radius: 50%; font-size: 11px; font-weight: 800; }.ai-launcher b { font-size: 13px; }.ai-launcher i { width: 7px; height: 7px; background: #57ddb2; border-radius: 50%; }
+.market-ai-dialog { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; width: min(420px,calc(100vw - 32px)); height: min(590px,calc(100vh - 125px)); flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #c9d8eb; border-radius: 15px; box-shadow: 0 24px 70px rgba(18,48,89,.24); }.market-ai-dialog>header { display: flex; align-items: center; gap: 10px; padding: 18px; }.market-ai-dialog>header>span { display: grid; width: 42px; height: 42px; place-items: center; color: #fff; background: linear-gradient(145deg,#153a6d,#176bff); border-radius: 12px; font-size: 12px; font-weight: 800; }.market-ai-dialog header small,.market-ai-dialog header strong { display: block; }.market-ai-dialog header small { color: #55708f; font-size: 9px; font-weight: 800; letter-spacing: .14em; }.market-ai-dialog header strong { margin-top: 4px; font-size: 19px; }.market-ai-dialog header i { width: 7px; height: 7px; margin-left: auto; background: #22af8e; border-radius: 50%; box-shadow: 0 0 0 4px #e1f7f1; }.market-ai-dialog header em { color: #17846e; font-size: 12px; font-style: normal; }.market-ai-dialog header button { display: grid; width: 29px; height: 29px; place-items: center; color: #61738a; background: #edf3fa; border: 0; border-radius: 8px; font-size: 20px; cursor: pointer; }.ai-message-list { display: grid; flex: 1; align-content: start; gap: 10px; min-height: 0; padding: 4px 18px 12px; overflow-y: auto; }.ai-message-list>div { max-width: 91%; padding: 12px 14px; border-radius: 5px 13px 13px; font-size: 13px; line-height: 1.65; }.ai-message-list .assistant { color: #415b78; background: #edf4fc; }.ai-message-list .user { justify-self: end; color: #fff; background: #1b66cc; border-radius: 13px 5px 13px 13px; }.ai-markdown :deep(h2),.ai-markdown :deep(h3) { margin: 14px 0 7px; color: #183b68; line-height: 1.35; }.ai-markdown :deep(h2:first-child),.ai-markdown :deep(h3:first-child) { margin-top: 0; }.ai-markdown :deep(h2) { font-size: 16px; }.ai-markdown :deep(h3) { font-size: 14px; }.ai-markdown :deep(p) { margin: 0 0 9px; }.ai-markdown :deep(p:last-child) { margin-bottom: 0; }.ai-markdown :deep(ul),.ai-markdown :deep(ol) { margin: 6px 0 11px; padding-left: 21px; }.ai-markdown :deep(li) { margin: 4px 0; }.ai-markdown :deep(strong) { color: #244d7c; }.ai-markdown :deep(blockquote) { margin: 11px 0 0; padding: 8px 10px; color: #61748b; background: rgba(255,255,255,.62); border-left: 3px solid #78a8e2; border-radius: 0 7px 7px 0; }.ai-markdown :deep(blockquote p) { margin: 0; }.ai-composer { margin: 0 18px 18px; padding: 11px 12px; background: #fff; border: 1px solid #cfdbea; border-radius: 11px; box-shadow: 0 6px 16px rgba(38,72,117,.05); }.ai-composer textarea { width: 100%; height: 48px; resize: none; border: 0; outline: 0; font-size: 13px; }.ai-composer>div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.ai-composer span { color: #697b91; font-size: 10px; }.ai-composer button { padding: 8px 12px; color: #fff; background: #1767dc; border: 0; border-radius: 7px; font-size: 11px; font-weight: 700; cursor: pointer; }.ai-composer button:disabled { opacity: .65; }.ai-error { margin: 0 0 8px; color: #c75560; font-size: 11px; }.ai-launcher { position: fixed; right: 24px; bottom: 24px; z-index: 950; display: flex; align-items: center; gap: 9px; padding: 10px 14px 10px 10px; color: #fff; background: linear-gradient(135deg,#143864,#176bff); border: 1px solid rgba(255,255,255,.18); border-radius: 28px; box-shadow: 0 16px 38px rgba(19,69,140,.28); cursor: pointer; }.ai-launcher span { display: grid; width: 31px; height: 31px; place-items: center; background: rgba(255,255,255,.14); border-radius: 50%; font-size: 11px; font-weight: 800; }.ai-launcher b { font-size: 13px; }.ai-launcher i { width: 7px; height: 7px; background: #57ddb2; border-radius: 50%; }
 @media (max-width: 1080px) { .market-hero { grid-template-columns: 1fr 420px; }.kpi-grid { grid-template-columns: repeat(2,1fr); }.market-detail-grid { grid-template-columns: 1fr 1fr; }.matrix-card { grid-column: 1/-1; }.signal-grid { grid-template-columns: repeat(2,1fr); } }
 @media (max-width: 760px) { .market-page { width: calc(100% - 24px); padding: 26px 0 86px; }.market-hero { display: block; min-height: 0; }.market-hero h1 { font-size: 38px; }.hero-description { font-size: 14px; }.hero-actions { align-items: flex-start; flex-direction: column; }.hero-visual { height: 260px; margin-top: 14px; }.filter-card { grid-template-columns: 1fr 1fr; }.filter-submit { grid-column: 1/-1; }.primary-grid,.market-detail-grid,.bottom-grid { grid-template-columns: 1fr; }.dashboard-grid :deep(.panel),.ranking-card { height: auto; min-height: 350px; }.matrix-card { grid-column: auto; }.signal-grid { grid-template-columns: 1fr; }.personal-cta { align-items: flex-start; flex-direction: column; }.market-ai-dialog { right: 12px; bottom: 70px; width: calc(100vw - 24px); height: min(560px,calc(100vh - 105px)); }.ai-launcher { right: 14px; bottom: 72px; } }
 @media (max-width: 460px) { .market-hero h1 { font-size: 33px; }.kpi-grid,.filter-card { grid-template-columns: 1fr; }.filter-submit { grid-column: auto; }.histogram { gap: 5px; }.histogram span { font-size: 9px; }.section-heading { align-items: flex-start; flex-direction: column; gap: 5px; }.ranking-card { overflow-x: auto; }.ranking-table { min-width: 650px; }.market-ai-dialog>header { padding: 15px; }.ai-composer>div { align-items: stretch; flex-direction: column; }.ai-composer button { width: 100%; } }

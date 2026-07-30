@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   authStore: { isAuthenticated: false },
   askQuestion: vi.fn(),
+  getHistory: vi.fn(),
+  getRun: vi.fn(),
   getPricing: vi.fn(),
 }));
 
@@ -15,7 +17,13 @@ vi.mock("@/services/marketDashboard", () => ({
   loadMarketDashboard: mocks.loadMarketDashboard,
 }));
 vi.mock("@/api/market", () => ({
-  marketAPI: { askQuestion: mocks.askQuestion },
+  marketAPI: {
+    askQuestion: mocks.askQuestion,
+    getHistory: mocks.getHistory,
+  },
+}));
+vi.mock("@/api/agent", () => ({
+  agentAPI: { getRun: mocks.getRun },
 }));
 vi.mock("@/api/career", () => ({
   careerAPI: { getPricing: mocks.getPricing },
@@ -61,6 +69,8 @@ describe("HomeView V2", () => {
     mocks.getPricing.mockResolvedValue({
       data: { marketQuestion: { amount: "0.20", currency: "CNY" } },
     });
+    mocks.getHistory.mockResolvedValue({ data: { items: [] } });
+    mocks.getRun.mockResolvedValue({ data: { status: "completed" } });
   });
 
   it("renders the public dashboard from a degraded data source without requesting login", async () => {
@@ -115,5 +125,102 @@ describe("HomeView V2", () => {
     expect(wrapper.get("[data-test='market-source']").text()).toContain(
       "部分展示使用测试数据",
     );
+  });
+
+  it("restores persisted market question history for a signed-in user", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.getHistory.mockResolvedValue({
+      data: {
+        items: [{
+          conversationId: "101",
+          latestRunId: "201",
+          latestRunStatus: "completed",
+          messages: [
+            { id: "1", role: "user", content: "杭州 AI 岗位多吗？", createdAt: "2026-07-29T10:00:00Z" },
+            { id: "2", role: "assistant", content: "杭州 AI 岗位需求保持增长。", createdAt: "2026-07-29T10:00:10Z" },
+          ],
+        }],
+      },
+    });
+
+    const wrapper = mount(HomeView, { global: { stubs: chartStubs } });
+    await flushPromises();
+
+    expect(mocks.getHistory).toHaveBeenCalledOnce();
+    expect(wrapper.get(".ai-message-list").text()).toContain("杭州 AI 岗位多吗？");
+    expect(wrapper.get(".ai-message-list").text()).toContain("杭州 AI 岗位需求保持增长。");
+  });
+
+  it("renders assistant markdown safely while keeping user content as plain text", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.getHistory.mockResolvedValue({
+      data: {
+        items: [{
+          conversationId: "101",
+          latestRunId: "201",
+          latestRunStatus: "completed",
+          messages: [
+            {
+              id: "1",
+              role: "user",
+              content: "<strong>这不是用户输入的富文本</strong>",
+              createdAt: "2026-07-29T10:00:00Z",
+            },
+            {
+              id: "2",
+              role: "assistant",
+              content: "## 推荐方向\n\n- **Python 后端开发**\n\n> 仅供参考<script>alert('xss')</script>",
+              createdAt: "2026-07-29T10:00:10Z",
+            },
+          ],
+        }],
+      },
+    });
+
+    const wrapper = mount(HomeView, { global: { stubs: chartStubs } });
+    await flushPromises();
+
+    const assistant = wrapper.findAll(".ai-message-list .assistant").at(-1);
+    const user = wrapper.get(".ai-message-list .user");
+    expect(assistant.get("h2").text()).toBe("推荐方向");
+    expect(assistant.get("li strong").text()).toBe("Python 后端开发");
+    expect(assistant.get("blockquote").text()).toBe("仅供参考");
+    expect(assistant.find("script").exists()).toBe(false);
+    expect(user.find("strong").exists()).toBe(false);
+    expect(user.text()).toContain("<strong>这不是用户输入的富文本</strong>");
+  });
+
+  it("waits for an asynchronous market answer and then reloads history", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.getHistory
+      .mockResolvedValueOnce({ data: { items: [] } })
+      .mockResolvedValueOnce({
+        data: {
+          items: [{
+            conversationId: "101",
+            latestRunId: "201",
+            latestRunStatus: "completed",
+            messages: [
+              { id: "1", role: "user", content: "新能源需要哪些技能？", createdAt: "2026-07-29T10:00:00Z" },
+              { id: "2", role: "assistant", content: "重点关注电池和数据分析技能。", createdAt: "2026-07-29T10:00:10Z" },
+            ],
+          }],
+        },
+      });
+    mocks.askQuestion.mockResolvedValue({
+      data: { conversationId: "101", runId: "201", status: "queued" },
+    });
+    mocks.getRun.mockResolvedValue({ data: { id: "201", status: "completed" } });
+
+    const wrapper = mount(HomeView, { global: { stubs: chartStubs } });
+    await flushPromises();
+    await wrapper.get("[data-test='market-ai-input']").setValue("新能源需要哪些技能？");
+    await wrapper.get(".ai-composer").trigger("submit");
+    await flushPromises();
+
+    expect(mocks.askQuestion).toHaveBeenCalledOnce();
+    expect(mocks.getRun).toHaveBeenCalledWith("201");
+    expect(mocks.getHistory).toHaveBeenCalledTimes(2);
+    expect(wrapper.get(".ai-message-list").text()).toContain("重点关注电池和数据分析技能。");
   });
 });

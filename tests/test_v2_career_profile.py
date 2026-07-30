@@ -4,7 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy.exc import InvalidRequestError
 
 
 ROOT = Path(__file__).parents[1]
@@ -24,6 +26,7 @@ from schemas.v2.profile import (  # noqa: E402
 )
 from schemas.v2.career import AIPricingResponse, CareerOverviewQuery  # noqa: E402
 from services.v2.profile_service import (  # noqa: E402
+    ProfileService,
     deduplicate_profile_items,
     normalize_profile_item_name,
 )
@@ -153,6 +156,69 @@ def test_profile_item_normalization_deduplicates_case_and_whitespace():
     assert deduplicated[0].proficiency_level == 4
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("collection", "payload", "row_type"),
+    [
+        ("courses", [ProfileCourseInput(name="Database Systems")], CareerProfileCourse),
+        ("skills", [ProfileSkillInput(name="Python", proficiency_level=4)], CareerProfileSkill),
+    ],
+)
+async def test_replacing_profile_collection_does_not_readd_parent_with_deleted_children(
+    monkeypatch,
+    collection,
+    payload,
+    row_type,
+):
+    """Bulk-deleted relationship items must not be cascaded back through the parent."""
+
+    profile = SimpleNamespace(
+        id=901,
+        education={},
+        skills=[],
+        courses=[CareerProfileCourse(id=11, profile_id=901, name="Old course")],
+        normalized_skills=[CareerProfileSkill(id=12, profile_id=901, name="Old skill")],
+    )
+
+    class DeletedRelationshipSession:
+        def __init__(self):
+            self.next_id = 1000
+
+        async def execute(self, statement):
+            return None
+
+        def add(self, instance):
+            if instance is profile:
+                raise InvalidRequestError(
+                    "parent cascaded a relationship instance deleted by the bulk DELETE"
+                )
+            if isinstance(instance, row_type):
+                instance.id = self.next_id
+                self.next_id += 1
+
+        async def flush(self):
+            return None
+
+    service = ProfileService()
+
+    async def get_profile(db, user_id):
+        return profile
+
+    async def list_existing(db, user_id):
+        return []
+
+    monkeypatch.setattr(service, "_get_or_create_profile", get_profile)
+    monkeypatch.setattr(service, f"list_{collection}", list_existing)
+
+    result = await getattr(service, f"replace_{collection}")(
+        DeletedRelationshipSession(),
+        100,
+        payload,
+    )
+
+    assert [item.name for item in result] == [payload[0].name]
+
+
 def test_v2_router_exposes_profile_career_and_pricing_routes():
     paths = {route.path for route in api_router.routes}
 
@@ -160,13 +226,82 @@ def test_v2_router_exposes_profile_career_and_pricing_routes():
         "/profile",
         "/profile/courses",
         "/profile/skills",
+        "/profile/resume-candidates",
         "/career-analysis/overview",
         "/career-analysis/reports/latest",
         "/career-analysis/reports",
         "/career-analysis/questions",
         "/ai/pricing",
         "/market/questions",
+        "/market/history",
     } <= paths
+
+
+def test_resume_candidate_profile_updates_ignore_empty_education_fields():
+    from services.v2.profile_service import resume_education_profile_updates
+
+    updates = resume_education_profile_updates(
+        SimpleNamespace(
+            school="New University",
+            major=None,
+            degree="",
+            end_date=None,
+        )
+    )
+
+    assert updates == {"school": "New University"}
+
+
+def test_resume_candidate_merge_only_selects_new_normalized_names():
+    from services.v2.profile_service import select_new_profile_items
+
+    existing = [SimpleNamespace(id=11, normalized_name="python")]
+    candidates = [
+        ProfileSkillInput(name=" Python "),
+        ProfileSkillInput(name="SQL"),
+        ProfileSkillInput(name="sql"),
+    ]
+
+    selected = select_new_profile_items(existing, candidates)
+
+    assert existing[0].id == 11
+    assert [item.name for item in selected] == ["sql"]
+
+
+@pytest.mark.parametrize(
+    "basic",
+    [
+        {"email": "not-an-email"},
+        {"phone": "12345"},
+        {"gender": "unknown"},
+    ],
+)
+def test_resume_candidate_schema_rejects_invalid_contact_fields(basic):
+    from schemas.v2.profile import ResumeCandidateApply
+
+    with pytest.raises(ValidationError):
+        ResumeCandidateApply(basic=basic)
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_profile_reloads_new_profile_relationships(monkeypatch):
+    service = ProfileService()
+    created = SimpleNamespace(id=901, user_id=100)
+    loaded = SimpleNamespace(id=901, user_id=100, courses=[], normalized_skills=[])
+    lookups = iter([None, loaded])
+
+    async def get_profile(db, user_id):
+        return next(lookups)
+
+    async def upsert_profile(db, user_id, obj_in):
+        return created
+
+    monkeypatch.setattr("services.v2.profile_service.crud_agent.get_profile", get_profile)
+    monkeypatch.setattr("services.v2.profile_service.crud_agent.upsert_profile", upsert_profile)
+
+    result = await service._get_or_create_profile(object(), 100)
+
+    assert result is loaded
 
 
 def test_pricing_contract_includes_home_market_question_price():

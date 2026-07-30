@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Iterable, List, Sequence, TypeVar
 
 from sqlalchemy import delete, select
@@ -10,7 +11,7 @@ from common.databases.models.career_profile import (
     CareerProfileCourse,
     CareerProfileSkill,
 )
-from common.databases.models.resume import Resume
+from common.databases.models.resume import Education, Resume, WorkExperience
 from crud import agent as crud_agent
 from schemas.agent_schema import CareerProfileUpdate
 from schemas.v2.profile import (
@@ -20,6 +21,7 @@ from schemas.v2.profile import (
     ProfileSkillInput,
     ProfileSkillResponse,
     ProfileUpdate,
+    ResumeCandidateApply,
 )
 
 
@@ -41,15 +43,50 @@ def deduplicate_profile_items(items: Iterable[ProfileItem]) -> List[ProfileItem]
     return [by_name[name] for name in order]
 
 
+def select_new_profile_items(existing: Iterable, candidates: Iterable[ProfileItem]) -> List[ProfileItem]:
+    existing_names = {
+        getattr(item, "normalized_name", None) or normalize_profile_item_name(item.name)
+        for item in existing
+    }
+    return [
+        item
+        for item in deduplicate_profile_items(candidates)
+        if normalize_profile_item_name(item.name) not in existing_names
+    ]
+
+
+def resume_education_profile_updates(education) -> dict:
+    updates = {}
+    for source, target in (
+        ("school", "school"),
+        ("major", "major"),
+        ("degree", "education"),
+    ):
+        value = getattr(education, source, None)
+        if value:
+            updates[target] = value
+    if getattr(education, "end_date", None):
+        updates["graduation_year"] = str(education.end_date.year)
+    return updates
+
+
+def _resume_item_signature(item, fields: Sequence[str]) -> tuple:
+    return tuple(
+        str(getattr(item, field, None) or "").strip().casefold()
+        for field in fields
+    )
+
+
 class ProfileService:
     async def _get_or_create_profile(self, db: AsyncSession, user_id: int) -> CareerProfile:
         profile = await crud_agent.get_profile(db, user_id=user_id)
         if profile is None:
-            profile = await crud_agent.upsert_profile(
+            await crud_agent.upsert_profile(
                 db,
                 user_id=user_id,
                 obj_in=CareerProfileUpdate(),
             )
+            profile = await crud_agent.get_profile(db, user_id=user_id)
         return profile
 
     async def get_profile(self, db: AsyncSession, user) -> ProfileResponse:
@@ -152,6 +189,158 @@ class ProfileService:
         await db.flush()
         return await self.get_profile(db, user)
 
+    async def apply_resume_candidates(
+        self,
+        db: AsyncSession,
+        user,
+        payload: ResumeCandidateApply,
+    ) -> ProfileResponse:
+        """Atomically merge user-confirmed resume candidates without replacing collections."""
+        profile = await self._get_or_create_profile(db, user.id)
+        basic = {
+            key: value
+            for key, value in payload.basic.model_dump(exclude_none=True).items()
+            if value not in (None, "")
+        }
+
+        resume_result = await db.execute(
+            select(Resume)
+            .options(
+                selectinload(Resume.educations),
+                selectinload(Resume.work_experiences),
+            )
+            .where(Resume.user_id == user.id)
+        )
+        resume = resume_result.scalar_one_or_none()
+        resume_fields = {
+            "name",
+            "gender",
+            "age",
+            "phone",
+            "email",
+            "desired_position",
+            "summary",
+        }
+        if resume is None:
+            resume_name = basic.get("name") or getattr(user, "nickname", None) or getattr(user, "username", None)
+            if not resume_name:
+                raise ValueError("a confirmed resume name is required")
+            resume = Resume(
+                user_id=user.id,
+                name=resume_name,
+                **{key: value for key, value in basic.items() if key in resume_fields and key != "name"},
+            )
+            db.add(resume)
+            await db.flush()
+            existing_educations = []
+            existing_works = []
+        else:
+            for key, value in basic.items():
+                if key in resume_fields:
+                    setattr(resume, key, value)
+            existing_educations = list(resume.educations or [])
+            existing_works = list(resume.work_experiences or [])
+
+        education_keys = {
+            _resume_item_signature(item, ("school", "major", "start_date"))
+            for item in existing_educations
+        }
+        created_educations = []
+        for candidate in payload.educations:
+            key = _resume_item_signature(candidate, ("school", "major", "start_date"))
+            if key in education_keys:
+                continue
+            education_keys.add(key)
+            row = Education(**candidate.model_dump(), resume_id=resume.id)
+            db.add(row)
+            created_educations.append(row)
+
+        work_keys = {
+            _resume_item_signature(item, ("company", "position", "start_date"))
+            for item in existing_works
+        }
+        for candidate in payload.work_experiences:
+            key = _resume_item_signature(candidate, ("company", "position", "start_date"))
+            if key in work_keys:
+                continue
+            work_keys.add(key)
+            db.add(WorkExperience(**candidate.model_dump(), resume_id=resume.id))
+
+        user_fields = {"name": "nickname", "phone": "phone", "email": "email"}
+        for source, target in user_fields.items():
+            if basic.get(source):
+                setattr(user, target, basic[source])
+
+        education_snapshot = dict(profile.education or {})
+        if payload.educations:
+            primary_education = max(
+                payload.educations,
+                key=lambda item: (
+                    item.end_date is not None,
+                    item.end_date or item.start_date or date.min,
+                ),
+            )
+            education_snapshot.update(resume_education_profile_updates(primary_education))
+
+        new_courses = select_new_profile_items(profile.courses, payload.courses)
+        for item in new_courses:
+            values = item.model_dump()
+            values.update(source="resume", confirmation_status="confirmed")
+            db.add(
+                CareerProfileCourse(
+                    profile_id=profile.id,
+                    normalized_name=normalize_profile_item_name(item.name),
+                    **values,
+                )
+            )
+        if new_courses:
+            existing_courses = list(education_snapshot.get("courses") or [])
+            education_snapshot["courses"] = existing_courses + [
+                item.model_copy(update={"source": "resume", "confirmation_status": "confirmed"}).model_dump(
+                    mode="json", by_alias=True
+                )
+                for item in new_courses
+            ]
+
+        new_skills = select_new_profile_items(profile.normalized_skills, payload.skills)
+        for item in new_skills:
+            values = item.model_dump()
+            values.update(source="resume", confirmation_status="confirmed")
+            db.add(
+                CareerProfileSkill(
+                    profile_id=profile.id,
+                    normalized_name=normalize_profile_item_name(item.name),
+                    **values,
+                )
+            )
+        if new_skills:
+            existing_skills = list(profile.skills or [])
+            profile.skills = existing_skills + [
+                item.model_copy(update={"source": "resume", "confirmation_status": "confirmed"}).model_dump(
+                    mode="json", by_alias=True
+                )
+                for item in new_skills
+            ]
+
+        profile.education = education_snapshot
+        db.add(
+            CareerProfileChangeLog(
+                profile_id=profile.id,
+                entity_type="resume",
+                change_type="apply_candidates",
+                source="resume",
+                after_data={
+                    "basic_fields": sorted(basic),
+                    "educations_added": len(created_educations),
+                    "courses_added": len(new_courses),
+                    "skills_added": len(new_skills),
+                },
+                review_status="accepted",
+            )
+        )
+        await db.flush()
+        return await self.get_profile(db, user)
+
     async def list_courses(self, db: AsyncSession, user_id: int) -> List[ProfileCourseResponse]:
         profile = await self._get_or_create_profile(db, user_id)
         result = await db.execute(
@@ -184,7 +373,6 @@ class ProfileService:
         education = dict(profile.education or {})
         education["courses"] = [item.model_dump(mode="json", by_alias=True) for item in normalized_items]
         profile.education = education
-        db.add(profile)
         db.add(
             CareerProfileChangeLog(
                 profile_id=profile.id,
@@ -229,7 +417,6 @@ class ProfileService:
             created.append(row)
         await db.flush()
         profile.skills = [item.model_dump(mode="json", by_alias=True) for item in normalized_items]
-        db.add(profile)
         db.add(
             CareerProfileChangeLog(
                 profile_id=profile.id,

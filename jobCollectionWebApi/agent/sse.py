@@ -1,3 +1,5 @@
+"""把 Redis 中的 Agent 事件转换成支持断线续传的 SSE 数据流。"""
+
 import asyncio
 import json
 import re
@@ -24,6 +26,8 @@ _EVENT_ID_PATTERN = re.compile(r"^\d+-\d+$")
 
 
 def normalize_last_event_id(value: Optional[str]) -> Optional[str]:
+    """校验浏览器传入的 Last-Event-ID，只接受 Redis Stream id 格式。"""
+
     if not value:
         return None
     normalized = value.strip()
@@ -31,6 +35,8 @@ def normalize_last_event_id(value: Optional[str]) -> Optional[str]:
 
 
 def format_sse_event(event: AgentEvent) -> str:
+    """按 SSE 协议格式序列化事件，包含 id、event 和 JSON data。"""
+
     payload = event.model_dump(mode="json")
     return (
         f"id: {event.event_id}\n"
@@ -40,6 +46,8 @@ def format_sse_event(event: AgentEvent) -> str:
 
 
 def event_type_for_status(status: str) -> Optional[AgentEventType]:
+    """将数据库终态映射为前端可识别的关闭事件类型。"""
+
     return {
         "completed": AgentEventType.RUN_COMPLETED,
         "failed": AgentEventType.RUN_FAILED,
@@ -55,6 +63,12 @@ def reconciled_event(
     status: str,
     event_type: AgentEventType,
 ) -> AgentEvent:
+    """根据数据库状态合成兜底事件。
+
+    Redis 事件可能因发布失败或 TTL 到期而缺失；此事件使前端仍能得知真实终态。
+    ``event_id=0-0`` 表明它不是从 Redis Stream 回放得到的事件。
+    """
+
     return AgentEvent(
         event_id="0-0",
         sequence=1,
@@ -67,6 +81,8 @@ def reconciled_event(
 
 
 async def load_run_status(run_id: int, user_id: int):
+    """使用短生命周期数据库会话读取运行状态，避免 SSE 长连接长期占用事务。"""
+
     async with db_manager.async_session() as db:
         return await crud_agent.get_run(db, run_id=run_id, user_id=user_id)
 
@@ -81,6 +97,13 @@ async def stream_agent_events(
     last_event_id: Optional[str] = None,
     store: AgentEventStore = agent_event_store,
 ) -> AsyncGenerator[str, None]:
+    """持续输出某次运行的 SSE 消息。
+
+    流程分三段：先根据 Last-Event-ID 回放遗漏事件；再用初始数据库状态补偿可能
+    丢失的终态；最后阻塞读取新事件并定期发送 heartbeat。检测到完成、失败、取消
+    或等待用户澄清后立即结束当前连接。
+    """
+
     cursor = normalize_last_event_id(last_event_id)
     closing_event_seen = False
     try:

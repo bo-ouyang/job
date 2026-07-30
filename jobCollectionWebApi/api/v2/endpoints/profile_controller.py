@@ -7,6 +7,7 @@ from dependencies import get_current_user, get_db
 from schemas.v2.profile import (
     ProfileCourseInput,
     ProfileCourseResponse,
+    ResumeCandidateApply,
     ProfileResponse,
     ProfileSkillInput,
     ProfileSkillResponse,
@@ -33,6 +34,15 @@ async def update_profile(
     current_user=Depends(get_current_user),
 ):
     return await profile_service.update_profile(db, current_user, payload)
+
+
+@router.post("/resume-candidates", response_model=ProfileResponse)
+async def apply_resume_candidates(
+    payload: ResumeCandidateApply,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await profile_service.apply_resume_candidates(db, current_user, payload)
 
 
 @router.get("/courses", response_model=List[ProfileCourseResponse])

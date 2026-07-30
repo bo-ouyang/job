@@ -273,7 +273,8 @@ async def mark_completed(
     celery_task_id: str,
     result_data: str,
     started_at: float = None,
-) -> None:
+    charge_amount: float = 0.0,
+) -> bool:
     """
     标记任务完成：更新 PG + 写 Redis 结果缓存 + 释放活跃锁。
     在 Celery worker 中调用，使用独立数据库 session。
@@ -282,12 +283,17 @@ async def mark_completed(
     now = datetime.utcnow()
 
     # 1. PG 更新
-    try:
-        from common.databases.PostgresManager import db_manager
-        async with await db_manager.get_session() as db:
+    from common.databases.PostgresManager import db_manager
+    from services.ai_access_service import ai_access_service
+
+    async with await db_manager.get_session() as db:
+        try:
             stmt = (
                 update(AiTask)
-                .where(AiTask.celery_task_id == celery_task_id)
+                .where(
+                    AiTask.celery_task_id == celery_task_id,
+                    AiTask.status.in_(["pending", "processing"]),
+                )
                 .values(
                     status="completed",
                     result_data=result_data,
@@ -295,10 +301,42 @@ async def mark_completed(
                     completed_at=now,
                 )
             )
-            await db.execute(stmt)
+            update_result = await db.execute(stmt)
+            if update_result.rowcount != 1:
+                status_result = await db.execute(
+                    select(AiTask.status).where(
+                        AiTask.celery_task_id == celery_task_id
+                    )
+                )
+                existing_status = status_result.scalar_one_or_none()
+                await db.rollback()
+                if existing_status == "completed":
+                    return True
+                raise RuntimeError(
+                    f"AI task cannot be completed from status {existing_status!r}: "
+                    f"task_id={celery_task_id}"
+                )
+
+            if charge_amount > 0:
+                await ai_access_service.charge_usage(
+                    db=db,
+                    user_id=user_id,
+                    feature_key=feature_key,
+                    amount=charge_amount,
+                    detail_suffix=f"ai_task:{celery_task_id}",
+                    order_no=f"ai_task:{celery_task_id}",
+                    commit=False,
+                )
             await db.commit()
-    except Exception as exc:
-        logger.error(f"mark_completed PG update failed: {exc}")
+        except Exception:
+            await db.rollback()
+            raise
+
+    if charge_amount > 0:
+        try:
+            ai_access_service.record_charge_metrics(feature_key, charge_amount)
+        except Exception as exc:
+            logger.warning(f"AI billing metrics update degraded: {exc}")
 
     # 2. Redis: 写结果缓存
     try:
@@ -321,6 +359,8 @@ async def mark_completed(
         await redis_manager.redis_client.delete(lkey)
     except Exception as exc:
         logger.warning(f"Redis release active lock degraded: {exc}")
+
+    return True
 
 
 async def mark_failed(
@@ -358,7 +398,6 @@ async def mark_failed(
         await redis_manager.redis_client.delete(lkey)
     except Exception as exc:
         logger.warning(f"Redis release active lock degraded: {exc}")
-
 
 async def mark_failed_by_task_id(
     celery_task_id: str,

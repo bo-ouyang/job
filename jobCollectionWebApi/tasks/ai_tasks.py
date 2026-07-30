@@ -147,6 +147,7 @@ def _mark_task_completed(
     result_data: str,
     started_at: float,
     request_params: dict = None,
+    charge_amount: float = 0.0,
 ):
     """Persist final task state, cache dedup and notify the user."""
     from crud import ai_task as crud_ai_task
@@ -155,17 +156,23 @@ def _mark_task_completed(
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
     try:
-        loop.run_until_complete(
+        persisted = loop.run_until_complete(
             crud_ai_task.mark_completed(
                 user_id=user_id,
                 feature_key=feature_key,
                 celery_task_id=celery_task_id,
                 result_data=result_data,
                 started_at=started_at,
+                charge_amount=charge_amount,
             )
         )
+        if not persisted:
+            raise RuntimeError(
+                f"AI task result was not persisted: task_id={celery_task_id}"
+            )
     except Exception as exc:
         logger.error(f"mark_completed callback failed: {exc}")
+        raise
 
     try:
         loop.run_until_complete(
@@ -326,8 +333,6 @@ async def _career_advice_logic(
     charge_amount: float,
 ):
     from services.ai_service import ai_service
-    from services.ai_access_service import ai_access_service
-    from common.databases.PostgresManager import db_manager
     logger.info(f"stat_career_advice started")
     # Call AI
     advice = await ai_service.generate_career_advice(
@@ -335,17 +340,6 @@ async def _career_advice_logic(
     )
     logger.info(f"generate_career_advice done")
     advice_text = advice if isinstance(advice, str) else str(advice)
-
-    # Charge usage if successful
-    if charge_amount > 0 and not advice_text.strip().startswith("❌"):
-        session_obj = await db_manager.get_session()
-        async with session_obj as db:
-            await ai_access_service.charge_usage(
-                db=db,
-                user_id=user_id,
-                feature_key="career_advice",
-                amount=charge_amount,
-            )
 
     return advice_text
 
@@ -377,12 +371,6 @@ def career_advice_task(
             _career_advice_logic(user_id, major, skills, engine, charge_amount)
         )
         logger.info(f"ai_task_stage task_id={self.request.id} feature=career_advice stage=ai_done")
-        # 功能级 WS 通知 (保持向后兼容)
-        _publish_result(user_id, "career_advice_result", {
-            "task_id": self.request.id,
-            "advice": result,
-        })
-
         if analysis_result is None and payload_task_id:
             payload = _load_task_payload(payload_task_id)
             analysis_result = payload.get("analysis_result")
@@ -393,7 +381,21 @@ def career_advice_task(
             "analysis_result": analysis_result,
         }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
-        _mark_task_completed(user_id, "career_advice", self.request.id, result_payload, started_at, request_params)
+        billable_amount = charge_amount if not result.strip().startswith("❌") else 0.0
+        _mark_task_completed(
+            user_id,
+            "career_advice",
+            self.request.id,
+            result_payload,
+            started_at,
+            request_params,
+            billable_amount,
+        )
+        # Only notify clients after the result and wallet charge commit together.
+        _publish_result(user_id, "career_advice_result", {
+            "task_id": self.request.id,
+            "advice": result,
+        })
         logger.info(f"ai_task_stage task_id={self.request.id} feature=career_advice stage=finalized")
         return {"status": "success", "advice": result}
     except Exception as exc:
@@ -414,8 +416,6 @@ async def _career_compass_logic(
     charge_amount: float,
 ):
     from services.ai_service import ai_service
-    from services.ai_access_service import ai_access_service
-    from common.databases.PostgresManager import db_manager
     logger.info("stat_career_compass started")
     ai_started_at = time.time()
     # Call AI with pre-aggregated ES data
@@ -427,21 +427,6 @@ async def _career_compass_logic(
         f"get_career_navigation_report done elapsed={time.time() - ai_started_at:.2f}s"
     )
     report_text = ai_report if isinstance(ai_report, str) else str(ai_report)
-
-    # Charge usage if successful
-    if charge_amount > 0 and not report_text.strip().startswith("❌"):
-        billing_started_at = time.time()
-        session_obj = await db_manager.get_session()
-        async with session_obj as db:
-            await ai_access_service.charge_usage(
-                db=db,
-                user_id=user_id,
-                feature_key="career_compass",
-                amount=charge_amount,
-            )
-        logger.info(
-            f"career_compass billing_done elapsed={time.time() - billing_started_at:.2f}s"
-        )
 
     return report_text
 
@@ -482,11 +467,6 @@ def career_compass_task(
             _career_compass_logic(user_id, major_name, es_stats, charge_amount)
         )
         logger.info(f"ai_task_stage task_id={self.request.id} feature=career_compass stage=ai_done")
-        # 功能级 WS 通知 (保持向后兼容)
-        _publish_result(user_id, "career_compass_result", {
-            "task_id": self.request.id,
-            "report": result,
-        })
         # 将报告与统计一起落库，便于前端历史恢复图表
         result_payload = json.dumps({
             "report": result,
@@ -494,7 +474,21 @@ def career_compass_task(
             "skill_cloud_data": skill_cloud_data,
         }, ensure_ascii=False)
         # 回写 AiTask + 去重 + 指标 + 统一通知
-        _mark_task_completed(user_id, "career_compass", self.request.id, result_payload, started_at, request_params)
+        billable_amount = charge_amount if not result.strip().startswith("❌") else 0.0
+        _mark_task_completed(
+            user_id,
+            "career_compass",
+            self.request.id,
+            result_payload,
+            started_at,
+            request_params,
+            billable_amount,
+        )
+        # Only notify clients after the result and wallet charge commit together.
+        _publish_result(user_id, "career_compass_result", {
+            "task_id": self.request.id,
+            "report": result,
+        })
         logger.info(f"ai_task_stage task_id={self.request.id} feature=career_compass stage=finalized")
         return {"status": "success", "report": result}
     except Exception as exc:

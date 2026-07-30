@@ -24,7 +24,7 @@ const navItems = [
 
 const profileCompletion = computed(() => authStore.user?.profile_completion ?? 60);
 const userName = computed(() => authStore.user?.username || authStore.user?.phone || "张同学");
-const walletBalance = computed(() => Number(authStore.user?.balance || 0).toFixed(2));
+const walletBalance = computed(() => Number(authStore.walletBalance || 0).toFixed(2));
 
 let interval = null;
 let ws = null;
@@ -38,6 +38,20 @@ const fetchUnreadCount = async () => {
   } catch (error) {
     console.error("Failed to fetch unread count", error);
   }
+};
+
+const fetchWalletBalance = async () => {
+  if (!authStore.isAuthenticated) return;
+  try {
+    await authStore.refreshWalletBalance();
+  } catch (error) {
+    console.error("Failed to fetch wallet balance", error);
+  }
+};
+
+const refreshHeaderData = () => {
+  fetchUnreadCount();
+  fetchWalletBalance();
 };
 
 const connectWebSocket = () => {
@@ -73,6 +87,10 @@ const connectWebSocket = () => {
       ElNotification({ title: "任务失败", message: data.data.message || "AI 任务执行失败。", type: "error", duration: 8000 });
     }
 
+    if (data.type === "ai_task_completed" || data.type === "ai_task_failed") {
+      fetchWalletBalance();
+    }
+
     window.dispatchEvent(new CustomEvent("ws-message", { detail: data }));
   };
 
@@ -104,9 +122,19 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => authStore.isAuthenticated,
+  (authenticated) => {
+    if (authenticated) fetchWalletBalance();
+  },
+);
+
+const handleWindowFocus = () => fetchWalletBalance();
+
 onMounted(() => {
-  fetchUnreadCount();
-  interval = setInterval(fetchUnreadCount, 30000);
+  refreshHeaderData();
+  interval = setInterval(refreshHeaderData, 30000);
+  window.addEventListener("focus", handleWindowFocus);
   if (authStore.isAuthenticated) {
     agentStore.loadCapabilities();
     connectWebSocket();
@@ -117,6 +145,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (interval) clearInterval(interval);
   if (reconnectInterval) clearInterval(reconnectInterval);
+  window.removeEventListener("focus", handleWindowFocus);
   ws?.close();
 });
 </script>

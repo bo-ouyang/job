@@ -1,1 +1,1 @@
-"""Career Agent runtime and controlled business tools."""
+"""职业规划 Agent 的运行时、状态机、实时事件和受控业务工具。"""

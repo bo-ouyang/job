@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   authStore: {
     isAuthenticated: false,
     user: null,
+    walletBalance: 0,
+    refreshWalletBalance: vi.fn(),
     logout: vi.fn(),
   },
   agentStore: {
@@ -34,7 +36,7 @@ vi.mock("@/stores/auth", () => ({ useAuthStore: () => mocks.authStore }));
 vi.mock("@/stores/agent", () => ({ useAgentStore: () => mocks.agentStore }));
 vi.mock("@/stores/aiTask", () => ({ useAiTaskStore: () => mocks.aiTaskStore }));
 vi.mock("@/api/message", () => ({
-  messageAPI: { getUnreadCount: vi.fn() },
+  messageAPI: { getUnreadCount: vi.fn().mockResolvedValue({ data: 0 }) },
 }));
 vi.mock("@/components/AiTaskPanel.vue", () => ({
   default: { name: "AiTaskPanel", template: "<div />" },
@@ -52,6 +54,10 @@ import BasicLayout from "./BasicLayout.vue";
 describe("BasicLayout login prompt", () => {
   beforeEach(() => {
     mocks.route = reactive({ path: "/", query: {} });
+    mocks.authStore.isAuthenticated = false;
+    mocks.authStore.user = null;
+    mocks.authStore.walletBalance = 0;
+    vi.clearAllMocks();
   });
 
   it("opens login only after a protected feature redirects back with login query", async () => {
@@ -84,6 +90,18 @@ describe("BasicLayout login prompt", () => {
     expect(wrapper.get("[data-test='account-entry']").exists()).toBe(true);
     expect(wrapper.get("[aria-label='主导航']").text()).not.toContain("个人中心");
 
+    wrapper.unmount();
+  });
+
+  it("loads the live wallet balance for the authenticated top navigation", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.authStore.user = { username: "tester", balance: 99 };
+    mocks.authStore.walletBalance = 12.34;
+
+    const wrapper = mount(BasicLayout);
+
+    expect(mocks.authStore.refreshWalletBalance).toHaveBeenCalledTimes(1);
+    expect(wrapper.get(".balance-link").text()).toContain("12.34");
     wrapper.unmount();
   });
 });

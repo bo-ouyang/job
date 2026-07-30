@@ -98,4 +98,12 @@ describe("frontend API contracts", () => {
     expect(v2Request.get).toHaveBeenNthCalledWith(1, "/profile/courses");
     expect(v2Request.get).toHaveBeenNthCalledWith(2, "/profile/skills");
   });
+
+  it("applies confirmed resume candidates atomically", () => {
+    profileAPI.applyResumeCandidates({ basic: { name: "Lin" } });
+    expect(v2Request.post).toHaveBeenCalledWith(
+      "/profile/resume-candidates",
+      { basic: { name: "Lin" } },
+    );
+  });
 });

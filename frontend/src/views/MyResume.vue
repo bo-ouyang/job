@@ -1,9 +1,13 @@
 <script setup>
-import { ref, onMounted, reactive } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useResumeStore } from "../stores/resume";
+import { useAiTaskStore } from "@/stores/aiTask";
+import { aiAPI } from "@/api/ai";
+import { profileAPI } from "@/api/profile";
 import { storeToRefs } from "pinia";
 
 const store = useResumeStore();
+const aiTaskStore = useAiTaskStore();
 const { resume, isLoading } = storeToRefs(store);
 
 // UI States
@@ -82,126 +86,267 @@ const handleResumeUpload = async (event) => {
   }
 };
 
-// AI Parsing
+// --- AI resume parsing and candidate confirmation ---
 const parsingStatus = ref("");
-import { aiAPI } from '@/api/ai';
+const parseError = ref("");
+const parseCandidates = ref([]);
+const applyingCandidates = ref(false);
+const activeParseTaskId = ref("");
+const isParseBusy = computed(() =>
+  ["uploading", "parsing", "saving"].includes(parsingStatus.value),
+);
+
+const BASIC_FIELDS = [
+  ["name", "姓名"],
+  ["phone", "手机号码"],
+  ["email", "邮箱"],
+  ["gender", "性别"],
+  ["age", "年龄"],
+  ["desired_position", "期望职位"],
+  ["summary", "个人优势"],
+];
+
+const displayValue = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean).join("、");
+  if (value && typeof value === "object") {
+    return value.school || value.company || value.name || JSON.stringify(value);
+  }
+  return String(value ?? "");
+};
+
+const normalizeTaskPayload = (result) => {
+  let payload = result?.result_payload || result?.resultPayload || result || {};
+  if (typeof payload?.result_data === "string") {
+    try {
+      payload = { ...payload, ...JSON.parse(payload.result_data) };
+    } catch (_) {
+      // The backend validation prevents malformed successful resume results.
+    }
+  }
+  return payload && typeof payload === "object" ? payload : {};
+};
+
+const buildParseCandidates = (payload) => {
+  const candidates = [];
+  for (const [field, label] of BASIC_FIELDS) {
+    if (payload[field] !== undefined && payload[field] !== null && payload[field] !== "") {
+      candidates.push({
+        id: `basic:${field}`,
+        kind: "basic",
+        field,
+        label,
+        value: payload[field],
+        currentValue: resume.value?.[field] || "",
+        selected: true,
+      });
+    }
+  }
+
+  (payload.educations || []).forEach((item, index) => {
+    if (!item?.school) return;
+    candidates.push({
+      id: `education:${index}`,
+      kind: "education",
+      label: "教育经历",
+      value: item,
+      currentValue: "",
+      selected: true,
+    });
+  });
+  (payload.work_experiences || []).forEach((item, index) => {
+    if (!item?.company || !item?.position) return;
+    candidates.push({
+      id: `work:${index}`,
+      kind: "work",
+      label: "工作经历",
+      value: item,
+      currentValue: "",
+      selected: true,
+    });
+  });
+  (payload.skills || []).forEach((item, index) => {
+    const name = typeof item === "string" ? item : item?.name;
+    if (!name) return;
+    candidates.push({
+      id: `skill:${index}`,
+      kind: "skill",
+      label: "专业技能",
+      value: { ...(typeof item === "object" ? item : {}), name },
+      currentValue: "",
+      selected: true,
+    });
+  });
+  (payload.courses || []).forEach((item, index) => {
+    const name = typeof item === "string" ? item : item?.name;
+    if (!name) return;
+    candidates.push({
+      id: `course:${index}`,
+      kind: "course",
+      label: "专业课程",
+      value: { ...(typeof item === "object" ? item : {}), name },
+      currentValue: "",
+      selected: true,
+    });
+  });
+  return candidates;
+};
+
+const errorMessage = (error) => {
+  const detail = error?.response?.data?.detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => `${item.loc?.slice(-1)?.[0] || "字段"}：${item.msg || "格式不正确"}`)
+      .join("；");
+  }
+  return String(
+    detail ||
+      error?.response?.data?.message ||
+      error?.message ||
+      error ||
+      "简历解析失败，请稍后重试",
+  );
+};
 
 const handleSmartParse = async (event) => {
-  const file = event.target.files[0];
+  const file = event.target.files?.[0];
   if (!file) return;
 
+  parseError.value = "";
+  parseCandidates.value = [];
   parsingStatus.value = "uploading";
   const formData = new FormData();
   formData.append("file", file);
 
   try {
-    await aiAPI.parseResume(formData);
+    const response = await aiAPI.parseResume(formData);
+    const taskId = response.data?.task_id;
+    if (!taskId) throw new Error("解析任务创建失败：后端未返回任务编号");
+
+    aiTaskStore.addTask(taskId, "resume_parse", { filename: file.name });
+    activeParseTaskId.value = taskId;
     parsingStatus.value = "parsing";
-  } catch (e) {
-    if (e.response?.status === 409 || e.response?.data?.code === 40902) {
-      parsingStatus.value = "";
-      alert("当前有简历解析任务正在执行中，请等待完成后再试");
-    } else if (e.code === "ECONNABORTED") {
-      parsingStatus.value = "timeout";
-      alert("请求超时，解析将在后台继续，请留意消息通知");
-    } else {
-      parsingStatus.value = "error";
-      alert(e);
-    }
-  }
-  // reset input
-  event.target.value = "";
-};
+    const result = await aiTaskStore.pollAndUpdate(taskId, { timeout: 120000 });
+    const candidates = buildParseCandidates(normalizeTaskPayload(result));
+    if (!candidates.length) throw new Error("未从简历中识别出可更新的资料");
 
-onMounted(() => {
-  window.addEventListener("ws-message", onWsMessage);
-});
-import { onUnmounted } from "vue";
-onUnmounted(() => {
-  window.removeEventListener("ws-message", onWsMessage);
-});
-
-const onWsMessage = async (e) => {
-  const msg = e.detail;
-  if (msg.type === "resume_parsed") {
-    const data = msg.data;
-    parsingStatus.value = "success";
-
-    // Auto fill Basic Info locally for display
-    if (data.name) basicForm.name = data.name;
-    if (data.phone) basicForm.phone = data.phone;
-    if (data.email) basicForm.email = data.email;
-    if (data.summary) basicForm.summary = data.summary;
-    if (data.age) basicForm.age = data.age;
-    if (data.gender) basicForm.gender = data.gender;
-    if (data.desired_position)
-      basicForm.desired_position = data.desired_position;
-
-    // --- Smart Auto-Create Logic ---
-    if (!resume.value) {
-      console.log("No existing resume. Creating base resume first...");
-      try {
-        // 1. Create Base Resume
-        await store.createResume(basicForm);
-        // 2. Refresh store to get the ID (store.createResume usually updates state, but good to be sure)
-        // store.createResume updates 'resume.value'
-      } catch (err) {
-        console.error("Failed to auto-create base resume:", err);
-        alert("自动创建简历失败，请检查基本信息格式");
-        return; // Stop if base creation failed
-      }
-    } else {
-      // If resume exists, we might want to update it?
-      // Let's just update the form and let user save, OR auto-save basics too?
-      // User expectation: "Auto fill". If I just fill form, they need to click save.
-      // But for consistency with "Smart Create", let's auto-save basics too if we are confident.
-      // For now, let's update form and trigger edit mode (existing logic),
-      // BUT we rely on `resume.value` for IDs for sub-items.
-      // So safe to proceed to sub-items.
-    }
-
-    // Trigger edit mode to show the (now saved or updated) data
-    isEditingBasic.value = true;
-
-    // Auto-add Educations
-    if (data.educations && Array.isArray(data.educations)) {
-      for (const edu of data.educations) {
-        // Determine if we should add?
-        // For simplicity, let's add them via store (which saves to DB).
-        try {
-          await store.addEducation(edu);
-        } catch (e) {
-          console.error("Add edu failed", e);
-        }
-      }
-    }
-
-    // Auto-add Work Experiences
-    if (data.work_experiences && Array.isArray(data.work_experiences)) {
-      console.log("Start adding work experiences:", data.work_experiences);
-      for (const work of data.work_experiences) {
-        try {
-          // Clean up empty strings for optional fields if needed, or rely on backend
-          if (work.department === "") delete work.department;
-          await store.addWorkExperience(work);
-          console.log("Added work:", work.company);
-        } catch (err) {
-          console.error("Failed to add work experience:", work, err);
-        }
-      }
-    }
-
-    // Final refresh to ensure all items are displayed correctly
-    await store.fetchMyResume();
-    // Clear status after 3 seconds
-    setTimeout(() => {
-      parsingStatus.value = "";
-    }, 3000);
-  } else if (msg.type === "resume_parse_error") {
+    parseCandidates.value = candidates;
+    parsingStatus.value = "review";
+  } catch (error) {
     parsingStatus.value = "error";
-    alert(msg.message);
+    parseError.value = errorMessage(error);
+  } finally {
+    event.target.value = "";
   }
 };
+
+const normalizedDate = (value) => (
+  /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? value : undefined
+);
+
+const cleanEducation = (item) => ({
+  school: String(item.school || "").trim(),
+  major: item.major || undefined,
+  degree: item.degree || undefined,
+  start_date: normalizedDate(item.start_date),
+  end_date: normalizedDate(item.end_date),
+  description: item.description || undefined,
+});
+
+const cleanWork = (item) => ({
+  company: String(item.company || "").trim(),
+  position: String(item.position || "").trim(),
+  department: item.department || undefined,
+  start_date: normalizedDate(item.start_date),
+  end_date: normalizedDate(item.end_date),
+  content: item.content || undefined,
+  achievement: item.achievement || undefined,
+});
+
+const confirmParsedCandidates = async () => {
+  const selected = parseCandidates.value.filter((item) => item.selected);
+  if (!selected.length) {
+    parseError.value = "请至少选择一项需要保存的资料";
+    return;
+  }
+
+  applyingCandidates.value = true;
+  parsingStatus.value = "saving";
+  parseError.value = "";
+  try {
+    const basicPayload = Object.fromEntries(
+      selected
+        .filter((item) => item.kind === "basic")
+        .map((item) => [item.field, item.value]),
+    );
+    if (basicPayload.phone && !/^1[3-9]\d{9}$/.test(String(basicPayload.phone))) {
+      throw new Error("解析出的手机号码格式不正确，请取消该项或重新上传简历");
+    }
+    if (basicPayload.gender && !["男", "女"].includes(basicPayload.gender)) {
+      throw new Error("解析出的性别格式不正确，请取消该项或重新上传简历");
+    }
+    if (basicPayload.age && (Number(basicPayload.age) < 16 || Number(basicPayload.age) > 100)) {
+      throw new Error("解析出的年龄不在 16 至 100 岁范围内，请取消该项或重新上传简历");
+    }
+
+    const educations = selected
+      .filter((item) => item.kind === "education")
+      .map((item) => cleanEducation(item.value));
+    const works = selected
+      .filter((item) => item.kind === "work")
+      .map((item) => cleanWork(item.value));
+
+    await profileAPI.applyResumeCandidates({
+      basic: basicPayload,
+      educations,
+      workExperiences: works,
+      skills: selected
+        .filter((item) => item.kind === "skill")
+        .map((item) => ({
+          name: item.value.name,
+          category: item.value.category || null,
+          proficiencyLevel: item.value.proficiencyLevel ?? item.value.proficiency_level ?? 3,
+          yearsExperience: item.value.yearsExperience ?? item.value.years_experience ?? null,
+          source: "resume",
+          confirmationStatus: "confirmed",
+          evidence: item.value.evidence ?? null,
+        })),
+      courses: selected
+        .filter((item) => item.kind === "course")
+        .map((item) => ({
+          name: item.value.name,
+          category: item.value.category || null,
+          level: item.value.level || null,
+          isCore: item.value.isCore ?? item.value.is_core ?? false,
+          source: "resume",
+          confirmationStatus: "confirmed",
+          evidence: item.value.evidence ?? null,
+        })),
+    });
+
+    await store.fetchMyResume();
+    parseCandidates.value = [];
+    parsingStatus.value = "success";
+    activeParseTaskId.value = "";
+    isEditingBasic.value = false;
+  } catch (error) {
+    parsingStatus.value = "review";
+    parseError.value = errorMessage(error);
+  } finally {
+    applyingCandidates.value = false;
+  }
+};
+
+const onWsMessage = (event) => {
+  const message = event.detail;
+  if (message?.type === "resume_parse_error") {
+    if (!message.data?.task_id || message.data.task_id !== activeParseTaskId.value) return;
+    parsingStatus.value = "error";
+    parseError.value = message.data?.message || "简历解析失败，请稍后重试";
+  }
+};
+
+onMounted(() => window.addEventListener("ws-message", onWsMessage));
+onUnmounted(() => window.removeEventListener("ws-message", onWsMessage));
 
 // --- Education ---
 const saveEdu = async () => {
@@ -267,22 +412,23 @@ const removeWork = async (id) => {
             </button>
             <label
               class="btn-primary big-btn ai-upload-btn"
-              :class="{ 'is-loading': parsingStatus }"
+              :class="{ 'is-loading': isParseBusy }"
             >
-              <span v-if="!parsingStatus">✨ 上传 PDF 智能生成</span>
+              <span v-if="!parsingStatus || parsingStatus === 'error' || parsingStatus === 'success'">✨ 上传 PDF 智能生成</span>
               <span v-else-if="parsingStatus === 'uploading'"
                 >🚀 正在上传...</span
               >
               <span v-else-if="parsingStatus === 'parsing'"
                 >🧠 AI 深度解析中...</span
               >
-              <span v-else-if="parsingStatus === 'success'">✅ 解析成功！</span>
+              <span v-else-if="parsingStatus === 'review'">📋 请确认解析结果</span>
+              <span v-else-if="parsingStatus === 'saving'">正在保存资料...</span>
               <input
                 type="file"
                 @change="handleSmartParse"
                 accept=".pdf"
                 hidden
-                :disabled="!!parsingStatus"
+                :disabled="isParseBusy"
               />
             </label>
           </div>
@@ -372,24 +518,23 @@ const removeWork = async (id) => {
               </p>
               <label
                 class="btn-primary ai-upload-btn"
-                :class="{ 'is-loading': parsingStatus }"
+                :class="{ 'is-loading': isParseBusy }"
               >
-                <span v-if="!parsingStatus">上传并解析 PDF</span>
+                <span v-if="!parsingStatus || parsingStatus === 'error' || parsingStatus === 'success'">上传并解析 PDF</span>
                 <span v-else-if="parsingStatus === 'uploading'"
                   >🚀 正在上传...</span
                 >
                 <span v-else-if="parsingStatus === 'parsing'"
                   >🧠 AI 深度解析中...</span
                 >
-                <span v-else-if="parsingStatus === 'success'"
-                  >✅ 解析成功，数据已更新</span
-                >
+                <span v-else-if="parsingStatus === 'review'">📋 请确认下方解析结果</span>
+                <span v-else-if="parsingStatus === 'saving'">正在保存资料...</span>
                 <input
                   type="file"
                   @change="handleSmartParse"
                   accept=".pdf"
                   hidden
-                  :disabled="!!parsingStatus"
+                  :disabled="isParseBusy"
                 />
               </label>
               <div class="parsing-progress" v-if="parsingStatus === 'parsing'">
@@ -431,6 +576,50 @@ const removeWork = async (id) => {
           </div>
         </div>
       </div>
+
+      <section v-if="parseError" class="parse-error" role="alert">
+        <strong>简历处理未完成</strong>
+        <span>{{ parseError }}</span>
+      </section>
+
+      <section
+        v-if="parseCandidates.length"
+        class="section parse-preview"
+        data-testid="resume-parse-preview"
+      >
+        <div class="section-header parse-preview-header">
+          <div>
+            <small>PARSE PREVIEW</small>
+            <h3>待确认的资料更新</h3>
+            <p>解析结果不会自动覆盖资料，请勾选确认后再保存。</p>
+          </div>
+          <span>{{ parseCandidates.filter((item) => item.selected).length }} 项已选择</span>
+        </div>
+        <div class="candidate-list">
+          <label v-for="candidate in parseCandidates" :key="candidate.id" class="candidate-row">
+            <input v-model="candidate.selected" type="checkbox" />
+            <span class="candidate-copy">
+              <small>{{ candidate.label }}</small>
+              <span v-if="candidate.currentValue" class="candidate-current">
+                {{ displayValue(candidate.currentValue) }} →
+              </span>
+              <strong>{{ displayValue(candidate.value) }}</strong>
+            </span>
+            <em>{{ candidate.currentValue ? "修改" : "新增" }}</em>
+          </label>
+        </div>
+        <footer class="parse-preview-footer">
+          <p>保存后会同步更新结构化简历和职业分析使用的个人资料。</p>
+          <button
+            class="btn-primary"
+            data-testid="confirm-resume-candidates"
+            :disabled="applyingCandidates"
+            @click="confirmParsedCandidates"
+          >
+            {{ applyingCandidates ? "保存中..." : "保存选中项" }}
+          </button>
+        </footer>
+      </section>
 
       <!-- Education -->
       <div class="section" v-if="resume">
@@ -1008,5 +1197,100 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   opacity: 0.6;
   cursor: pointer;
+}
+
+.parse-error {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  color: #fecaca;
+  background: #451a1a;
+  border: 1px solid #7f1d1d;
+  border-radius: 10px;
+}
+.parse-error span {
+  color: #fca5a5;
+}
+.parse-preview-header small {
+  color: #60a5fa;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.parse-preview-header h3 {
+  margin: 0.35rem 0;
+}
+.parse-preview-header p,
+.parse-preview-footer p {
+  margin: 0;
+  color: #94a3b8;
+}
+.parse-preview-header > span {
+  color: #fbbf24;
+  font-weight: 700;
+}
+.candidate-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.candidate-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 1rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.candidate-row input {
+  width: 18px;
+  height: 18px;
+}
+.candidate-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: baseline;
+  min-width: 0;
+}
+.candidate-copy small {
+  width: 100%;
+  color: #94a3b8;
+}
+.candidate-copy strong {
+  color: #f8fafc;
+  overflow-wrap: anywhere;
+}
+.candidate-current {
+  color: #64748b;
+  text-decoration: line-through;
+}
+.candidate-row em {
+  color: #86efac;
+  font-size: 0.8rem;
+  font-style: normal;
+}
+.parse-preview-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+@media (max-width: 640px) {
+  .parse-error,
+  .parse-preview-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .candidate-row {
+    grid-template-columns: auto 1fr;
+  }
+  .candidate-row em {
+    grid-column: 2;
+  }
 }
 </style>

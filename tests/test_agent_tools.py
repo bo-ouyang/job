@@ -22,7 +22,7 @@ from agent.tools.base import AgentTool, ToolContext
 from agent.tools.job_tools import SearchJobsTool
 from agent.tools.normalizers import normalize_job
 from agent.tools.registry import AgentToolRegistry, agent_tool_registry
-from agent.tools.resolvers import ResolvedDimension
+from agent.tools.resolvers import ResolvedDimension, ToolResolutionError, resolve_city
 from agent.tools.schemas import CompareCitiesInput, SkillDemandInput, ToolResult
 from schemas.analysis_schema import CompareAnalysisResponse
 
@@ -43,6 +43,11 @@ class DummyTool(AgentTool[DummyInput]):
             filters=input_data.model_dump(),
             source="mock",
         )
+
+
+class ResolutionFailureTool(DummyTool):
+    async def execute(self, input_data, context):
+        raise ToolResolutionError("unknown or ambiguous city: 上海")
 
 
 def test_default_registry_contains_only_approved_tools():
@@ -68,6 +73,34 @@ def test_registry_validates_arguments_and_rejects_unknown_tools():
     assert valid.ok and valid.data == {"value": 3}
     assert invalid.error_code == "INVALID_TOOL_ARGUMENTS"
     assert unknown.error_code == "UNKNOWN_TOOL"
+
+
+def test_city_resolver_prefers_the_city_level_record_for_a_municipality():
+    result_proxy = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(
+            all=lambda: [
+                SimpleNamespace(code=101020000, name="上海", level=0),
+                SimpleNamespace(code=101020100, name="上海", level=1),
+            ]
+        )
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=result_proxy))
+
+    resolved = asyncio.run(resolve_city(db, "上海"))
+
+    assert resolved == ResolvedDimension(code=101020100, name="上海", level=1)
+
+
+def test_tool_returns_the_dimension_resolution_error_instead_of_hiding_it():
+    result = asyncio.run(
+        ResolutionFailureTool().invoke(
+            {"value": 1},
+            ToolContext(db=AsyncMock(), user_id=1),
+        )
+    )
+
+    assert result.error_code == "DIMENSION_RESOLUTION_FAILED"
+    assert result.warnings == ["城市或行业解析失败：unknown or ambiguous city: 上海"]
 
 
 def test_search_jobs_normalizes_backend_results():
@@ -105,6 +138,29 @@ def test_search_jobs_normalizes_backend_results():
     assert result.data["common_skills"][0]["name"] in {"SQL", "Python"}
 
 
+def test_search_jobs_treats_an_unknown_industry_label_as_a_keyword():
+    empty_result = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [])
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=empty_result))
+    service = SimpleNamespace(
+        search_jobs_with_meta=AsyncMock(return_value=([], 0, "postgresql", []))
+    )
+
+    result = asyncio.run(
+        SearchJobsTool(service=service).invoke(
+            {"keyword": "人工智能", "industries": ["人工智能"], "limit": 10},
+            ToolContext(db=db, user_id=1),
+        )
+    )
+
+    assert result.ok
+    service.search_jobs_with_meta.assert_awaited_once()
+    assert service.search_jobs_with_meta.await_args.kwargs["keyword"] == "人工智能"
+    assert service.search_jobs_with_meta.await_args.kwargs["industry"] is None
+    assert any("关键词" in warning for warning in result.warnings)
+
+
 def test_market_overview_falls_back_to_postgresql():
     service = SimpleNamespace(get_faceted_job_stats=AsyncMock(side_effect=RuntimeError("es down")))
     fallback = {
@@ -129,6 +185,36 @@ def test_market_overview_falls_back_to_postgresql():
     assert result.source == "postgresql"
     assert result.sample_size == 5
     assert result.data["skill_distribution"][0] == {"name": "SQL", "count": 4}
+
+
+def test_market_overview_treats_an_unknown_industry_label_as_a_keyword():
+    empty_result = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [])
+    )
+    db = SimpleNamespace(execute=AsyncMock(return_value=empty_result))
+    service = SimpleNamespace(
+        get_faceted_job_stats=AsyncMock(
+            return_value={
+                "salary": [],
+                "skills": [],
+                "industries": [],
+                "total_jobs": 3,
+            }
+        )
+    )
+
+    result = asyncio.run(
+        GetMarketOverviewTool(service=service).invoke(
+            {"keyword": "人工智能", "industries": ["人工智能"]},
+            ToolContext(db=db, user_id=1),
+        )
+    )
+
+    assert result.ok
+    assert result.sample_size == 3
+    assert service.get_faceted_job_stats.await_args.kwargs["keyword"] == "人工智能"
+    assert service.get_faceted_job_stats.await_args.kwargs["industry"] is None
+    assert any("关键词" in warning for warning in result.warnings)
 
 
 def test_skill_demand_caps_duplicate_tag_ratios():

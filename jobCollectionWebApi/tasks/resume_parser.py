@@ -18,6 +18,31 @@ from jobCollectionWebApi.core.celery_app import celery_app
 from services.ai_service import ai_service
 
 
+def _has_usable_resume_candidates(parsed_data) -> bool:
+    if not isinstance(parsed_data, dict) or parsed_data.get("error") or parsed_data.get("message"):
+        return False
+    if any(parsed_data.get(field) for field in (
+        "name", "phone", "email", "gender", "age", "desired_position", "summary"
+    )):
+        return True
+    if any(item and item.get("school") for item in parsed_data.get("educations") or [] if isinstance(item, dict)):
+        return True
+    if any(
+        item and item.get("company") and item.get("position")
+        for item in parsed_data.get("work_experiences") or []
+        if isinstance(item, dict)
+    ):
+        return True
+    for field in ("skills", "courses"):
+        if any(
+            (isinstance(item, str) and item.strip())
+            or (isinstance(item, dict) and str(item.get("name") or "").strip())
+            for item in parsed_data.get(field) or []
+        ):
+            return True
+    return False
+
+
 def _get_event_loop():
     try:
         loop = asyncio.get_event_loop()
@@ -135,6 +160,9 @@ async def _parse_resume_logic(user_id: int, file_path: str) -> str:
     # Call AI
     parsed_data = await ai_service.parse_resume_text(text)
     logger.debug(f"AI Parsed Data: {parsed_data}")
+
+    if not _has_usable_resume_candidates(parsed_data):
+        raise RuntimeError("AI resume parsing returned no structured data")
 
     # Publish feature-specific WS message (backward compatible)
     _publish_ws(user_id, "resume_parsed", parsed_data)
@@ -302,4 +330,8 @@ def parse_resume_task(self, user_id: int, file_path: str):
     except Exception as e:
         logger.error(f"Resume parsing failed: {e}")
         _mark_failed(user_id, self.request.id, str(e), started_at)
-        _publish_ws(user_id, "resume_parse_error", {"message": "解析服务暂时不可用"})
+        _publish_ws(
+            user_id,
+            "resume_parse_error",
+            {"message": "解析服务暂时不可用", "task_id": self.request.id},
+        )

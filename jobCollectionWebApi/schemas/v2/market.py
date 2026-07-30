@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field
@@ -87,3 +88,27 @@ class MarketDashboardResponse(V2Model):
 class MarketQuestionRequest(V2Model):
     question: str = Field(min_length=1, max_length=20000)
     context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketHistoryMessage(V2Model):
+    id: str
+    conversation_id: str
+    role: str
+    message_type: str
+    content: str
+    created_at: Optional[datetime] = None
+
+
+class MarketHistoryItem(V2Model):
+    conversation_id: str
+    title: str
+    latest_run_id: Optional[str] = None
+    latest_run_status: Optional[str] = None
+    messages: List[MarketHistoryMessage] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class MarketHistoryResponse(V2Model):
+    items: List[MarketHistoryItem] = Field(default_factory=list)
+    total: int = 0

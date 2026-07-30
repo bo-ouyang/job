@@ -40,6 +40,15 @@ const connectionLabel = computed(() => ({
   failed: "连接失败",
 }[store.connectionState] || "在线"));
 const recentToolEvents = computed(() => store.runEvents.filter((event) => ["tool_started", "tool_completed"].includes(event.event)).slice(-4));
+const composerDisabled = computed(() => (
+  store.runState !== "waiting" && (!store.capabilitiesLoaded || !store.featureAvailable)
+));
+const composerPlaceholder = computed(() => {
+  if (store.runState === "waiting") return "补充 Agent 需要的信息...";
+  if (!store.capabilitiesLoaded) return "正在确认 Agent 可用状态...";
+  if (!store.featureAvailable) return "当前账号暂未开放新分析";
+  return "输入你想探索的职业问题...";
+});
 function renderContent(content) {
   return DOMPurify.sanitize(marked.parse(String(content || ""), { breaks: true }));
 }
@@ -71,8 +80,8 @@ function renderContent(content) {
     <div v-else-if="store.runState === 'failed'" class="error-note">分析未完成：{{ store.error || '数据或模型服务暂时不可用' }}</div>
     <div v-else-if="store.runState === 'cancelled'" class="waiting-note">本次分析已取消，你可以重新提出问题。</div>
     <div v-if="store.error && store.runState !== 'failed'" class="error-note">{{ store.error }}</div>
-    <div class="suggestions"><span>你可以问我</span><button v-for="suggestion in agentSuggestions" :key="suggestion" @click="submit(suggestion)">{{ suggestion }} <AgentIcon name="arrow" :size="13" /></button></div>
-    <form class="composer" @submit.prevent="submit()"><textarea v-model="input" rows="1" :disabled="!store.featureAvailable && store.runState !== 'waiting'" :placeholder="!store.featureAvailable && store.runState !== 'waiting' ? '当前账号暂未开放新分析' : store.runState === 'waiting' ? '补充 Agent 需要的信息...' : '输入你想探索的职业问题...'" @keydown="onKeydown" /><button type="submit" aria-label="发送" :disabled="!input.trim() || store.isThinking || (!store.featureAvailable && store.runState !== 'waiting')"><AgentIcon name="send" :size="17" /></button></form>
+    <div class="suggestions"><span>你可以问我</span><button v-for="suggestion in agentSuggestions" :key="suggestion" :disabled="!store.capabilitiesLoaded && store.runState !== 'waiting'" @click="submit(suggestion)">{{ suggestion }} <AgentIcon name="arrow" :size="13" /></button></div>
+    <form class="composer" @submit.prevent="submit()"><textarea v-model="input" rows="1" :disabled="composerDisabled" :placeholder="composerPlaceholder" @keydown="onKeydown" /><button type="submit" aria-label="发送" :disabled="!input.trim() || store.isThinking || composerDisabled"><AgentIcon name="send" :size="17" /></button></form>
     <p class="privacy-note">AI 生成内容仅供参考 · 对话将保存用于会话恢复，并可能由配置的模型服务处理</p>
   </section>
 </template>

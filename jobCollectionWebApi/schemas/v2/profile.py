@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, List, Literal, Optional
 
-from pydantic import BeforeValidator, Field, field_validator
+from pydantic import BeforeValidator, EmailStr, Field, field_validator
 from typing_extensions import Annotated
 
 from .common import V2Model
@@ -95,3 +95,56 @@ class ProfileResponse(V2Model):
     target_industries: List[str] = Field(default_factory=list)
     expected_salary: str = ""
     completion: int = Field(default=0, ge=0, le=100)
+
+
+class ResumeCandidateBasic(V2Model):
+    name: Optional[str] = Field(default=None, max_length=50)
+    gender: Optional[str] = Field(default=None, max_length=10)
+    age: Optional[int] = Field(default=None, ge=16, le=100)
+    phone: Optional[str] = Field(default=None, max_length=20)
+    email: Optional[EmailStr] = Field(default=None, max_length=100)
+    desired_position: Optional[str] = Field(default=None, max_length=100)
+    summary: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        import re
+
+        if value and not re.fullmatch(r"1[3-9]\d{9}", value):
+            raise ValueError("invalid phone number")
+        return value
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, value: Optional[str]) -> Optional[str]:
+        if value and value not in {"男", "女"}:
+            raise ValueError("invalid gender")
+        return value
+
+
+class ResumeEducationCandidate(V2Model):
+    school: str = Field(min_length=1, max_length=100)
+    major: Optional[str] = Field(default=None, max_length=100)
+    degree: Optional[str] = Field(default=None, max_length=50)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
+
+
+class ResumeWorkCandidate(V2Model):
+    company: str = Field(min_length=1, max_length=100)
+    position: str = Field(min_length=1, max_length=100)
+    department: Optional[str] = Field(default=None, max_length=50)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    content: Optional[str] = None
+    achievement: Optional[str] = None
+
+
+class ResumeCandidateApply(V2Model):
+    basic: ResumeCandidateBasic = Field(default_factory=ResumeCandidateBasic)
+    educations: List[ResumeEducationCandidate] = Field(default_factory=list)
+    work_experiences: List[ResumeWorkCandidate] = Field(default_factory=list)
+    skills: List[ProfileSkillInput] = Field(default_factory=list)
+    courses: List[ProfileCourseInput] = Field(default_factory=list)

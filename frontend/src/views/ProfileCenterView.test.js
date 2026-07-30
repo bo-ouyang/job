@@ -63,4 +63,34 @@ describe("ProfileCenterView", () => {
     expect(mocks.getCourses).toHaveBeenCalledOnce();
     expect(mocks.getSkills).toHaveBeenCalledOnce();
   });
+
+  it("keeps course-name focus while the v-model value changes", async () => {
+    const wrapper = mount(ProfileCenterView, {
+      attachTo: document.body,
+      global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } },
+    });
+    await flushPromises();
+    const input = wrapper.get("[data-section='courses'] input");
+
+    input.element.focus();
+    await input.setValue("数据结构与算法");
+
+    expect(document.activeElement).toBe(input.element);
+    wrapper.unmount();
+  });
+
+  it("keeps skill-name focus while the v-model value changes", async () => {
+    const wrapper = mount(ProfileCenterView, {
+      attachTo: document.body,
+      global: { stubs: { RouterLink: { template: "<a><slot /></a>" } } },
+    });
+    await flushPromises();
+    const input = wrapper.get("[data-section='skills'] input");
+
+    input.element.focus();
+    await input.setValue("Python 开发");
+
+    expect(document.activeElement).toBe(input.element);
+    wrapper.unmount();
+  });
 });

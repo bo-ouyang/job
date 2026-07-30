@@ -118,6 +118,7 @@ const fetchBalance = async () => {
     const res = await walletAPI.getBalance();
     balance.value = Number(res.data.balance || 0);
     walletStatus.value = res.data.status || "active";
+    authStore.setWalletBalance(res.data);
   } catch (error) {
     ElMessage.error("Failed to load wallet balance");
   } finally {

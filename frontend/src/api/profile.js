@@ -7,6 +7,9 @@ export const profileAPI = {
   updateProfile(payload) {
     return v2Request.patch("/profile", payload);
   },
+  applyResumeCandidates(payload) {
+    return v2Request.post("/profile/resume-candidates", payload);
+  },
   getCourses() {
     return v2Request.get("/profile/courses");
   },

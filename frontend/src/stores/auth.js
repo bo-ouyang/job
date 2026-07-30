@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { authAPI } from "@/api/auth";
+import { walletAPI } from "@/api/wallet";
 import router from "@/router";
 
 const WALLET_PENDING_ORDER_KEY = "wallet_pending_order_no";
@@ -18,6 +19,9 @@ export const useAuthStore = defineStore("auth", () => {
   const user = ref(JSON.parse(localStorage.getItem("user")) || null);
   const token = ref(localStorage.getItem("token") || null);
   const refreshToken = ref(localStorage.getItem("refresh_token") || null);
+  const walletBalance = ref(Number(user.value?.balance || 0));
+  const walletStatus = ref(null);
+  let walletRefreshPromise = null;
 
   if (typeof window !== "undefined") {
     window.addEventListener("auth-token-refreshed", (event) => {
@@ -27,6 +31,34 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Getters
   const isAuthenticated = computed(() => !!token.value);
+
+  const setWalletBalance = (wallet = {}) => {
+    const nextBalance = Number(wallet.balance || 0);
+    walletBalance.value = Number.isFinite(nextBalance) ? nextBalance : 0;
+    walletStatus.value = wallet.status || walletStatus.value;
+
+    if (user.value) {
+      user.value = { ...user.value, balance: walletBalance.value };
+      localStorage.setItem("user", JSON.stringify(user.value));
+    }
+  };
+
+  const refreshWalletBalance = async () => {
+    if (!token.value) return null;
+    if (walletRefreshPromise) return walletRefreshPromise;
+
+    walletRefreshPromise = walletAPI
+      .getBalance()
+      .then((response) => {
+        setWalletBalance(response.data || {});
+        return response.data;
+      })
+      .finally(() => {
+        walletRefreshPromise = null;
+      });
+
+    return walletRefreshPromise;
+  };
 
   // Actions
   const login = async (username, password) => {
@@ -102,6 +134,8 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = data.token.access_token;
     refreshToken.value = data.token.refresh_token;
     user.value = data.user;
+    walletBalance.value = Number(data.user?.balance || 0);
+    walletStatus.value = null;
     clearWalletPendingOrders();
 
     // Persist to localStorage
@@ -121,6 +155,8 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = null;
       token.value = null;
       refreshToken.value = null;
+      walletBalance.value = 0;
+      walletStatus.value = null;
       localStorage.removeItem("token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("user");
@@ -153,7 +189,11 @@ export const useAuthStore = defineStore("auth", () => {
   return {
     user,
     token,
+    walletBalance,
+    walletStatus,
     isAuthenticated,
+    setWalletBalance,
+    refreshWalletBalance,
     login,
     register,
     loginWithPhone,

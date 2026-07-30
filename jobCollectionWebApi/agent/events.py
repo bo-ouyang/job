@@ -1,3 +1,5 @@
+"""Agent 实时事件的数据结构与脱敏逻辑。"""
+
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -6,6 +8,8 @@ from pydantic import BaseModel, Field
 
 
 class AgentEventType(str, Enum):
+    """前端可订阅的 Agent 生命周期事件类型。"""
+
     RUN_STARTED = "run_started"
     PLAN_CREATED = "plan_created"
     TOOL_STARTED = "tool_started"
@@ -24,10 +28,13 @@ TERMINAL_EVENTS = {
     AgentEventType.RUN_CANCELLED.value,
 }
 
+# 终态事件和“等待用户澄清”都会结束当前 SSE 连接；用户补充信息后会开启新运行。
 STREAM_CLOSING_EVENTS = TERMINAL_EVENTS | {AgentEventType.CLARIFICATION_REQUIRED.value}
 
 
 class AgentEvent(BaseModel):
+    """写入 Redis Stream 并通过 SSE 发送给前端的标准事件。"""
+
     event_id: Optional[str] = None
     sequence: int = Field(ge=1)
     event: AgentEventType
@@ -38,6 +45,12 @@ class AgentEvent(BaseModel):
 
 
 def sanitize_event_data(value: Any, depth: int = 0) -> Any:
+    """裁剪并过滤事件数据，避免敏感信息或超大对象进入 Redis/SSE。
+
+    最多保留四层嵌套、有限数量的字典键和列表元素；prompt、token、SQL 等
+    高风险字段会被直接删除。该函数只处理可观测事件，不修改数据库中的业务结果。
+    """
+
     if depth >= 4:
         return "[truncated]"
     if isinstance(value, str):

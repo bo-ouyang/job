@@ -60,6 +60,7 @@ export const useAgentStore = defineStore(
     const featureAvailable = ref(
       DATA_SOURCE === "mock" && import.meta.env.VITE_AGENT_ENABLED === "true",
     );
+    const capabilitiesLoaded = ref(DATA_SOURCE === "mock");
 
     const uploadedDocument = ref(null);
     const isUploading = ref(false);
@@ -111,6 +112,7 @@ export const useAgentStore = defineStore(
     async function loadCapabilities() {
       if (!isApiMode.value || import.meta.env.VITE_AGENT_ENABLED !== "true") {
         featureAvailable.value = false;
+        capabilitiesLoaded.value = true;
         return false;
       }
       try {
@@ -118,6 +120,8 @@ export const useAgentStore = defineStore(
         featureAvailable.value = Boolean(response.data?.enabled);
       } catch {
         featureAvailable.value = false;
+      } finally {
+        capabilitiesLoaded.value = true;
       }
       return featureAvailable.value;
     }
@@ -446,6 +450,7 @@ export const useAgentStore = defineStore(
       error.value = null;
       structuredResult.value = null;
       featureAvailable.value = DATA_SOURCE === "mock" && import.meta.env.VITE_AGENT_ENABLED === "true";
+      capabilitiesLoaded.value = DATA_SOURCE === "mock";
       uploadedDocument.value = null;
       isUploading.value = false;
       selectedDirection.value = "ai-pm";
@@ -478,6 +483,7 @@ export const useAgentStore = defineStore(
       error,
       structuredResult,
       featureAvailable,
+      capabilitiesLoaded,
       isApiMode,
       isDashboardMock,
       isThinking,

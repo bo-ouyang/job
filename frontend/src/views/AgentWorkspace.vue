@@ -80,7 +80,7 @@ onBeforeUnmount(() => store.stopRunStream());
       <div class="workspace-grid">
         <aside class="conversation-column" :class="{ 'mobile-hidden': mobilePanel !== 'coach' }"><AgentConversation /></aside>
         <section class="dashboard-column" :class="{ 'mobile-hidden': mobilePanel !== 'overview' }">
-          <div v-if="!store.featureAvailable" class="demo-banner unavailable">职业规划 Agent 当前仅对灰度用户开放。</div>
+          <div v-if="store.capabilitiesLoaded && !store.featureAvailable" class="demo-banner unavailable">职业规划 Agent 当前仅对灰度用户开放。</div>
           <div v-else-if="store.isDashboardMock" class="demo-banner">对话和分析进度来自真实 Agent；画像、匹配度、路线图、岗位与行动卡片仍为界面演示数据。</div>
           <div class="welcome-row"><div><p class="section-kicker">TUESDAY · 07 JUN 2025</p><h1>早上好，晓屿 <span>✦</span></h1><p class="welcome-subtitle">这是你本周的职业成长快照，保持节奏，持续靠近目标。</p></div><button class="run-button" :disabled="!store.featureAvailable || store.runState === 'running' || store.isSending" @click="runAnalysis"><AgentIcon name="spark" :size="16" /> {{ store.runState === 'running' || store.isSending ? '分析中...' : '发起新一轮对话分析' }}</button></div>
 

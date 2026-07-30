@@ -85,9 +85,24 @@ describe("Agent store", () => {
     mocks.getCapabilities.mockResolvedValue({ data: { enabled: true } });
     const store = useAgentStore();
 
+    expect(store.capabilitiesLoaded).toBe(false);
     expect(await store.loadCapabilities()).toBe(true);
     expect(store.featureAvailable).toBe(true);
+    expect(store.capabilitiesLoaded).toBe(true);
     expect(mocks.getCapabilities).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Agent availability pending until the backend capability resolves", async () => {
+    const capability = deferred();
+    mocks.getCapabilities.mockReturnValue(capability.promise);
+    const store = useAgentStore();
+
+    const loading = store.loadCapabilities();
+
+    expect(store.capabilitiesLoaded).toBe(false);
+    capability.resolve({ data: { enabled: true } });
+    await loading;
+    expect(store.capabilitiesLoaded).toBe(true);
   });
 
   it("does not reconnect after a terminal run event", async () => {
