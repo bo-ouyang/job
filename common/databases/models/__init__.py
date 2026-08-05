@@ -35,6 +35,7 @@ from .career_profile import (
     CareerProfileCourse,
     CareerProfileSkill,
 )
+from .crawler_control import CrawlerEvent, CrawlerRun, CrawlerWorker
 
 __all__ = [
     'Base',
@@ -86,4 +87,7 @@ __all__ = [
     'CareerProfileCourse',
     'CareerProfileSkill',
     'CareerProfileChangeLog',
+    'CrawlerWorker',
+    'CrawlerRun',
+    'CrawlerEvent',
 ]

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, func, BigInteger, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from common.databases.models.base import Base
 from common.utils.snowflake import generate_id
 
@@ -22,6 +23,20 @@ class BossCrawlTask(Base):
     status = Column(String(50), default='pending', index=True, comment='状态: pending, processing, done, error')
     priority = Column(Integer, default=0, comment='优先级 (越大越优先)')
     pid = Column(Integer, nullable=True, comment='爬虫进程ID')
+    spider_name = Column(String(80), nullable=False, default="boss_list_drission")
+    spider_args = Column(JSONB, nullable=False, default=dict)
+    desired_status = Column(String(20), nullable=False, default="stopped", index=True)
+    latest_run_id = Column(
+        BigInteger,
+        ForeignKey(
+            "crawler_runs.id",
+            name="fk_boss_crawl_task_latest_run",
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
+        nullable=True,
+        index=True,
+    )
     
     # 执行结果
     last_crawl_time = Column(DateTime, nullable=True, comment='最后爬取时间')

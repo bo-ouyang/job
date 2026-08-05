@@ -7,7 +7,13 @@ from .favorite import FavoriteJobView
 from .industry import IndustryView
 from .skills import SkillsView
 from .logs import AdminLogView, TaskLogView
-from .crawler import BossSpiderFilterView, BossCrawlTaskView
+from .crawler import (
+    BossSpiderFilterView,
+    BossCrawlTaskView,
+    CrawlerEventAdminView,
+    CrawlerRunAdminView,
+    CrawlerWorkerAdminView,
+)
 from .proxy import ProxyView
 from .product import ProductView
 from .system_config import SystemConfigView

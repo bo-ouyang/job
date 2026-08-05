@@ -7,6 +7,7 @@ from .views import (
     FavoriteJobView, IndustryView, SkillsView, 
     AdminLogView, TaskLogView, 
     BossSpiderFilterView, BossCrawlTaskView,
+    CrawlerEventAdminView, CrawlerRunAdminView, CrawlerWorkerAdminView,
     ProxyView, ProductView, SystemConfigView,
     PaymentOrderView, WalletAdminView
 )
@@ -21,6 +22,7 @@ from common.databases.models.admin_log import AdminLog
 from common.databases.models.analysis import TaskLog
 from common.databases.models.boss_spider_filter import BossSpiderFilter
 from common.databases.models.boss_crawl_task import BossCrawlTask
+from common.databases.models.crawler_control import CrawlerEvent, CrawlerRun, CrawlerWorker
 from common.databases.models.proxy import Proxy
 # Ensure related models are loaded for User relationships
 from common.databases.models.payment import PaymentOrder
@@ -62,6 +64,9 @@ def setup_admin(app, engine):
     # Crawler Module
     admin.add_view(BossSpiderFilterView(BossSpiderFilter, icon="fa fa-filter"))
     admin.add_view(BossCrawlTaskView(BossCrawlTask, icon="fa fa-spider"))
+    admin.add_view(CrawlerWorkerAdminView(CrawlerWorker, icon="fa fa-server"))
+    admin.add_view(CrawlerRunAdminView(CrawlerRun, icon="fa fa-play-circle"))
+    admin.add_view(CrawlerEventAdminView(CrawlerEvent, icon="fa fa-stream"))
     admin.add_view(ProxyView(Proxy, icon="fa fa-globe"))
     
     admin.add_view(AdminLogView(AdminLog, label="鎿嶄綔鏃ュ織", icon="fa fa-history"))

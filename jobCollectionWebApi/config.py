@@ -267,6 +267,33 @@ class Settings(BaseSettings):
     AGENT_MAX_SSE_CONNECTIONS_PER_USER: int = int(os.getenv("AGENT_MAX_SSE_CONNECTIONS_PER_USER", 2))
     AGENT_SSE_REDIS_MAX_CONNECTIONS: int = int(os.getenv("AGENT_SSE_REDIS_MAX_CONNECTIONS", 100))
 
+    # Cross-machine crawler control Agent. Dry-run is intentionally the safe default:
+    # it validates lifecycle control without opening Chrome or contacting a target site.
+    CRAWLER_AGENT_TOKEN: str = os.getenv("CRAWLER_AGENT_TOKEN", "")
+    CRAWLER_AGENT_API_URL: str = os.getenv("CRAWLER_AGENT_API_URL", "http://127.0.0.1:8000/api/v2")
+    CRAWLER_AGENT_ID: str = os.getenv("CRAWLER_AGENT_ID", "crawler-worker-local")
+    CRAWLER_AGENT_NAME: str = os.getenv("CRAWLER_AGENT_NAME", "Local Crawler Worker")
+    CRAWLER_AGENT_HEARTBEAT_SECONDS: int = max(3, int(os.getenv("CRAWLER_AGENT_HEARTBEAT_SECONDS", 10)))
+    CRAWLER_AGENT_STALE_SECONDS: int = max(
+        CRAWLER_AGENT_HEARTBEAT_SECONDS + 5,
+        int(os.getenv("CRAWLER_AGENT_STALE_SECONDS", 45)),
+    )
+    CRAWLER_AGENT_POLL_SECONDS: float = max(0.5, float(os.getenv("CRAWLER_AGENT_POLL_SECONDS", 2)))
+    CRAWLER_AGENT_MAX_CONCURRENCY: int = max(1, int(os.getenv("CRAWLER_AGENT_MAX_CONCURRENCY", 1)))
+    CRAWLER_AGENT_DRY_RUN: bool = os.getenv("CRAWLER_AGENT_DRY_RUN", "true").lower() == "true"
+    CRAWLER_AGENT_ALLOWED_SPIDERS_STR: str = os.getenv(
+        "CRAWLER_AGENT_ALLOWED_SPIDERS",
+        "boss_list_drission,boss_detail_drission",
+    )
+
+    @property
+    def CRAWLER_AGENT_ALLOWED_SPIDERS(self) -> List[str]:
+        return [
+            name.strip()
+            for name in self.CRAWLER_AGENT_ALLOWED_SPIDERS_STR.split(",")
+            if name.strip()
+        ]
+
     # 支付配置
     PAYMENT_NOTIFY_BASE_URL: str = os.getenv("PAYMENT_NOTIFY_BASE_URL", "http://localhost:8000/api/v1/payment/notify")
     

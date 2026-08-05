@@ -2,6 +2,8 @@ from fastapi import APIRouter
 
 from api.v2.endpoints import (
     career_controller,
+    crawler_agent_controller,
+    crawler_controller,
     market_controller,
     meta_controller,
     pricing_controller,
@@ -18,3 +20,13 @@ api_router.include_router(
     tags=["v2-career-analysis"],
 )
 api_router.include_router(pricing_controller.router, prefix="/ai", tags=["v2-ai"])
+api_router.include_router(
+    crawler_controller.router,
+    prefix="/admin/crawlers",
+    tags=["v2-crawler-admin"],
+)
+api_router.include_router(
+    crawler_agent_controller.router,
+    prefix="/crawler-agent",
+    tags=["v2-crawler-agent"],
+)
