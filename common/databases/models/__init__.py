@@ -36,6 +36,7 @@ from .career_profile import (
     CareerProfileSkill,
 )
 from .crawler_control import CrawlerEvent, CrawlerRun, CrawlerWorker
+from .position_type import PositionType
 
 __all__ = [
     'Base',
@@ -90,4 +91,5 @@ __all__ = [
     'CrawlerWorker',
     'CrawlerRun',
     'CrawlerEvent',
+    'PositionType',
 ]

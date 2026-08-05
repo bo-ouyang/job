@@ -140,6 +140,7 @@ class PostgresManager:
                 agent_message,
                 agent_run,
                 career_profile,
+                position_type,
             )
 
             async with self.engine.begin() as conn:
