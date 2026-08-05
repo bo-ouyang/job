@@ -52,4 +52,14 @@ describe("WalletView balance synchronization", () => {
     expect(wrapper.get(".balance-card .value").text()).toBe("42.50");
     wrapper.unmount();
   });
+
+  it("does not expose the manual test top-up action by default", async () => {
+    const wrapper = mount(WalletView, {
+      global: { directives: { loading: {} } },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("弹出测试");
+    wrapper.unmount();
+  });
 });

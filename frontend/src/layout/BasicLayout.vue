@@ -58,7 +58,7 @@ const connectWebSocket = () => {
   const token = localStorage.getItem("token");
   if (!token) return;
 
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
   const fullUrl = baseUrl.startsWith("/") ? `${window.location.origin}${baseUrl}` : baseUrl;
   const wsUrl = fullUrl.replace(/^http/, "ws") + `/ws/${token}`;
   ws = new WebSocket(wsUrl);

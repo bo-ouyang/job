@@ -11,7 +11,6 @@ const PENDING_ORDER_KEY = "wallet_pending_order_no";
 
 const loadingBalance = ref(false);
 const loadingTopup = ref(false);
-const loadingManualTopup = ref(false);
 const loadingTransactions = ref(false);
 const loadingOrders = ref(false);
 
@@ -256,25 +255,6 @@ const handleTopUp = async () => {
   }
 };
 
-const handleManualTopUp = async () => {
-  const amount = Number(topUpAmount.value);
-  if (!amount || amount <= 0) {
-    ElMessage.warning("Please input a valid amount");
-    return;
-  }
-
-  loadingManualTopup.value = true;
-  try {
-    await walletAPI.simulateTopup({ amount });
-    await Promise.all([fetchBalance(), fetchTransactions(1), fetchMyOrders(1)]);
-    ElMessage.success("Manual top-up completed");
-  } catch (error) {
-    ElMessage.error("Manual top-up failed");
-  } finally {
-    loadingManualTopup.value = false;
-  }
-};
-
 const closePaymentModal = () => {
   paymentModalOpen.value = false;
   stopPolling();
@@ -367,9 +347,6 @@ onUnmounted(() => {
       <div class="action-row">
         <button class="primary" :disabled="loadingTopup" @click="handleTopUp">
           {{ loadingTopup ? "创建订单" : "现在支付" }}
-        </button>
-        <button class="ghost" :disabled="loadingManualTopup" @click="handleManualTopUp">
-          {{ loadingManualTopup ? "加载中..." : "弹出测试" }}
         </button>
       </div>
     </section>

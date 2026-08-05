@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from crud import user as crud_user
 from crud import wallet as crud_wallet
-from dependencies import get_current_admin_user, get_current_user, get_db
+from dependencies import (
+    get_current_admin_user,
+    get_current_user,
+    get_db,
+    is_development_environment,
+    require_development_endpoint,
+)
 from schemas.transaction_schema import TransactionPage, TransactionSchema
 
 router = APIRouter()
@@ -33,7 +39,11 @@ async def get_balance(
     return {"balance": wallet.balance, "status": wallet.status}
 
 
-@router.post("/topup/simulate")
+@router.post(
+    "/topup/simulate",
+    dependencies=[Depends(require_development_endpoint)],
+    include_in_schema=is_development_environment(),
+)
 async def simulate_topup(
     params: TopUpRequest,
     db: AsyncSession = Depends(get_db),

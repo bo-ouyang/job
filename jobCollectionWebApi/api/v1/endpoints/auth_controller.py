@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, Request, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.logger import sys_logger as logger
 from config import settings
-from dependencies import get_db, get_client_info
+from dependencies import (
+    get_db,
+    get_client_info,
+    is_development_environment,
+    require_development_endpoint,
+)
 from crud import user as crud_user, verification_code as crud_verification_code
 from schemas.token_schema import (
     Token, WechatLoginRequest, PhoneLoginRequest, SendSMSRequest, 
@@ -97,7 +102,7 @@ async def send_sms(
     )
     
     # 在开发环境中返回验证码（便于测试）
-    if settings.DEBUG:
+    if is_development_environment():
         return {
             "message": "验证码发送成功",
             "debug_code": code  # 仅在开发环境返回
@@ -184,7 +189,11 @@ async def app_confirm(
 
 # --- 开发测试接口 ---
 
-@router.post("/qrcode/dev/scan")
+@router.post(
+    "/qrcode/dev/scan",
+    dependencies=[Depends(require_development_endpoint)],
+    include_in_schema=is_development_environment(),
+)
 async def simulate_scan(ticket: str = Query(..., min_length=1, max_length=1024, description="Simulate WeChat Scan")):
     """(开发测试) 模拟手机扫码"""
     success = await auth_service.simulate_qrcode_scan(ticket)
@@ -192,7 +201,11 @@ async def simulate_scan(ticket: str = Query(..., min_length=1, max_length=1024, 
         raise AppException(status_code=StatusCode.BAD_REQUEST, code=StatusCode.PARAMS_ERROR, message="Ticket无效或已过期")
     return {"message": "已模拟扫码"}
 
-@router.post("/qrcode/dev/confirm")
+@router.post(
+    "/qrcode/dev/confirm",
+    dependencies=[Depends(require_development_endpoint)],
+    include_in_schema=is_development_environment(),
+)
 async def simulate_confirm(
     ticket: str = Query(..., min_length=1, max_length=1024, description="Simulate WeChat Login Action"),
     db: AsyncSession = Depends(get_db)

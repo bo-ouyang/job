@@ -13,6 +13,7 @@ import { connectAgentEventStream } from "@/utils/sseClient";
 
 const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration));
 const DATA_SOURCE = import.meta.env.VITE_AGENT_DATA_SOURCE || "hybrid";
+const FRONTEND_AGENT_ENABLED = import.meta.env.VITE_AGENT_ENABLED !== "false";
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
@@ -58,7 +59,7 @@ export const useAgentStore = defineStore(
     const error = ref(null);
     const structuredResult = ref(null);
     const featureAvailable = ref(
-      DATA_SOURCE === "mock" && import.meta.env.VITE_AGENT_ENABLED === "true",
+      DATA_SOURCE === "mock" && FRONTEND_AGENT_ENABLED,
     );
     const capabilitiesLoaded = ref(DATA_SOURCE === "mock");
 
@@ -110,7 +111,7 @@ export const useAgentStore = defineStore(
     }
 
     async function loadCapabilities() {
-      if (!isApiMode.value || import.meta.env.VITE_AGENT_ENABLED !== "true") {
+      if (!isApiMode.value || !FRONTEND_AGENT_ENABLED) {
         featureAvailable.value = false;
         capabilitiesLoaded.value = true;
         return false;

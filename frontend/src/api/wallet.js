@@ -10,9 +10,6 @@ export const walletAPI = {
   getTransactionsPage(params = {}) {
     return request.get("/wallet/transactions/page", { params });
   },
-  simulateTopup(data) {
-    return request.post("/wallet/topup/simulate", data);
-  },
   createPayment(data) {
     return request.post("/payment/create", data);
   },

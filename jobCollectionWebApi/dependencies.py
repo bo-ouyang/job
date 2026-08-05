@@ -14,6 +14,18 @@ from common.databases.RedisManager import get_redis, RedisManager
 # 安全方案
 security = HTTPBearer()
 
+
+def is_development_environment() -> bool:
+    """Return true only when debug helpers are safe to expose."""
+    environment = str(settings.ENVIRONMENT or "").strip().lower()
+    return settings.DEBUG and environment not in {"prod", "production"}
+
+
+def require_development_endpoint() -> None:
+    """Hide destructive development helpers outside an explicit debug environment."""
+    if not is_development_environment():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
 # 数据库依赖
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """获取数据库会话依赖"""
