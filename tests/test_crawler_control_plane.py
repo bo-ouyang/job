@@ -1,3 +1,5 @@
+import importlib
+import inspect
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -94,6 +96,31 @@ def test_boss_crawl_task_exposes_generic_control_fields():
         "desired_status",
         "latest_run_id",
     } <= _column_names(BossCrawlTask)
+
+
+def test_crawler_migration_repairs_legacy_task_id_before_creating_run_fk(monkeypatch):
+    migration_path = (
+        ROOT / "alembic" / "versions" / "20260805_00_add_crawler_control_plane.py"
+    )
+    spec = importlib.util.spec_from_file_location("crawler_control_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+    statements = []
+    monkeypatch.setattr(migration.op, "execute", statements.append)
+
+    migration._ensure_boss_crawl_task_id_key()
+
+    ddl = str(statements[0])
+    assert "pk_boss_crawl_task_control_plane" in ddl
+    assert "PRIMARY KEY (id)" in ddl
+    assert "GROUP BY id HAVING count(*) > 1" in ddl
+
+    upgrade_source = inspect.getsource(migration.upgrade)
+    assert upgrade_source.index("_ensure_boss_crawl_task_id_key()") < upgrade_source.index(
+        '"crawler_runs"'
+    )
+
 
 
 @pytest.mark.parametrize(

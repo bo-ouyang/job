@@ -18,6 +18,49 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _ensure_boss_crawl_task_id_key() -> None:
+    """Repair legacy installations whose task table was created without a key."""
+    op.execute(
+        sa.text(
+            """
+            DO $$
+            DECLARE
+                id_attribute smallint;
+            BEGIN
+                SELECT attnum
+                  INTO id_attribute
+                  FROM pg_attribute
+                 WHERE attrelid = 'boss_crawl_task'::regclass
+                   AND attname = 'id'
+                   AND NOT attisdropped;
+
+                IF NOT EXISTS (
+                    SELECT 1
+                      FROM pg_constraint
+                     WHERE conrelid = 'boss_crawl_task'::regclass
+                       AND contype IN ('p', 'u')
+                       AND conkey = ARRAY[id_attribute]::smallint[]
+                ) THEN
+                    IF EXISTS (SELECT 1 FROM boss_crawl_task WHERE id IS NULL)
+                       OR EXISTS (
+                            SELECT 1
+                              FROM boss_crawl_task
+                             GROUP BY id HAVING count(*) > 1
+                       ) THEN
+                        RAISE EXCEPTION
+                            'boss_crawl_task.id must be non-null and unique before crawler control migration';
+                    END IF;
+
+                    ALTER TABLE boss_crawl_task
+                        ADD CONSTRAINT pk_boss_crawl_task_control_plane PRIMARY KEY (id);
+                END IF;
+            END
+            $$;
+            """
+        )
+    )
+
+
 def upgrade() -> None:
     op.create_table(
         "crawler_workers",
@@ -53,6 +96,8 @@ def upgrade() -> None:
     op.add_column("boss_crawl_task", sa.Column("latest_run_id", sa.BigInteger(), nullable=True))
     op.create_index(op.f("ix_boss_crawl_task_desired_status"), "boss_crawl_task", ["desired_status"])
     op.create_index(op.f("ix_boss_crawl_task_latest_run_id"), "boss_crawl_task", ["latest_run_id"])
+
+    _ensure_boss_crawl_task_id_key()
 
     op.create_table(
         "crawler_runs",
@@ -147,6 +192,14 @@ def downgrade() -> None:
     op.drop_column("boss_crawl_task", "desired_status")
     op.drop_column("boss_crawl_task", "spider_args")
     op.drop_column("boss_crawl_task", "spider_name")
+    op.execute(
+        sa.text(
+            """
+            ALTER TABLE boss_crawl_task
+                DROP CONSTRAINT IF EXISTS pk_boss_crawl_task_control_plane;
+            """
+        )
+    )
     op.drop_index(op.f("ix_crawler_workers_status"), table_name="crawler_workers")
     op.drop_index("idx_crawler_worker_status_heartbeat", table_name="crawler_workers")
     op.drop_table("crawler_workers")
