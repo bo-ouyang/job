@@ -472,10 +472,30 @@ async def test_career_overview_adapts_agent_dictionary_variants(monkeypatch):
     )
 
     assert overview.directions[0].title == "数据分析师"
-    assert overview.directions[0].match is None
+    assert overview.directions[0].match is not None
     assert overview.directions[0].reason == "专业与技能基础匹配"
+    assert overview.directions[0].tags
+    assert len(overview.directions) >= 3
     assert overview.skills[0].name == "SQL"
     assert overview.skills[0].advice == "需要补充复杂查询实践"
+    assert overview.skills[0].current is not None
+    assert overview.skills[0].target is not None
+    assert len(overview.skills) >= 6
+    assert len(overview.cities) >= 3
+    assert overview.cities[0].city == "杭州"
+    assert all(
+        city.jobs and city.salary and city.growth and city.competition
+        for city in overview.cities
+    )
+    assert len(overview.plan) >= 3
+    assert overview.plan[0].title == "完成 SQL 项目"
+    assert all(item.items for item in overview.plan)
+    assert {
+        "career.agent_report",
+        "career.city_comparison",
+        "career.skill_gap",
+        "career.action_plan",
+    } <= set(overview.data_status.synthetic_dimensions)
 
 
 @pytest.mark.asyncio
@@ -513,3 +533,35 @@ async def test_career_overview_fills_missing_report_sections_with_test_data(monk
     assert overview.data_status.source == "mixed"
     assert "career.agent_report" in overview.data_status.missing_dimensions
     assert "career.agent_report" in overview.data_status.synthetic_dimensions
+
+
+@pytest.mark.asyncio
+async def test_career_overview_prioritizes_selected_city_and_direction(monkeypatch):
+    service = CareerService()
+
+    async def no_latest_answer(db, user_id):
+        return None
+
+    async def profile_view(db, user):
+        return SimpleNamespace(
+            name="筛选用户",
+            completion=70,
+            school="测试大学",
+            major="软件工程",
+            graduation_year="2027",
+            education="本科",
+        )
+
+    monkeypatch.setattr(service, "_latest_answer", no_latest_answer)
+    monkeypatch.setattr("services.v2.career_service.profile_service.get_profile", profile_view)
+
+    overview = await service.get_overview(
+        object(),
+        SimpleNamespace(id=100),
+        CareerOverviewQuery(city="北京", direction="商业分析师"),
+    )
+
+    assert overview.cities[0].city == "北京"
+    assert overview.directions[0].title == "商业分析师"
+    assert all(direction.match is not None for direction in overview.directions)
+    assert all(direction.reason and direction.tags for direction in overview.directions)

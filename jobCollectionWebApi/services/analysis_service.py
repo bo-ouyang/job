@@ -313,8 +313,10 @@ class AnalysisService:
         keyword: str = None,
         location: str = None,
         experience: str = None,
+        education: str = None,
         industry: int = None,
         industry_2: int = None,
+        published_after=None,
     ) -> Dict[str, Any]:
         """专门用于带维度筛选的 ES 岗位统计分析查询"""
         try:
@@ -339,6 +341,14 @@ class AnalysisService:
                 
             if experience and experience not in ("经验不限", "不限"):
                 filter_clauses.append({"term": {"experience": experience}})
+
+            if education:
+                filter_clauses.append({"prefix": {"education": education}})
+
+            if published_after:
+                filter_clauses.append(
+                    {"range": {"publish_date": {"gte": published_after.isoformat()}}}
+                )
             
             # 行业筛选：如果传了 industry_2，则进行精准筛选 (term)
             if industry_2:

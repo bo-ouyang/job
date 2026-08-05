@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional, Tuple, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func, and_, desc, String
@@ -259,7 +260,8 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
         industry: Optional[int] = None,
         industry_2: Optional[int] = None,
         salary_min: Optional[float] = None,
-        salary_max: Optional[float] = None
+        salary_max: Optional[float] = None,
+        published_after: Optional[datetime] = None,
     ) -> dict:
         """数据库备用统计逻辑 (支持筛选)"""
         
@@ -287,6 +289,9 @@ class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
             
         if salary_max is not None:
             conditions.append(Job.salary_min <= salary_max)
+
+        if published_after is not None:
+            conditions.append(Job.publish_date >= published_after)
         
         # 行业筛选逻辑
         # if industry_2:

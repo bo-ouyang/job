@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -93,6 +94,77 @@ class CareerService:
             )
         return result
 
+    @staticmethod
+    def _plan(items) -> list[dict]:
+        result = []
+        for index, action in enumerate(items if isinstance(items, list) else []):
+            if not isinstance(action, dict):
+                continue
+            title = action.get("title") or action.get("action") or "下一步行动"
+            values = action.get("items") if isinstance(action.get("items"), list) else []
+            if not values and action.get("description"):
+                values = [str(action["description"])]
+            result.append(
+                {
+                    "period": action.get("period") or f"阶段 {index + 1}",
+                    "title": str(title),
+                    "items": [str(item) for item in values if item],
+                }
+            )
+        return result
+
+    @staticmethod
+    def _prioritize(items: list[dict], key: str, selected: Optional[str]) -> list[dict]:
+        if not selected:
+            return list(items)
+        return sorted(items, key=lambda item: 0 if item.get(key) == selected else 1)
+
+    @staticmethod
+    def _is_missing(value) -> bool:
+        return value is None or value == "" or value == []
+
+    @classmethod
+    def _backfill_rows(
+        cls,
+        rows: list[dict],
+        fallback_rows: list[dict],
+        *,
+        identity: str,
+        required: tuple[str, ...],
+        minimum: int,
+    ) -> tuple[list[dict], bool]:
+        """Fill incomplete Agent rows without replacing fields it actually produced."""
+
+        fallback = [deepcopy(item) for item in fallback_rows]
+        fallback_by_name = {item.get(identity): item for item in fallback}
+        result = []
+        changed = False
+        used = set()
+
+        for index, original in enumerate(rows):
+            row = deepcopy(original)
+            name = row.get(identity)
+            template = fallback_by_name.get(name)
+            if template is None and fallback:
+                template = fallback[min(index, len(fallback) - 1)]
+            for field in required:
+                if cls._is_missing(row.get(field)) and template is not None:
+                    row[field] = deepcopy(template.get(field))
+                    changed = True
+            result.append(row)
+            used.add(name)
+
+        for template in fallback:
+            if len(result) >= minimum:
+                break
+            if template.get(identity) in used:
+                continue
+            result.append(deepcopy(template))
+            used.add(template.get(identity))
+            changed = True
+
+        return result, changed
+
     async def _latest_answer(self, db: AsyncSession, user_id: int) -> Optional[AgentMessage]:
         result = await db.execute(
             select(AgentMessage)
@@ -122,15 +194,48 @@ class CareerService:
         skill_gaps = self._skill_gaps(report.get("skill_gaps"))
         cities = self._cities(report.get("cities"))
         next_actions = report.get("next_actions") if isinstance(report.get("next_actions"), list) else []
-        plan = []
-        for index, action in enumerate(next_actions):
-            if not isinstance(action, dict):
-                continue
-            title = action.get("title") or action.get("action") or "下一步行动"
-            items = action.get("items") if isinstance(action.get("items"), list) else []
-            if not items and action.get("description"):
-                items = [str(action["description"])]
-            plan.append({"period": action.get("period") or f"阶段 {index + 1}", "title": title, "items": items})
+        plan = self._plan(next_actions)
+
+        fallback_directions = self._prioritize(
+            self._directions(CAREER_TEST_DATA["directions"]),
+            "title",
+            query.direction,
+        )
+        fallback_cities = self._prioritize(
+            self._cities(CAREER_TEST_DATA["cities"]),
+            "city",
+            query.city,
+        )
+        directions, directions_changed = self._backfill_rows(
+            directions,
+            fallback_directions,
+            identity="title",
+            required=("match", "reason", "tags"),
+            minimum=3,
+        )
+        cities, cities_changed = self._backfill_rows(
+            cities,
+            fallback_cities,
+            identity="city",
+            required=("jobs", "salary", "growth", "competition"),
+            minimum=3,
+        )
+        skill_gaps, skills_changed = self._backfill_rows(
+            skill_gaps,
+            self._skill_gaps(CAREER_TEST_DATA["skills"]),
+            identity="name",
+            required=("current", "target"),
+            minimum=6,
+        )
+        plan, plan_changed = self._backfill_rows(
+            plan,
+            self._plan(CAREER_TEST_DATA["plan"]),
+            identity="title",
+            required=("period", "items"),
+            minimum=3,
+        )
+        directions = self._prioritize(directions, "title", query.direction)
+        cities = self._prioritize(cities, "city", query.city)
 
         sample_size = sum(
             int(self._number(row.get("sample_size")) or 0)
@@ -142,20 +247,17 @@ class CareerService:
         synthetic = []
         if not has_report:
             missing.append("career.agent_report")
-        if not directions:
-            directions = self._directions(CAREER_TEST_DATA["directions"])
+        if directions_changed:
+            missing.append("career.agent_report")
             synthetic.append("career.agent_report")
-        if not cities:
+        if cities_changed:
             missing.append("career.city_comparison")
-            cities = self._cities(CAREER_TEST_DATA["cities"])
             synthetic.append("career.city_comparison")
-        if not skill_gaps:
+        if skills_changed:
             missing.append("career.skill_gap")
-            skill_gaps = self._skill_gaps(CAREER_TEST_DATA["skills"])
             synthetic.append("career.skill_gap")
-        if not plan:
+        if plan_changed:
             missing.append("career.action_plan")
-            plan = CAREER_TEST_DATA["plan"]
             synthetic.append("career.action_plan")
 
         missing = list(dict.fromkeys(missing))

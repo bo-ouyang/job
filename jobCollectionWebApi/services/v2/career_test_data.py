@@ -25,6 +25,7 @@ CAREER_TEST_DATA = {
         {"city": "杭州", "jobs": "12,860", "salary": "18.6K", "growth": "+19.4%", "competition": "中"},
         {"city": "上海", "jobs": "18,940", "salary": "21.2K", "growth": "+12.8%", "competition": "高"},
         {"city": "深圳", "jobs": "13,520", "salary": "20.8K", "growth": "+16.8%", "competition": "中高"},
+        {"city": "北京", "jobs": "17,680", "salary": "21.6K", "growth": "+11.5%", "competition": "高"},
     ],
     "skills": [
         {"name": "产品思维", "current": 78, "target": 90},

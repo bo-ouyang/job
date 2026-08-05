@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from config import settings
@@ -19,6 +19,7 @@ from schemas.v2.market import (
 )
 from services.analysis_service import analysis_service
 from services.v2.market_test_data import MARKET_TEST_DATA
+from agent.tools.resolvers import ToolResolutionError, resolve_city, resolve_industry
 
 
 StatsLoader = Callable[[MarketDashboardQuery], Awaitable[Tuple[Dict, str]]]
@@ -53,27 +54,59 @@ class MarketDashboardService:
         except (TypeError, ValueError):
             return None
 
-    async def _load_stats(self, query: MarketDashboardQuery) -> Tuple[Dict, str]:
-        city_code = self._numeric_code(query.city)
-        industry_code = self._numeric_code(query.industry)
-        if settings.ES_ENABLED:
-            try:
-                data = await analysis_service.get_faceted_job_stats(
-                    location=city_code,
-                    experience=query.experience,
-                    industry=industry_code,
-                )
-                return data, "elasticsearch"
-            except Exception:
-                pass
+    def _published_after(self, range_value: str) -> Optional[datetime]:
+        days = {"30d": 30, "6m": 183, "12m": 365}.get(range_value)
+        if days is None:
+            return None
+        cutoff = self._now() - timedelta(days=days)
+        # Job.publish_date is stored as a timezone-naive PostgreSQL timestamp.
+        return cutoff.replace(tzinfo=None)
 
+    async def _resolve_city_code(self, session, value: Optional[str]) -> Optional[int]:
+        numeric = self._numeric_code(value)
+        if numeric is not None or not value:
+            return numeric
+        try:
+            return (await resolve_city(session, value)).code
+        except ToolResolutionError:
+            # An unknown filter must return no matches instead of silently
+            # falling back to nationwide data.
+            return -1
+
+    async def _resolve_industry_code(self, session, value: Optional[str]) -> Optional[int]:
+        numeric = self._numeric_code(value)
+        if numeric is not None or not value:
+            return numeric
+        try:
+            return (await resolve_industry(session, value)).code
+        except ToolResolutionError:
+            return -1
+
+    async def _load_stats(self, query: MarketDashboardQuery) -> Tuple[Dict, str]:
         async with db_manager.async_session() as session:
+            city_code = await self._resolve_city_code(session, query.city)
+            industry_code = await self._resolve_industry_code(session, query.industry)
+            published_after = self._published_after(query.range)
+            if settings.ES_ENABLED:
+                try:
+                    data = await analysis_service.get_faceted_job_stats(
+                        location=city_code,
+                        experience=query.experience,
+                        education=query.education,
+                        industry=industry_code,
+                        published_after=published_after,
+                    )
+                    return data, "elasticsearch"
+                except Exception:
+                    pass
+
             data = await crud_job.get_statistics_from_db(
                 session,
                 location=city_code,
                 experience=query.experience,
                 education=query.education,
                 industry=industry_code,
+                published_after=published_after,
             )
         return data, "postgresql"
 

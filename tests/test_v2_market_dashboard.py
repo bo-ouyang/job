@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,8 @@ sys.path.insert(0, str(ROOT / "jobCollectionWebApi"))
 
 from schemas.v2.market import MarketDashboardQuery
 from services.v2.market_dashboard_service import MarketDashboardService
+
+dashboard_module = importlib.import_module("services.v2.market_dashboard_service")
 
 
 @pytest.mark.asyncio
@@ -79,3 +83,47 @@ def test_dashboard_serializes_frontend_camel_case_contract():
 
     assert payload["range"] == "12m"
     assert payload["education"] == "本科"
+    assert MarketDashboardService._numeric_code("101210100") == 101210100
+
+
+@pytest.mark.asyncio
+async def test_dashboard_resolves_named_filters_and_applies_date_range(monkeypatch):
+    captured = {}
+
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    async def resolve_city(_db, value):
+        assert value == "杭州"
+        return SimpleNamespace(code=101210100)
+
+    async def resolve_industry(_db, value):
+        assert value == "互联网/AI"
+        return SimpleNamespace(code=100000)
+
+    async def load_stats(_db, **kwargs):
+        captured.update(kwargs)
+        return {"total_jobs": 7, "salary": [], "skills": [], "industries": []}
+
+    monkeypatch.setattr(dashboard_module.settings, "ES_ENABLED", False)
+    monkeypatch.setattr(dashboard_module.db_manager, "async_session", lambda: SessionContext())
+    monkeypatch.setattr(dashboard_module, "resolve_city", resolve_city)
+    monkeypatch.setattr(dashboard_module, "resolve_industry", resolve_industry)
+    monkeypatch.setattr(dashboard_module.crud_job, "get_statistics_from_db", load_stats)
+
+    service = MarketDashboardService(
+        now=lambda: datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc),
+    )
+    raw, source = await service._load_stats(
+        MarketDashboardQuery(range="30d", city="杭州", industry="互联网/AI")
+    )
+
+    assert raw["total_jobs"] == 7
+    assert source == "postgresql"
+    assert captured["location"] == 101210100
+    assert captured["industry"] == 100000
+    assert captured["published_after"] == datetime(2026, 7, 6, 12, 0)
