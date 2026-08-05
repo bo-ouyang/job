@@ -120,6 +120,26 @@ class CareerService:
         return sorted(items, key=lambda item: 0 if item.get(key) == selected else 1)
 
     @staticmethod
+    def _ensure_selected(
+        items: list[dict],
+        fallback_items: list[dict],
+        key: str,
+        selected: Optional[str],
+    ) -> tuple[list[dict], bool]:
+        """Include a supported selected option even when an older report omitted it."""
+
+        result = list(items)
+        if not selected or any(item.get(key) == selected for item in result):
+            return result, False
+        selected_fallback = next(
+            (item for item in fallback_items if item.get(key) == selected),
+            None,
+        )
+        if selected_fallback is None:
+            return result, False
+        return [deepcopy(selected_fallback), *result], True
+
+    @staticmethod
     def _is_missing(value) -> bool:
         return value is None or value == "" or value == []
 
@@ -206,6 +226,18 @@ class CareerService:
             "city",
             query.city,
         )
+        directions, selected_direction_added = self._ensure_selected(
+            directions,
+            fallback_directions,
+            "title",
+            query.direction,
+        )
+        cities, selected_city_added = self._ensure_selected(
+            cities,
+            fallback_cities,
+            "city",
+            query.city,
+        )
         directions, directions_changed = self._backfill_rows(
             directions,
             fallback_directions,
@@ -234,6 +266,8 @@ class CareerService:
             required=("period", "items"),
             minimum=3,
         )
+        directions_changed = directions_changed or selected_direction_added
+        cities_changed = cities_changed or selected_city_added
         directions = self._prioritize(directions, "title", query.direction)
         cities = self._prioritize(cities, "city", query.city)
 

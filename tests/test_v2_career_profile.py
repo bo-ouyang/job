@@ -539,8 +539,26 @@ async def test_career_overview_fills_missing_report_sections_with_test_data(monk
 async def test_career_overview_prioritizes_selected_city_and_direction(monkeypatch):
     service = CareerService()
 
-    async def no_latest_answer(db, user_id):
-        return None
+    message = SimpleNamespace(
+        metadata_json={
+            "result": {
+                "directions": [
+                    {"title": "Java 后端", "match": 88, "reason": "市场需求稳定", "tags": ["真实报告"]},
+                    {"title": "Python 后端", "match": 86, "reason": "技能基础匹配", "tags": ["真实报告"]},
+                    {"title": "全栈开发", "match": 80, "reason": "能力可迁移", "tags": ["真实报告"]},
+                ],
+                "cities": [
+                    {"city": "杭州", "jobs": "100", "salary": "18K", "growth": "+10%", "competition": "中"},
+                    {"city": "上海", "jobs": "120", "salary": "20K", "growth": "+8%", "competition": "高"},
+                    {"city": "深圳", "jobs": "110", "salary": "19K", "growth": "+9%", "competition": "中高"},
+                ],
+            }
+        },
+        created_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+    )
+
+    async def latest_answer(db, user_id):
+        return message
 
     async def profile_view(db, user):
         return SimpleNamespace(
@@ -552,7 +570,7 @@ async def test_career_overview_prioritizes_selected_city_and_direction(monkeypat
             education="本科",
         )
 
-    monkeypatch.setattr(service, "_latest_answer", no_latest_answer)
+    monkeypatch.setattr(service, "_latest_answer", latest_answer)
     monkeypatch.setattr("services.v2.career_service.profile_service.get_profile", profile_view)
 
     overview = await service.get_overview(
