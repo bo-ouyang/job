@@ -31,7 +31,6 @@ PyJWT>=2.8.0
 cryptography>=41.0.0
 psycopg2-binary>=2.9.9
 asyncpg>=0.28.0
-aiomysql>=0.2.0
 uvloop>=0.19.0
 elasticsearch==8.16
 
@@ -51,7 +50,6 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]==1.7.4
 
 
-mitmproxy>=10.0.0
 
 
 aiofiles>=23.0.0

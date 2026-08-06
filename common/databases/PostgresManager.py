@@ -11,7 +11,7 @@ class PostgresManager:
     def __init__(self):
         self.async_session = None
         self._initialized = False
-        self._init_lock = asyncio.Lock()
+        self._init_lock = None
 
         self.engine = create_async_engine(
             settings.DATABASE_URL,
@@ -46,6 +46,8 @@ class PostgresManager:
         if self._initialized:
             return
 
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
         async with self._init_lock:
             if self._initialized:
                 return
@@ -67,6 +69,7 @@ class PostgresManager:
                 logger.info("PostgreSQL connection initialized successfully")
 
             except Exception as e:
+                self._init_lock = None
                 logger.error(f"Failed to initialize PostgreSQL connection: {e}")
                 raise
 
@@ -82,6 +85,8 @@ class PostgresManager:
         if self.engine:
             await self.engine.dispose()
             self._initialized = False
+            self.async_session = None
+            self._init_lock = None
             logger.info("PostgreSQL connection closed")
 
     async def get_db(self):

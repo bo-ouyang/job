@@ -1,0 +1,12 @@
+[
+  {
+    "name": "account-1",
+    "cookies": null,
+    "user_data_dir": null,
+    "mobile": null,
+    "country_code": "+86",
+    "login_mode": "manual",
+    "sms_code_source": "file",
+    "sms_code_file": null
+  }
+]

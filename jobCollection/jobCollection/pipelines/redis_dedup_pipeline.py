@@ -1,6 +1,7 @@
 import logging
+import hashlib
+import os
 import redis
-import mmh3
 from scrapy.exceptions import DropItem
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,16 @@ class RedisBloomFilter:
         if not value:
             return []
         """Generate k hash points."""
-        return [mmh3.hash(value, seed, signed=False) % self.bit_size for seed in self.seeds]
+        encoded = str(value).encode("utf-8")
+        points = []
+        for seed in self.seeds:
+            digest = hashlib.blake2b(
+                encoded,
+                digest_size=8,
+                person=str(seed).encode("ascii")[:16],
+            ).digest()
+            points.append(int.from_bytes(digest, "big") % self.bit_size)
+        return points
 
     def is_contains(self, value):
         points = self.get_hash_points(value)
@@ -52,6 +62,8 @@ class RedisDeduplicationPipeline:
         self.server = None
         self.bf = None
         self.bf_key = "boss:bloomfilter"
+        self.bf_ttl_seconds = 172800
+        self._ttl_applied = False
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -78,16 +90,16 @@ class RedisDeduplicationPipeline:
             # Test Connection
             self.server.ping()
             
-            # Dynamic Key: boss:bloomfilter:{spider}:{date}
-            # Resets daily, and separates spiders.
+            # Stable daily window, separated by spider and automatically expired.
             import datetime
-            # Use timestamp to ensure unique key per run
-            run_id = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+            run_id = datetime.datetime.now().strftime('%Y%m%d')
             self.bf_key = f"boss:bloomfilter:{spider.name}:{run_id}"
 
             # Initialize Bloom Filter with config
             bit_size = 1 << self.bit_size_exp
             self.bf = RedisBloomFilter(self.server, self.bf_key, bit_size, self.seeds)
+            self.bf_ttl_seconds = int(os.getenv("BOSS_BLOOM_TTL_SECONDS", "172800"))
+            self._ttl_applied = False
             
             logger.info(f"Redis Bloom Filter Connected. Key: {self.bf_key} Size: 2^{self.bit_size_exp} ({bit_size/8/1024/1024:.2f} MB)")
         except Exception as e:
@@ -110,12 +122,14 @@ class RedisDeduplicationPipeline:
         # Check Bloom Filter
         try:
             if self.bf.is_contains(job_id):
-                # Duplicate!
                 spider.logger.debug(f"Duplicate job found in Bloom Filter: {job_id}")
-                #raise DropItem(f"Duplicate job found in Bloom Filter: {job_id}")
+                raise DropItem(f"Duplicate job found in Bloom Filter: {job_id}")
             else:
                 # Add to Bloom Filter
                 self.bf.insert(job_id)
+                if not self._ttl_applied:
+                    self.server.expire(self.bf_key, self.bf_ttl_seconds)
+                    self._ttl_applied = True
                 return item
         except redis.RedisError as e:
              logger.error(f"Redis error during Bloom Filter check: {e}")

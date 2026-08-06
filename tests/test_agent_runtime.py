@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -307,6 +308,25 @@ def test_runtime_retries_one_transient_answer_model_timeout_within_run_budget():
     assert client.answer_attempts == 2
 
 
+def test_answer_model_timeout_is_not_retried_when_remaining_budget_is_too_small():
+    # 剩余预算装不下下一次完整 LLM 调用时，重试注定失败，应立即放弃而非烧掉尾款预算。
+    client = TimeoutOnceAnswerClient(analyze_plan(), answer_result())
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=client,
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(llm_timeout_seconds=90),
+        publisher=FakePublisher(),
+        repository=FakeRepository(),
+    )
+    runtime.deadline = time.monotonic() + 1
+
+    with pytest.raises(AgentDeadlineExceededError):
+        asyncio.run(runtime._call_structured("system", "user", AgentAnswer))
+
+    assert client.answer_attempts == 1
+
+
 def test_market_question_does_not_inherit_unmentioned_profile_filters():
     repository = FakeRepository()
     repository.messages = [
@@ -539,5 +559,5 @@ def test_production_llm_client_rejects_mock_provider(monkeypatch):
 def test_celery_agent_task_allows_the_extended_model_runtime_budget():
     from tasks.agent_tasks import execute_agent_run
 
-    assert execute_agent_run.soft_time_limit >= 135
-    assert execute_agent_run.time_limit >= 150
+    assert execute_agent_run.soft_time_limit >= 270
+    assert execute_agent_run.time_limit >= 300

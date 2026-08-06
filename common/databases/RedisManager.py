@@ -3,11 +3,29 @@ import json
 from typing import Optional, Any
 from jobCollectionWebApi.config import settings
 
+
+class _LazyRedisClient:
+    """Resolve redis-py's loop-bound client on first operation, not import."""
+
+    def __init__(self, manager: "RedisManager"):
+        self._manager = manager
+
+    def __getattr__(self, name: str):
+        return getattr(self._manager._get_client(), name)
+
+
 class RedisManager:
     """Redis 管理器 (Async)"""
     
     def __init__(self):
-        # 使用 async connection pool
+        # redis-py creates an asyncio.Lock, so construction must be lazy.
+        self.pool = None
+        self._redis_client = None
+        self.redis_client = _LazyRedisClient(self)
+
+    def _get_client(self):
+        if self._redis_client is not None:
+            return self._redis_client
         self.pool = redis.ConnectionPool(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
@@ -19,7 +37,8 @@ class RedisManager:
             retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
             decode_responses=True
         )
-        self.redis_client = redis.Redis(connection_pool=self.pool)
+        self._redis_client = redis.Redis(connection_pool=self.pool)
+        return self._redis_client
     
     def make_key(self, key: str) -> str:
         """生成带前缀的键"""
@@ -135,12 +154,18 @@ class RedisManager:
             return False
 
     async def close(self) -> None:
-        close_method = getattr(self.redis_client, "aclose", None) or getattr(self.redis_client, "close", None)
-        if close_method:
-            result = close_method()
-            if hasattr(result, "__await__"):
-                await result
-        await self.pool.disconnect()
+        client = self._redis_client
+        pool = self.pool
+        if client is not None:
+            close_method = getattr(client, "aclose", None) or getattr(client, "close", None)
+            if close_method:
+                result = close_method()
+                if hasattr(result, "__await__"):
+                    await result
+        if pool is not None:
+            await pool.disconnect()
+        self._redis_client = None
+        self.pool = None
 
 # 创建全局 Redis 管理器实例
 redis_manager = RedisManager()

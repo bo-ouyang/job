@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import random
-import sys
 import time
 from datetime import datetime
 from http.cookies import SimpleCookie
@@ -16,21 +15,27 @@ from sqlalchemy import select, update
 
 from common.databases.PostgresManager import db_manager
 from common.databases.models.boss_crawl_task import BossCrawlTask
-from jobCollection.items.boss_job_item import BossJobItem
+from jobCollection.boss.parsers import (
+    build_boss_job_item,
+    extract_jobs_and_has_more,
+    is_job_list_payload,
+)
+from jobCollection.boss.proxy import (
+    cleanup_proxy_auth_extension,
+    create_proxy_auth_extension,
+    proxy_manager,
+)
 
 from DrissionPage import ChromiumPage, ChromiumOptions
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 simple_script_dir = os.path.join(os.path.dirname(current_dir), "simple_script")
-if simple_script_dir not in sys.path:
-    sys.path.append(simple_script_dir)
-from proxy_manager import proxy_manager
 from .boss_sms_login_handler import BossSmsLoginHandler
 
 
 class BossListDrissionSpider(scrapy.Spider):
     """
-    使用 DrissionPage 直接监听/抓取列表数据，不再依赖 mitmproxy + Redis 桥接。
+    使用 DrissionPage 直接监听 BOSS 列表接口并抓取数据。
 
     启动流程：
       1. 打开浏览器
@@ -44,6 +49,7 @@ class BossListDrissionSpider(scrapy.Spider):
     custom_settings = {
         "DOWNLOAD_TIMEOUT": 1800,
         "CONCURRENT_REQUESTS": 1,
+        "CONCURRENT_ITEMS": 1,
         "ITEM_PIPELINES": {
             "jobCollection.pipelines.redis_dedup_pipeline.RedisDeduplicationPipeline": 200,
             "jobCollection.pipelines.boss_pipeline.BossJobPipeline": 300,
@@ -76,8 +82,13 @@ class BossListDrissionSpider(scrapy.Spider):
         self.accounts_file = accounts_file
 
         self.page: Optional[ChromiumPage] = None
+        self.proxy_extension_path: Optional[str] = None
+        self.pipeline_failed = False
         self.is_checking = False
-        self.item_queue: asyncio.Queue = asyncio.Queue()
+        # An asyncio queue belongs to the loop that first uses it.  Spider
+        # construction also happens in synchronous discovery/admin contexts,
+        # so defer allocation until parse_loop runs on Scrapy's event loop.
+        self._item_queue: Optional[asyncio.Queue] = None
 
         # ── 代理配置 ──────────────────────────────────────────────────────
         self.current_proxy: Optional[str] = None
@@ -108,6 +119,7 @@ class BossListDrissionSpider(scrapy.Spider):
         self.current_task_url = ""
         self.current_task_major_name = ""  # 来自 BossStuCrawlUrl.major_name
         self.current_task_retry = 0
+        self._pending_completion = None
 
         # ── 抓取行为参数（可通过环境变量覆盖）────────────────────────────
         # 每页最大重试次数
@@ -143,14 +155,32 @@ class BossListDrissionSpider(scrapy.Spider):
             f"代理轮换: {self.proxy_rotate_seconds}s"
         )
 
+    @property
+    def item_queue(self) -> asyncio.Queue:
+        if self._item_queue is None:
+            self._item_queue = asyncio.Queue()
+        return self._item_queue
+
     # ------------------------------------------------------------------ #
     #  Scrapy 入口
     # ------------------------------------------------------------------ #
 
+    def _bootstrap_request(self):
+        return scrapy.Request(
+            "data:,bootstrap", callback=self._bootstrap, dont_filter=True
+        )
+
+    def start_requests(self):
+        yield self._bootstrap_request()
+
     async def start(self):
+        yield self._bootstrap_request()
+
+    async def _bootstrap(self, response):
         await db_manager.initialize()
-        await self._rebuild_browser()   # 打开浏览器 + 登录验证
-        yield scrapy.Request("data:,started", callback=self.parse_loop, dont_filter=True)
+        if not await self._rebuild_browser():
+            raise CloseSpider(reason="BOSS 登录失败")
+        yield scrapy.Request("data:,loop", callback=self.parse_loop, dont_filter=True)
 
     async def parse_loop(self, response):
         while not self.item_queue.empty():
@@ -168,13 +198,19 @@ class BossListDrissionSpider(scrapy.Spider):
             finally:
                 self.is_checking = False
 
+        while not self.item_queue.empty():
+            item = await self.item_queue.get()
+            yield item
+
+        if self._pending_completion is not None:
+            await self._finalize_pending_task()
+
         await asyncio.sleep(0.2)
         yield scrapy.Request("data:,loop", callback=self.parse_loop, dont_filter=True)
 
     def spider_idle(self, spider):
         self.crawler.engine.crawl(
-            scrapy.Request("data:,idle", callback=self.parse_loop, dont_filter=True),
-            spider,
+            scrapy.Request("data:,idle", callback=self.parse_loop, dont_filter=True)
         )
         raise DontCloseSpider
 
@@ -184,6 +220,11 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.page.quit()
         except Exception:
             pass
+        self._cleanup_proxy_extension()
+        try:
+            await self._clear_target_pid()
+        except Exception as e:
+            self.logger.warning(f"清理目标任务 PID 失败: {e}")
 
     # ------------------------------------------------------------------ #
     #  任务调度
@@ -227,11 +268,35 @@ class BossListDrissionSpider(scrapy.Spider):
             self._pages_since_cookie_save = 0
             await self._save_cookies_to_disk()
 
-        await self._update_db_status(self.current_task_id, "done")
-        self.logger.info(f"任务 {self.current_task_id} 完成，共入库 {total_count} 条")
+        self._pending_completion = (
+            self.current_task_id,
+            total_count,
+            self.target_task_id is not None,
+        )
+
+    async def _finalize_pending_task(self):
+        task_id, total_count, is_target_task = self._pending_completion
+        status = "error" if self.pipeline_failed else "done"
+        if self.pipeline_failed:
+            await self._update_db_status(
+                task_id,
+                status,
+                error_msg="Pipeline 数据库写入失败",
+                pid=None,
+            )
+        else:
+            await self._update_db_status(task_id, status, pid=None)
+        self._pending_completion = None
+        if status == "done":
+            self.logger.info(f"任务 {task_id} 完成，共入库 {total_count} 条")
+        else:
+            self.logger.error(f"任务 {task_id} 因 Pipeline 写入失败标记为 error")
         self.current_task_id = None
         self.current_task_url = ""
         self.current_task_major_name = ""
+        self.pipeline_failed = False
+        if is_target_task:
+            raise CloseSpider(reason=f"指定任务已{status}")
 
     async def _handle_page_failure(self):
         await self._rotate_proxy_and_browser()
@@ -279,7 +344,7 @@ class BossListDrissionSpider(scrapy.Spider):
                 await self._rebuild_browser()
                 return 0, False
             page_num = 0
-            while has_more:
+            while has_more is not False and page_num < max_pages:
                 page_num += 1
                 # 滚动触发懒加载
                 await self._scroll_to_load()
@@ -296,9 +361,13 @@ class BossListDrissionSpider(scrapy.Spider):
 
                 if payload is None:
                     self.logger.warning(f"第 {page_num} 轮未获取到数据，结束循环")
-                    break
+                    return total_count, False
 
-                jobs, has_more = self._extract_jobs_and_has_more(payload)
+                if not is_job_list_payload(payload):
+                    self.logger.warning(f"第 {page_num} 轮 payload 不含 jobList")
+                    return total_count, False
+
+                jobs, has_more = extract_jobs_and_has_more(payload)
 
                 # 立即入库，不等所有轮次结束
                 if jobs:
@@ -309,8 +378,10 @@ class BossListDrissionSpider(scrapy.Spider):
                     f"第 {page_num} 轮抓取 {len(jobs)} 条入库，has_more={has_more}，累计 {total_count} 条"
                 )
 
-                if not has_more:
+                if has_more is False:
                     break
+
+                self.current_page += 1
 
                 # 轮次间随机等待，模拟人工操作
                 await asyncio.sleep(random.uniform(self.page_delay_min, self.page_delay_max))
@@ -362,7 +433,7 @@ class BossListDrissionSpider(scrapy.Spider):
     def _build_job_api_url(self, page_url: str) -> Optional[str]:
         parsed = urlparse(page_url)
         query = parse_qs(parsed.query)
-        query.setdefault("page", [str(self.current_page)])
+        query["page"] = [str(self.current_page)]
         query.setdefault("pageSize", ["30"])
         q = urlencode({k: v[0] for k, v in query.items() if v}, doseq=False)
         return f"https://www.zhipin.com/wapi/zpgeek/search/joblist.json?{q}"
@@ -403,66 +474,19 @@ class BossListDrissionSpider(scrapy.Spider):
                 return None
         return None
 
-    def _extract_jobs_and_has_more(self, payload: Optional[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool]:
-        if not payload:
-            return [], False
-        if "zpData" in payload and isinstance(payload["zpData"], dict):
-            zp = payload["zpData"]
-            return zp.get("jobList") or [], bool(zp.get("hasMore", False))
-        data = payload.get("data")
-        if isinstance(data, dict):
-            return data.get("jobList") or data.get("list") or [], bool(data.get("hasMore", False))
-        return payload.get("jobList") or payload.get("list") or [], bool(payload.get("hasMore", False))
-
     async def _emit_job_items(self, source_url: str, jobs: List[Dict[str, Any]], major_name: str = ""):
-        parsed_url = urlparse(source_url)
-        query_params = parse_qs(parsed_url.query)
-        url_industry = query_params.get("industry", [None])[0]
-        url_city = query_params.get("city", [None])[0]
-
         for job in jobs:
-            item = BossJobItem()
-            item["job_name"] = job.get("jobName")
-            item["salary_desc"] = job.get("salaryDesc")
-            item["job_experience"] = job.get("jobExperience")
-            item["job_degree"] = job.get("jobDegree")
-            item["city_name"] = job.get("cityName")
-            item["area_district"] = job.get("areaDistrict")
-            item["business_district"] = job.get("businessDistrict")
-            item["job_labels"] = job.get("jobLabels", [])
-            item["skills"] = job.get("skills", [])
-            item["welfare_list"] = job.get("welfareList", [])
-            item["encrypt_job_id"] = job.get("encryptJobId")
-            item["encrypt_brand_id"] = job.get("encryptBrandId")
-            item["brand_name"] = job.get("brandName")
-            item["brand_logo"] = job.get("brandLogo")
-            item["brand_stage_name"] = job.get("brandStageName")
-            item["brand_industry"] = job.get("brandIndustry")
-            item["brand_scale_name"] = job.get("brandScaleName")
-            item["longitude"] = job.get("gps", {}).get("longitude") if job.get("gps") else None
-            item["latitude"] = job.get("gps", {}).get("latitude") if job.get("gps") else None
-            item["boss_name"] = job.get("bossName")
-            item["boss_title"] = job.get("bossTitle")
-            item["boss_avatar"] = job.get("bossAvatar")
-            item["major_name"] = major_name or None
-
-            industry_code = url_industry or job.get("industry")
-            if industry_code:
-                try:
-                    item["industry_code"] = int(industry_code)
-                except Exception:
-                    pass
-            if url_city:
-                try:
-                    item["city_code"] = int(url_city)
-                except Exception:
-                    pass
-
-            await self.item_queue.put(item)
+            await self.item_queue.put(
+                build_boss_job_item(job, source_url, major_name=major_name)
+            )
 
     # ------------------------------------------------------------------ #
     #  浏览器 & 代理
     # ------------------------------------------------------------------ #
+
+    def _cleanup_proxy_extension(self):
+        cleanup_proxy_auth_extension(self.proxy_extension_path)
+        self.proxy_extension_path = None
 
     async def _rebuild_browser(self):
         """关闭旧浏览器，创建新浏览器，完成登录验证后开始抓取。"""
@@ -471,10 +495,11 @@ class BossListDrissionSpider(scrapy.Spider):
                 self.page.quit()
         except Exception:
             pass
+        self._cleanup_proxy_extension()
 
         await asyncio.sleep(1)
 
-        self.current_proxy = proxy_manager.get_proxy()
+        self.current_proxy = await asyncio.to_thread(proxy_manager.get_proxy)
         self.proxy_started_at = time.time()
 
         co = ChromiumOptions()
@@ -499,7 +524,12 @@ class BossListDrissionSpider(scrapy.Spider):
 
         if self.current_proxy:
             if "@" in self.current_proxy:
-                co.add_extension(self._create_proxy_extension(self.current_proxy))
+                self.proxy_extension_path = create_proxy_auth_extension(
+                    self.current_proxy,
+                    simple_script_dir,
+                    f"list_{self.account_index + 1}",
+                )
+                co.add_extension(self.proxy_extension_path)
                 self.logger.info(f"使用认证代理: {self.current_proxy.split('@')[-1]}")
             else:
                 co.set_proxy(self.current_proxy)
@@ -511,7 +541,7 @@ class BossListDrissionSpider(scrapy.Spider):
         self.page.set.load_mode.none()
         self.logger.info("浏览器已创建，开始登录验证...")
 
-        await self._ensure_logged_in()
+        return await self._ensure_logged_in()
 
     async def _ensure_logged_in(self):
         """
@@ -522,7 +552,7 @@ class BossListDrissionSpider(scrapy.Spider):
         4. 登录成功 → 保存 Cookie 到磁盘 + 启用图片屏蔽
         """
         if not self.page:
-            return
+            return False
 
         account = self.accounts[self.account_index]
         account_name = account.get("name", f"account-{self.account_index + 1}")
@@ -552,7 +582,7 @@ class BossListDrissionSpider(scrapy.Spider):
         if self._is_logged_in():
             self.logger.info(f"✓ 账户 [{account_name}] 已登录，开始抓取")
             await self._handle_login_success()
-            return
+            return True
 
         login_handler = BossSmsLoginHandler(
             page=self.page,
@@ -567,7 +597,7 @@ class BossListDrissionSpider(scrapy.Spider):
             logged_in = await login_handler.login(timeout=self.login_timeout)
             if logged_in:
                 await self._handle_login_success()
-                return
+                return True
             self.logger.info(f"账户 [{account_name}] 自动登录失败，回退手动登录。")
 
         # Step 3：未登录 → 等待手动登录
@@ -575,6 +605,7 @@ class BossListDrissionSpider(scrapy.Spider):
         logged_in = await self._wait_for_manual_login(account_name=account_name)
         if not logged_in:
             self.logger.error(f"账户 [{account_name}] 登录超时，爬虫可能无法抓取数据")
+        return logged_in
 
     async def _handle_login_success(self):
         try:
@@ -641,10 +672,21 @@ class BossListDrissionSpider(scrapy.Spider):
                 return False
 
             # Cookie 检测：BOSS 直聘认证 token
+            has_authenticated_cookie = False
             try:
-                cookies = self.page.cookies(as_dict=True)
+                cookies = self.page.cookies()
                 if cookies:
-                    if not any(k in cookies for k in ["__zp_stoken__", "bst", "wt2"]):
+                    if isinstance(cookies, dict):
+                        cookie_names = set(cookies)
+                    else:
+                        cookie_names = {
+                            cookie.get("name") if isinstance(cookie, dict) else getattr(cookie, "name", None)
+                            for cookie in cookies
+                        }
+                    has_authenticated_cookie = bool(
+                        cookie_names.intersection({"__zp_stoken__", "bst", "wt2"})
+                    )
+                    if not has_authenticated_cookie:
                         return False
             except Exception:
                 pass
@@ -665,11 +707,11 @@ class BossListDrissionSpider(scrapy.Spider):
                 except Exception:
                     pass
 
-            return True  # 有 token 但无明确 DOM 信号，保守认为已登录
+            return has_authenticated_cookie
 
         except Exception as e:
             self.logger.info(f"登录状态检测异常: {e}")
-            return True
+            return False
 
     def _block_images(self):
         """登录后动态屏蔽图片请求，提升抓取速度。"""
@@ -852,24 +894,22 @@ class BossListDrissionSpider(scrapy.Spider):
 
     async def _fetch_and_assign_new_task(self):
         async with (await db_manager.get_session()) as session:
-            stmt = select(BossCrawlTask).where(BossCrawlTask.status == "pending")
-            if self.target_task_id:
-                stmt = stmt.where(BossCrawlTask.id == self.target_task_id)
-            stmt = stmt.order_by(BossCrawlTask.id.asc()).limit(1)
-            result = await session.execute(stmt)
-            task = result.scalar_one_or_none()
-            if not task:
-                if self.target_task_id and self.target_task_url:
-                    self.current_task_id = self.target_task_id
-                    self.current_task_url = self.target_task_url
-                    self.current_task_major_name = ""
-                    self.current_page = 1
-                    self.current_task_retry = 0
-                    self.logger.info(f"直接使用指定任务参数: {self.current_task_id} -> {self.current_task_url}")
-                    await self._update_db_status(self.current_task_id, "processing")
-                return
-            task.status = "processing"
-            await session.commit()
+            async with session.begin():
+                stmt = select(BossCrawlTask).where(BossCrawlTask.status == "pending")
+                if self.target_task_id:
+                    stmt = stmt.where(BossCrawlTask.id == self.target_task_id)
+                stmt = (
+                    stmt.order_by(BossCrawlTask.id.asc())
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )
+                result = await session.execute(stmt)
+                task = result.scalar_one_or_none()
+                if not task:
+                    if self.target_task_id:
+                        raise CloseSpider(reason="指定任务不存在或不再等待处理")
+                    return
+                task.status = "processing"
             self.current_task_id = task.id
             self.current_task_url = task.url
             self.current_task_major_name = getattr(task, "major_name", "")
@@ -881,14 +921,38 @@ class BossListDrissionSpider(scrapy.Spider):
         # BossStuCrawlUrl 无 page 字段，页码状态仅内存追踪，无需写入 DB
         pass
 
-    async def _update_db_status(self, task_id: int, status: str, error_msg: Optional[str] = None):
+    async def _update_db_status(
+        self,
+        task_id: int,
+        status: str,
+        error_msg: Optional[str] = None,
+        pid: Optional[int] = None,
+    ):
         async with (await db_manager.get_session()) as session:
+            values = {
+                "status": status,
+                "last_crawl_time": datetime.now(),
+                "error_msg": error_msg,
+            }
+            if status in {"done", "error"} or pid is not None:
+                values["pid"] = pid
             stmt = (
                 update(BossCrawlTask)
                 .where(BossCrawlTask.id == task_id)
-                .values(status=status, last_crawl_time=datetime.now(), error_msg=error_msg)
+                .values(**values)
             )
             await session.execute(stmt)
+            await session.commit()
+
+    async def _clear_target_pid(self):
+        if self.target_task_id is None:
+            return
+        async with (await db_manager.get_session()) as session:
+            await session.execute(
+                update(BossCrawlTask)
+                .where(BossCrawlTask.id == self.target_task_id)
+                .values(pid=None)
+            )
             await session.commit()
 
     # ------------------------------------------------------------------ #
@@ -902,40 +966,3 @@ class BossListDrissionSpider(scrapy.Spider):
         query["page"] = [str(page)]
         query_str = urlencode({k: v[0] for k, v in query.items()}, doseq=False)
         return urlunparse(parsed._replace(query=query_str))
-
-    def _create_proxy_extension(self, proxy_url: str) -> str:
-        """为带认证的代理创建 Chrome 扩展插件。"""
-        proxy_url = proxy_url.replace("http://", "").replace("https://", "")
-        auth, ip_port = proxy_url.split("@")
-        username, password = auth.split(":")
-        ip, port = ip_port.split(":")
-
-        plugin_path = os.path.join(simple_script_dir, f"proxy_auth_plugin_list_{self.account_index}")
-        os.makedirs(plugin_path, exist_ok=True)
-
-        manifest_json = """{
-    "version": "1.0.0",
-    "manifest_version": 2,
-    "name": "Chrome Proxy",
-    "permissions": ["proxy","tabs","unlimitedStorage","storage","<all_urls>","webRequest","webRequestBlocking"],
-    "background": {"scripts": ["background.js"]},
-    "minimum_chrome_version": "22.0.0"
-}"""
-
-        background_js = """var config = {
-    mode: "fixed_servers",
-    rules: { singleProxy: { scheme: "http", host: "%s", port: parseInt(%s) }, bypassList: ["localhost"] }
-};
-chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-function callbackFn(details) {
-    return { authCredentials: { username: "%s", password: "%s" } };
-}
-chrome.webRequest.onAuthRequired.addListener(callbackFn, {urls: ["<all_urls>"]}, ["blocking"]);
-""" % (ip, port, username, password)
-
-        with open(os.path.join(plugin_path, "manifest.json"), "w", encoding="utf-8") as f:
-            f.write(manifest_json)
-        with open(os.path.join(plugin_path, "background.js"), "w", encoding="utf-8") as f:
-            f.write(background_js)
-
-        return plugin_path

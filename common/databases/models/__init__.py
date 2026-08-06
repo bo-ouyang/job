@@ -15,6 +15,8 @@ from .application import Application
 from .message import Message
 from .city import City
 from .boss_crawl_task import BossCrawlTask
+from .boss_crawl_run_job import BossCrawlRunJob
+from .boss_crawler_account import BossCrawlerAccount
 from .boss_spider_filter import BossSpiderFilter
 from .fetch_failure import FetchFailure
 from .payment import PaymentOrder
@@ -22,7 +24,7 @@ from .wallet import UserWallet, WalletTransaction
 from .product import Product
 from .spider_boss_crawl_url import SpiderBossCrawlUrl
 from .major import Major, MajorIndustryRelation
-from .boss_stu_crawl_url import BossStuCrawlUrl
+from .boss_stu_crawl_url import BossStuCrawlUrl, BossStuUrlPosition
 from .system_config import SystemConfig
 from .proxy import Proxy
 from .ai_task import AiTask
@@ -68,6 +70,8 @@ __all__ = [
     'Message',
     'City',
     'BossCrawlTask',
+    'BossCrawlRunJob',
+    'BossCrawlerAccount',
     'BossSpiderFilter',
     'FetchFailure',
     'PaymentOrder',
@@ -78,6 +82,7 @@ __all__ = [
     'Major',
     'MajorIndustryRelation',
     'BossStuCrawlUrl',
+    'BossStuUrlPosition',
     'SystemConfig',
     'Proxy',
     'AiTask',

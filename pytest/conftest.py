@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../j
 from main import app
 from dependencies import get_db
 from common.databases.RedisManager import redis_manager
-from common.databases.MysqlManager import db_manager
+from common.databases.PostgresManager import db_manager
 from services.ai_service import ai_service
 
 # 2. Mock Global Services (DB, Redis, AI) to prevent independent service usage

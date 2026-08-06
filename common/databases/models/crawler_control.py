@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
@@ -63,6 +64,24 @@ class CrawlerRun(Base):
         Index("idx_crawler_run_task_status", "task_id", "status"),
         Index("idx_crawler_run_worker_status", "worker_id", "status"),
         Index("idx_crawler_run_status_created", "status", "created_at"),
+        Index(
+            "uq_crawler_run_active_account",
+            "account_id",
+            unique=True,
+            postgresql_where=text(
+                "account_id IS NOT NULL AND status IN "
+                "('queued', 'starting', 'running', 'pausing', 'paused', 'stopping')"
+            ),
+        ),
+        Index(
+            "uq_crawler_run_active_proxy",
+            "proxy_identity_hash",
+            unique=True,
+            postgresql_where=text(
+                "proxy_identity_hash IS NOT NULL AND status IN "
+                "('queued', 'starting', 'running', 'pausing', 'paused', 'stopping')"
+            ),
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, default=generate_id)
@@ -78,6 +97,13 @@ class CrawlerRun(Base):
         nullable=True,
         index=True,
     )
+    account_id = Column(
+        BigInteger,
+        ForeignKey("boss_crawler_account.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    proxy_identity_hash = Column(String(64), nullable=True, index=True)
     spider_name = Column(String(80), nullable=False)
     spider_args = Column(JSONB, nullable=False, default=dict)
     desired_status = Column(String(20), nullable=False, default="running", index=True)

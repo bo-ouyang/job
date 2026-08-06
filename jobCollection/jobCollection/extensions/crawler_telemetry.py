@@ -14,15 +14,42 @@ MAX_LINE_BYTES = 32768
 DENIED_KEYS = {
     "authorization",
     "body",
+    "content",
     "cookie",
     "cookies",
+    "credential",
+    "credentials",
+    "header",
     "headers",
     "password",
     "proxy",
+    "request",
+    "requestbody",
+    "requestcontent",
+    "requestheaders",
     "response",
+    "responsebody",
+    "responsecontent",
+    "responseheaders",
+    "responsetext",
     "secret",
+    "setcookie",
     "token",
 }
+DENIED_KEY_SUFFIXES = (
+    "authorization",
+    "body",
+    "cookie",
+    "cookies",
+    "credential",
+    "credentials",
+    "header",
+    "headers",
+    "password",
+    "proxy",
+    "secret",
+    "token",
+)
 
 
 def _safe_scalar(value: Any, *, max_length: int = 1000):
@@ -41,8 +68,8 @@ def _safe_mapping(values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     result = {}
     for raw_key, value in (values or {}).items():
         key = str(raw_key)[:80]
-        lowered = key.casefold()
-        if any(denied in lowered for denied in DENIED_KEYS):
+        normalized = "".join(character for character in key.casefold() if character.isalnum())
+        if normalized in DENIED_KEYS or normalized.endswith(DENIED_KEY_SUFFIXES):
             continue
         safe_value = _safe_scalar(value)
         if safe_value is not None:

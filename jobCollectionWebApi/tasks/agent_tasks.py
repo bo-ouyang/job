@@ -97,8 +97,8 @@ async def _mark_failed(
     name="tasks.agent_tasks.execute_agent_run",
     acks_late=True,
     reject_on_worker_lost=True,
-    soft_time_limit=135,
-    time_limit=150,
+    soft_time_limit=270,
+    time_limit=300,
 )
 def execute_agent_run(self, run_id: int, user_id: int) -> dict:
     loop = _get_event_loop()

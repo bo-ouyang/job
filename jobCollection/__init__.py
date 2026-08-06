@@ -1,5 +1,7 @@
-import asyncio
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+import os
 
-from twisted.internet import asyncioreactor
-asyncioreactor.install()
+# The Scrapy source package lives one level below this project package.  Make
+# it visible when tests and tools import from the repository root.
+_scrapy_package = os.path.join(os.path.dirname(__file__), "jobCollection")
+if _scrapy_package not in __path__:
+    __path__.append(_scrapy_package)

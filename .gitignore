@@ -39,6 +39,14 @@ jobCollection/logs/
 jobCollection/failure_logs/
 jobCollection/static/log/
 **/cookies_*.json
+**/.jobdir/
+**/login_debug_account_*/
+**/proxy_auth_plugin*/
+**/proxy_extensions/
+jobCollection/jobCollection/simple_script/accounts.json
+jobCollection/task*_status.json
+jobCollection/detail.html
+jobCollection/school.html
 
 # Node
 node_modules/

@@ -482,7 +482,9 @@ class AgentRuntime:
                 )
             except (asyncio.TimeoutError, LLMTimeoutError) as exc:
                 remaining = self._remaining_seconds()
-                if attempt == 0 and remaining > 1:
+                # 只有剩余预算还装得下一次完整 LLM 调用时才重试，否则这次重试注定失败，
+                # 只会白白烧掉剩余预算。
+                if attempt == 0 and remaining >= max(2, self.policies.llm_timeout_seconds // 2):
                     logger.warning(
                         "Agent LLM timed out; retrying once within run budget: "
                         f"schema={schema.__name__}, remaining={remaining:.1f}s"

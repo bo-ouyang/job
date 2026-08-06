@@ -93,7 +93,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("idx_position_type_name", table_name="position_type", if_exists=True)
-    op.drop_index("idx_position_type_code_level", table_name="position_type", if_exists=True)
-    op.drop_index("idx_position_type_parent_order", table_name="position_type", if_exists=True)
-    op.drop_table("position_type", if_exists=True)
+    """Intentionally preserve taxonomy data on downgrade.
+
+    This revision adopted a ``position_type`` table that could already have
+    been populated by the standalone taxonomy importer. Alembic cannot prove
+    that it owns that table or its data, so dropping it (or its possibly
+    pre-existing indexes) would be destructive. A downgrade only moves the
+    revision marker; operators may remove an empty, migration-owned table
+    manually after verifying ownership.
+    """
+
+    return None

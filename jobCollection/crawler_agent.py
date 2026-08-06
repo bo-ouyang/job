@@ -23,15 +23,46 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 
 import httpx
 
+from common.crawler_metrics import PROGRESS_FACT_METRICS
+from common.crawler_sanitization import redact_crawler_text
+
 
 logger = logging.getLogger("crawler-agent")
 TELEMETRY_PREFIX = "CRAWLER_EVENT "
-SENSITIVE_LOG_PATTERNS = (
-    re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)([^\s]+)"),
-    re.compile(r"(?i)(cookie\s*[:=]\s*)([^\s]+)"),
-    re.compile(r"(?i)(password\s*[:=]\s*)([^\s]+)"),
-    re.compile(r"(?i)(token\s*[:=]\s*)([^\s]+)"),
+MAX_FINALIZE_ATTEMPTS = 3
+SENSITIVE_FIELD_NAMES = {
+    "authorization",
+    "body",
+    "content",
+    "cookie",
+    "credential",
+    "credentials",
+    "header",
+    "headers",
+    "password",
+    "proxy",
+    "requestbody",
+    "requestcontent",
+    "requestheaders",
+    "responsebody",
+    "responsecontent",
+    "responseheaders",
+    "responsetext",
+    "secret",
+    "token",
+}
+SENSITIVE_FIELD_SUFFIXES = (
+    "authorization", "body", "cookie", "cookies", "credential",
+    "credentials", "header", "headers", "password", "proxy", "secret",
+    "token",
 )
+
+
+def _is_sensitive_field(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+    return normalized in SENSITIVE_FIELD_NAMES or normalized.endswith(
+        SENSITIVE_FIELD_SUFFIXES
+    )
 
 
 def bounded_backoff(attempt: int) -> int:
@@ -86,14 +117,53 @@ def parse_telemetry_line(line: str) -> Optional[Dict[str, Any]]:
         payload = json.loads(line[len(TELEMETRY_PREFIX) :])
     except (TypeError, ValueError):
         return None
-    return payload if isinstance(payload, dict) else None
+    return sanitize_telemetry_event(payload) if isinstance(payload, dict) else None
 
 
 def redact_log_line(line: str) -> str:
-    sanitized = str(line)[:4000]
-    for pattern in SENSITIVE_LOG_PATTERNS:
-        sanitized = pattern.sub(lambda match: match.group(1) + "[REDACTED]", sanitized)
-    return sanitized
+    return redact_crawler_text(line, max_length=4000)
+
+
+def _sanitize_telemetry_value(value: Any, depth: int = 0) -> Any:
+    if depth >= 4:
+        return "[TRUNCATED]"
+    if isinstance(value, dict):
+        result = {}
+        for raw_key, child in list(value.items())[:50]:
+            key = str(raw_key)[:80]
+            if _is_sensitive_field(key):
+                continue
+            result[key] = _sanitize_telemetry_value(child, depth + 1)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [
+            _sanitize_telemetry_value(child, depth + 1)
+            for child in value[:50]
+        ]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return redact_log_line(str(value)[:2000])
+
+
+def sanitize_telemetry_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Treat spider stdout as untrusted before it reaches control storage."""
+
+    level = str(payload.get("level") or "info").casefold()
+    if level not in {"debug", "info", "warning", "error"}:
+        level = "info"
+    message = payload.get("message")
+    return {
+        "eventType": str(payload.get("eventType") or "telemetry")[:50],
+        "level": level,
+        "message": (
+            redact_log_line(str(message)) if message is not None else None
+        ),
+        "metrics": _sanitize_telemetry_value(payload.get("metrics") or {}),
+        "checkpoint": _sanitize_telemetry_value(
+            payload.get("checkpoint") or {}
+        ),
+        "payload": _sanitize_telemetry_value(payload.get("payload") or {}),
+    }
 
 
 @dataclass(frozen=True)
@@ -327,6 +397,7 @@ class SubprocessRunner:
         )
         env = os.environ.copy()
         env["CRAWLER_RUN_ID"] = str(assignment["runId"])
+        env["CRAWLER_EXECUTION_TOKEN"] = str(assignment["executionToken"])
         env["CRAWLER_WORKER_ID"] = config.worker_id
         kwargs = {
             "cwd": config.project_dir,
@@ -353,6 +424,8 @@ class CrawlerAgent:
         self.runner = runner or (DryRunRunner() if config.dry_run else SubprocessRunner())
         self.active_assignment: Optional[Dict[str, Any]] = None
         self.active_execution = None
+        self._pending_finish_payload: Optional[Dict[str, Any]] = None
+        self._pending_finish_attempts = 0
 
     def _worker_heartbeat(self):
         self.client.heartbeat_worker(
@@ -380,7 +453,11 @@ class CrawlerAgent:
                 "executionToken": assignment["executionToken"],
                 "status": status,
                 "pid": execution.pid,
-                "metrics": execution.metrics(),
+                "metrics": {
+                    key: value
+                    for key, value in execution.metrics().items()
+                    if key not in PROGRESS_FACT_METRICS
+                },
                 "checkpoint": execution.checkpoint(),
             },
         )
@@ -403,22 +480,81 @@ class CrawlerAgent:
     def _finish_active(self, status: str, *, exit_code: Optional[int] = None, error_msg=None):
         assignment = self.active_assignment
         execution = self.active_execution
-        self.client.finish_run(
-            assignment["runId"],
-            {
-                "executionToken": assignment["executionToken"],
-                "status": status,
-                "exitCode": exit_code,
-                "errorMsg": error_msg,
-                "metrics": execution.metrics(),
-                "checkpoint": execution.checkpoint(),
-            },
-        )
+        try:
+            self.client.finish_run(
+                assignment["runId"],
+                {
+                    "executionToken": assignment["executionToken"],
+                    "status": status,
+                    "exitCode": exit_code,
+                    "errorMsg": error_msg,
+                    "metrics": execution.metrics(),
+                    "checkpoint": execution.checkpoint(),
+                },
+            )
+        except Exception as exc:
+            if not self._is_lease_loss(exc):
+                raise
         self.active_assignment = None
         self.active_execution = None
 
+    @staticmethod
+    def _is_lease_loss(error: Exception) -> bool:
+        return isinstance(error, httpx.HTTPStatusError) and (
+            error.response.status_code in {403, 404, 409}
+        )
+
+    @staticmethod
+    def _is_transient_control_error(error: Exception) -> bool:
+        if isinstance(error, httpx.HTTPStatusError):
+            return error.response.status_code >= 500
+        return isinstance(error, (httpx.TimeoutException, httpx.TransportError))
+
+    def _clear_local_assignment(self):
+        self.active_assignment = None
+        self.active_execution = None
+        self._pending_finish_payload = None
+        self._pending_finish_attempts = 0
+
+    def _retry_pending_finish(self) -> None:
+        assignment = self.active_assignment
+        payload = self._pending_finish_payload
+        if assignment is None or payload is None:
+            return
+        self._pending_finish_attempts += 1
+        try:
+            self.client.finish_run(assignment["runId"], payload)
+        except Exception as exc:
+            if self._is_lease_loss(exc):
+                self._clear_local_assignment()
+                return
+            if self._is_transient_control_error(exc):
+                if self._pending_finish_attempts >= MAX_FINALIZE_ATTEMPTS:
+                    logger.warning(
+                        "Giving up local finalize after %s attempts; server will reconcile run=%s",
+                        self._pending_finish_attempts,
+                        assignment["runId"],
+                    )
+                    self._clear_local_assignment()
+                return
+            self._clear_local_assignment()
+            raise
+        self._clear_local_assignment()
+
+    def _abandon_active(self):
+        execution = self.active_execution
+        try:
+            if execution is not None:
+                execution.terminate()
+        finally:
+            self.active_assignment = None
+            self.active_execution = None
+
     def tick(self):
         self._worker_heartbeat()
+        if self._pending_finish_payload is not None:
+            self._retry_pending_finish()
+            return
         if self.active_execution is None:
             claimed = self.client.claim_run(
                 {
@@ -432,39 +568,53 @@ class CrawlerAgent:
             try:
                 self.active_execution = self.runner.start(claimed, self.config)
             except Exception as exc:
-                self.client.finish_run(
-                    claimed["runId"],
-                    {
-                        "executionToken": claimed["executionToken"],
-                        "status": "failed",
-                        "exitCode": None,
-                        "errorMsg": f"Crawler runner failed to start: {type(exc).__name__}",
-                        "metrics": {},
-                        "checkpoint": claimed.get("checkpoint") or {},
-                    },
-                )
-                self.active_assignment = None
-                self.active_execution = None
+                self._pending_finish_payload = {
+                    "executionToken": claimed["executionToken"],
+                    "status": "failed",
+                    "exitCode": None,
+                    "errorMsg": f"Crawler runner failed to start: {type(exc).__name__}",
+                    "metrics": {},
+                    "checkpoint": claimed.get("checkpoint") or {},
+                }
+                self._retry_pending_finish()
                 return
-            self._append_event(
-                "run_started",
-                "Dry-run crawler started" if self.config.dry_run else "Crawler process started",
-                payload={"dryRun": self.config.dry_run},
-            )
-            self._heartbeat_active("running")
+            try:
+                self._append_event(
+                    "run_started",
+                    "Dry-run crawler started" if self.config.dry_run else "Crawler process started",
+                    payload={"dryRun": self.config.dry_run},
+                )
+                self._heartbeat_active("running")
+            except Exception as exc:
+                if not self._is_lease_loss(exc):
+                    raise
+                self._abandon_active()
             return
 
         assignment = self.active_assignment
         execution = self.active_execution
-        desired = self.client.desired_state(
-            assignment["runId"],
-            assignment["executionToken"],
-        )
+        try:
+            desired = self.client.desired_state(
+                assignment["runId"],
+                assignment["executionToken"],
+            )
+        except Exception as exc:
+            if not self._is_lease_loss(exc):
+                raise
+            self._abandon_active()
+            return
+        if desired.get("status") in {"stopped", "succeeded", "failed", "stale"}:
+            self._abandon_active()
+            return
         desired_status = desired["desiredStatus"]
         if desired_status == "paused":
             execution.terminate()
-            self._heartbeat_active("paused")
-            self._append_event("run_paused", "Crawler run paused")
+            try:
+                self._append_event("run_paused", "Crawler run paused")
+                self._heartbeat_active("paused")
+            except Exception as exc:
+                if not self._is_lease_loss(exc):
+                    raise
             self.active_assignment = None
             self.active_execution = None
             return
@@ -477,14 +627,25 @@ class CrawlerAgent:
         execution.advance()
         events = execution.drain_events()
         if events:
-            self.client.append_events(
-                assignment["runId"],
-                assignment["executionToken"],
-                events,
-            )
+            try:
+                self.client.append_events(
+                    assignment["runId"],
+                    assignment["executionToken"],
+                    events,
+                )
+            except Exception as exc:
+                if not self._is_lease_loss(exc):
+                    raise
+                self._abandon_active()
+                return
         exit_code = execution.poll()
         if exit_code is None:
-            self._heartbeat_active("running")
+            try:
+                self._heartbeat_active("running")
+            except Exception as exc:
+                if not self._is_lease_loss(exc):
+                    raise
+                self._abandon_active()
             return
         status = "succeeded" if exit_code == 0 else "failed"
         self._finish_active(

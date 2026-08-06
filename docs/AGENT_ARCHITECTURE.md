@@ -211,7 +211,7 @@ Worker 使用两层防重：
 
 若 Redis 临时不可用，任务记录告警并退化到数据库 claim；因此 Redis 锁是性能/竞争保护，数据库状态才是正确性边界。锁竞争时 Celery 每 5 秒重试，最多 20 次。
 
-Celery 任务开启 `acks_late`、`reject_on_worker_lost`，软/硬时限分别为 65/75 秒。Runtime 默认自身运行预算为 60 秒。
+Celery 任务开启 `acks_late`、`reject_on_worker_lost`，软/硬时限分别为 270/300 秒。Runtime 默认自身运行预算为 240 秒。
 
 ## 8. Runtime 运行图
 
@@ -240,8 +240,8 @@ flowchart TD
 
 | 预算 | 默认值 |
 |---|---:|
-| 单次 Run | 60 秒 |
-| 单次 LLM | 20 秒 |
+| 单次 Run | 240 秒 |
+| 单次 LLM | 90 秒 |
 | 工具调用 | 6 次 |
 | Runtime 步骤 | 12 步 |
 | 澄清轮次 | 2 次 |

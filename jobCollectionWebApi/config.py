@@ -205,24 +205,6 @@ class Settings(BaseSettings):
         else:
             return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
-    # @property
-    # def MYSQL_URL(self) -> str:
-    #     """生成 MySQL 连接 URL"""
-    #     return (
-    #         f"mysql+aiomysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
-    #         f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
-    #         f"?charset={self.MYSQL_CHARSET}"
-    #     )
-        
-    # @property
-    # def MYSQL_URL_SYNC(self) -> str:
-    #     """生成 MySQL 连接 URL"""
-    #     return (
-    #         f"mysql+aiomysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
-    #         f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
-    #         f"?charset={self.MYSQL_CHARSET}"
-    #     )
-    
     # AI 配置
     AI_ENABLED: bool = os.getenv("AI_ENABLED", "true").lower() == "true"
     AI_CAREER_COMPASS_ENABLED: bool = os.getenv("AI_CAREER_COMPASS_ENABLED", "true").lower() == "true"
@@ -253,8 +235,8 @@ class Settings(BaseSettings):
     AGENT_ROLLOUT_USER_IDS: str = os.getenv("AGENT_ROLLOUT_USER_IDS", "")
     AGENT_MAX_CONCURRENT_RUNS_PER_USER: int = int(os.getenv("AGENT_MAX_CONCURRENT_RUNS_PER_USER", 1))
     AGENT_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("AGENT_RATE_LIMIT_PER_MINUTE", 3))
-    AGENT_RUN_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", 120))
-    AGENT_LLM_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", 45))
+    AGENT_RUN_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", 240))
+    AGENT_LLM_TIMEOUT_SECONDS: int = int(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", 90))
     AGENT_MAX_TOOL_CALLS: int = int(os.getenv("AGENT_MAX_TOOL_CALLS", 6))
     AGENT_MAX_STEPS: int = int(os.getenv("AGENT_MAX_STEPS", 12))
     AGENT_MAX_CLARIFICATIONS: int = int(os.getenv("AGENT_MAX_CLARIFICATIONS", 2))
@@ -262,7 +244,7 @@ class Settings(BaseSettings):
     AGENT_MAX_CONTEXT_MESSAGES: int = int(os.getenv("AGENT_MAX_CONTEXT_MESSAGES", 20))
     AGENT_EVENT_TTL_SECONDS: int = int(os.getenv("AGENT_EVENT_TTL_SECONDS", 86400))
     AGENT_EVENT_MAXLEN: int = int(os.getenv("AGENT_EVENT_MAXLEN", 500))
-    AGENT_LOCK_TTL_SECONDS: int = int(os.getenv("AGENT_LOCK_TTL_SECONDS", 90))
+    AGENT_LOCK_TTL_SECONDS: int = int(os.getenv("AGENT_LOCK_TTL_SECONDS", 300))
     AGENT_SSE_HEARTBEAT_SECONDS: int = int(os.getenv("AGENT_SSE_HEARTBEAT_SECONDS", 15))
     AGENT_MAX_SSE_CONNECTIONS_PER_USER: int = int(os.getenv("AGENT_MAX_SSE_CONNECTIONS_PER_USER", 2))
     AGENT_SSE_REDIS_MAX_CONNECTIONS: int = int(os.getenv("AGENT_SSE_REDIS_MAX_CONNECTIONS", 100))

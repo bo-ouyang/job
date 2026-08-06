@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   getOverview: vi.fn(),
   getPricing: vi.fn(),
   generateReport: vi.fn(),
+  getLatestReport: vi.fn(),
   askQuestion: vi.fn(),
+  getRun: vi.fn(),
+  getConversation: vi.fn(),
 }));
 
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: mocks.push }) }));
@@ -17,7 +20,14 @@ vi.mock("@/api/career", () => ({
     getOverview: mocks.getOverview,
     getPricing: mocks.getPricing,
     generateReport: mocks.generateReport,
+    getLatestReport: mocks.getLatestReport,
     askQuestion: mocks.askQuestion,
+  },
+}));
+vi.mock("@/api/agent", () => ({
+  agentAPI: {
+    getRun: mocks.getRun,
+    getConversation: mocks.getConversation,
   },
 }));
 
@@ -94,5 +104,51 @@ describe("CareerAnalysisView", () => {
       "分析部分使用测试数据",
     );
     expect(wrapper.text()).toContain("林晓雨");
+  });
+
+  it("tracks the report run and renders the latest report after completion", async () => {
+    vi.useFakeTimers();
+    mocks.authStore.isAuthenticated = true;
+    mocks.authStore.user = { username: "林晓雨" };
+    mocks.generateReport.mockResolvedValue({
+      data: { run_id: "9001", conversation_id: "8001", status: "queued" },
+    });
+    mocks.getRun
+      .mockResolvedValueOnce({
+        data: { id: "9001", status: "running", current_node: "execute_tools" },
+      })
+      .mockResolvedValueOnce({
+        data: { id: "9001", status: "completed", current_node: "completed" },
+      });
+    mocks.getLatestReport.mockResolvedValue({
+      data: {
+        status: "completed",
+        run_id: "9001",
+        content: "完整报告正文",
+        created_at: "2026-08-06T10:00:00",
+      },
+    });
+    mocks.getOverview.mockResolvedValue({ data: { ...overview } });
+
+    const wrapper = mount(CareerAnalysisView);
+    await flushPromises();
+
+    await wrapper.get("[data-test='generate-analysis']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-test='run-status']").text()).toContain("正在准备");
+
+    vi.advanceTimersByTime(3000);
+    await flushPromises();
+    expect(wrapper.get("[data-test='run-status']").text()).toContain("查询市场数据");
+
+    vi.advanceTimersByTime(3000);
+    await flushPromises();
+
+    expect(wrapper.get("[data-test='run-status']").text()).toContain("分析完成");
+    expect(wrapper.get("[data-test='latest-report']").text()).toContain("完整报告正文");
+    expect(mocks.getOverview).toHaveBeenCalledTimes(2);
+    expect(mocks.getLatestReport).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
   });
 });
