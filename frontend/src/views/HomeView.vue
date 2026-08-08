@@ -38,6 +38,11 @@ const marketAiWelcome = {
   content: "你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。",
 };
 const aiMessages = ref([{ ...marketAiWelcome }]);
+const marketFailureMessage = (code) => (
+  code === "AGENT_LLM_QUOTA_EXCEEDED"
+    ? "AI 模型服务余额不足，请联系管理员充值后重试。本次不会扣除余额。"
+    : "本次回答未完成，不会扣除余额。请稍后重新提问。"
+);
 const marketRun = useAgentRunStream({
   connect: connectAgentEventStream,
   getRun: agentAPI.getRun,
@@ -91,9 +96,11 @@ const marketRun = useAgentRunStream({
       return;
     }
     provisional.status = event.event === "run_cancelled" ? "cancelled" : "failed";
+    const failureCode = finishedRun?.error_code || finishedRun?.errorCode
+      || event.data?.error_code || event.data?.errorCode;
     provisional.content = event.event === "run_cancelled"
       ? "本次问题已取消，未生成完整回答，不会扣除余额。"
-      : "本次回答未完成，不会扣除余额。请稍后重新提问。";
+      : marketFailureMessage(failureCode);
   },
 });
 const filters = reactive({ range: "12m", city: "", industry: "", education: "" });

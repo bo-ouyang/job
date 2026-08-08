@@ -308,6 +308,27 @@ describe("CareerAnalysisView", () => {
     expect(wrapper.get(".error-message").text()).not.toContain("provider timeout");
   });
 
+  it("maps an SSE provider balance failure to an actionable career error message", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.generateReport.mockResolvedValue({ data: { runId: "9001", conversationId: "8001", status: "queued" } });
+    let streamOptions;
+    mocks.connect.mockImplementation((options) => {
+      streamOptions = options;
+      return new Promise(() => {});
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("[data-test='generate-analysis']").trigger("click");
+    await vi.waitFor(() => expect(streamOptions).toBeTruthy());
+    await streamOptions.onEvent({
+      event_id: "1-0", event: "run_failed", run_id: "9001",
+      data: { error_code: "AGENT_LLM_QUOTA_EXCEEDED" },
+    });
+    await flushPromises();
+
+    expect(wrapper.get(".error-message").text()).toContain("余额不足");
+  });
+
   it("streams a career question, resets a new stream attempt, and calibrates its final answer", async () => {
     mocks.authStore.isAuthenticated = true;
     mocks.askQuestion.mockResolvedValue({ data: { runId: "9101", conversationId: "8101", status: "queued" } });

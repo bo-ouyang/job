@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from agent.errors import (
     LLMConfigurationError,
+    LLMQuotaExceededError,
     LLMStructuredOutputError,
     LLMTimeoutError,
     LLMUnavailableError,
@@ -95,6 +96,10 @@ class LLMClient:
                     }
                 )
             except Exception as exc:
+                if getattr(exc, "status_code", None) == 402:
+                    raise LLMQuotaExceededError(
+                        "AI 模型服务余额不足，请联系管理员充值后重试"
+                    ) from exc
                 raise LLMStructuredOutputError("模型未返回有效的结构化结果") from exc
             return result
 
@@ -118,11 +123,15 @@ class LLMClient:
         except CircuitBreakerOpen as exc:
             ai_calls_total.labels(method=metric_name, status="circuit_open").inc()
             raise LLMUnavailableError("Agent LLM 熔断保护中") from exc
-        except (LLMConfigurationError, LLMStructuredOutputError):
+        except (LLMConfigurationError, LLMQuotaExceededError, LLMStructuredOutputError):
             ai_calls_total.labels(method=metric_name, status="failure").inc()
             raise
         except Exception as exc:
             ai_calls_total.labels(method=metric_name, status="failure").inc()
+            if getattr(exc, "status_code", None) == 402:
+                raise LLMQuotaExceededError(
+                    "AI 模型服务余额不足，请联系管理员充值后重试"
+                ) from exc
             raise LLMUnavailableError("Agent LLM 暂时不可用") from exc
         finally:
             ai_call_duration.labels(method=metric_name).observe(time.monotonic() - started)

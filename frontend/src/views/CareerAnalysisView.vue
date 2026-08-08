@@ -58,6 +58,7 @@ const ERROR_MAP = {
   AGENT_RUNTIME_ERROR: "AI 分析运行异常，请稍后重试。",
   AGENT_RUN_STALE: "分析任务已失效，请重新发起。",
   AGENT_LLM_NOT_CONFIGURED: "AI 服务尚未正确配置，请联系管理员。",
+  AGENT_LLM_QUOTA_EXCEEDED: "AI 模型服务余额不足，请联系管理员充值后重试。",
   AGENT_LLM_UNAVAILABLE: "AI 服务暂时不可用，请稍后重试。",
   AGENT_LLM_TIMEOUT: "模型响应超时，请稍后重试。",
   AGENT_LLM_INVALID_OUTPUT: "AI 返回内容格式异常，请稍后重试。",

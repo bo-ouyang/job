@@ -47,6 +47,12 @@ class LLMUnavailableError(AgentRuntimeError):
     code = "AGENT_LLM_UNAVAILABLE"
 
 
+class LLMQuotaExceededError(LLMUnavailableError):
+    """模型服务账户余额或额度不足，继续重试不会产生有效回答。"""
+
+    code = "AGENT_LLM_QUOTA_EXCEEDED"
+
+
 class LLMTimeoutError(AgentRuntimeError):
     """单次大模型请求超时。"""
 

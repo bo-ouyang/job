@@ -404,6 +404,31 @@ describe("HomeView V2", () => {
     wrapper.unmount();
   });
 
+  it("explains an Agent provider balance failure without suggesting malformed output", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.askQuestion.mockResolvedValue({ data: { conversationId: "101", runId: "201", status: "queued" } });
+    let streamOptions;
+    mocks.connect.mockImplementation((options) => {
+      streamOptions = options;
+      return new Promise(() => {});
+    });
+    const wrapper = mount(HomeView, { global: { stubs: chartStubs } });
+    await flushPromises();
+    await wrapper.get("[data-test='market-ai-input']").setValue("测试模型余额失败展示");
+    await wrapper.get(".ai-composer").trigger("submit");
+    await vi.waitFor(() => expect(streamOptions).toBeTruthy());
+    await streamOptions.onEvent({
+      event_id: "1-0", event: "run_failed", run_id: "201",
+      data: { error_code: "AGENT_LLM_QUOTA_EXCEEDED" },
+    });
+    await flushPromises();
+
+    const message = wrapper.get("[data-test='market-ai-streaming-message']").text();
+    expect(message).toContain("AI 模型服务余额不足");
+    expect(message).toContain("不会扣除余额");
+    wrapper.unmount();
+  });
+
   it("rejects an unrelated historical answer when recovering a completed run", async () => {
     mocks.authStore.isAuthenticated = true;
     mocks.askQuestion.mockResolvedValue({ data: { conversationId: "101", runId: "201", status: "queued" } });
