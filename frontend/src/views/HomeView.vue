@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -15,6 +15,9 @@ import SkillDonutChart from "@/components/charts/SkillDonutChart.vue";
 import homeMockData from "@/data/homeMockData";
 import { loadMarketDashboard } from "@/services/marketDashboard";
 import { useAuthStore } from "@/stores/auth";
+import { extractAgentRunReference, extractApiError } from "@/utils/apiError";
+import { useAgentRunStream } from "@/composables/useAgentRunStream";
+import { connectAgentEventStream } from "@/utils/sseClient";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -27,12 +30,72 @@ const aiOpen = ref(true);
 const aiSending = ref(false);
 const aiQuestion = ref("");
 const aiError = ref("");
+const marketClarification = ref(null);
+const clarificationAnswer = ref("");
+const clarificationSubmitting = ref(false);
 const marketAiWelcome = {
   role: "assistant",
   content: "你好，我可以基于当前招聘市场数据，回答行业趋势、城市薪资和技能需求问题。",
 };
 const aiMessages = ref([{ ...marketAiWelcome }]);
-let pollGeneration = 0;
+const marketRun = useAgentRunStream({
+  connect: connectAgentEventStream,
+  getRun: agentAPI.getRun,
+  onEvent: (event) => {
+    const provisional = aiMessages.value.find(
+      (message) => message.provisional && String(message.runId) === String(event.run_id),
+    );
+    if (!provisional) return;
+    const stages = {
+      run_started: "running",
+      tool_started: "tool",
+      message_started: "generating",
+      message_delta: "streaming",
+    };
+    provisional.status = stages[event.event] || provisional.status;
+  },
+  onTerminal: async ({ event, run: finishedRun, content, successful }) => {
+    const runId = finishedRun?.id || event.run_id;
+    const provisional = aiMessages.value.find(
+      (message) => message.provisional && String(message.runId) === String(runId),
+    );
+    if (!provisional) return;
+    if (finishedRun?.status === "waiting_user") {
+      provisional.status = "waiting_user";
+      marketClarification.value = {
+        runId: String(runId),
+        conversationId: finishedRun.conversationId || event.conversation_id || null,
+        question: event.data?.question || event.data?.message || "请补充必要信息后继续分析。",
+      };
+      return;
+    }
+    if (event.event === "run_completed") {
+      if (successful) {
+        // The confirmed stream is already the latest answer. Avoid replacing it
+        // with a stale history response from another conversation.
+        provisional.status = "completed";
+        provisional.content = content;
+        return;
+      }
+      // The fallback snapshot is scoped to this exact run/conversation. An
+      // unrelated historical assistant answer must never settle this run.
+      const snapshot = await readCurrentRunAnswer(runId, finishedRun?.conversationId || event.conversation_id)
+        .catch(() => null);
+      if (snapshot) {
+        provisional.status = "completed";
+        provisional.content = snapshot;
+      } else {
+        provisional.status = "failed";
+        provisional.content = "回答生成未完成，本次不会扣除余额。请重新提问。";
+      }
+      return;
+    }
+    provisional.status = event.event === "run_cancelled" ? "cancelled" : "failed";
+    provisional.content = event.event === "run_cancelled"
+      ? "本次问题已取消，未生成完整回答，不会扣除余额。"
+      : "本次回答未完成，不会扣除余额。请稍后重新提问。";
+  },
+});
 const filters = reactive({ range: "12m", city: "", industry: "", education: "" });
 
 const market = computed(() => dashboard.value || homeMockData);
@@ -65,8 +128,6 @@ const formatSalary = (value) => {
   return String(value);
 };
 
-const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration));
-
 const renderAssistantContent = (content) => DOMPurify.sanitize(
   marked.parse(String(content || ""), { breaks: true }),
 );
@@ -81,6 +142,9 @@ const historyMessages = (items) => {
         role: message.role,
         content: message.content,
         createdAt: message.createdAt || "",
+        metadata: message.metadata || {},
+        runId: message.runId || message.run_id || message.metadata?.runId || message.metadata?.run_id || null,
+        conversationId: item.conversationId || message.conversationId || message.conversation_id || null,
       }));
     messages.push(...conversationMessages);
     if (
@@ -98,34 +162,60 @@ const historyMessages = (items) => {
   return messages.sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
 };
 
+const readCurrentRunAnswer = async (runId, conversationId) => {
+  if (!runId || !conversationId) return null;
+  const response = await agentAPI.getConversation(String(conversationId));
+  const detail = response?.data || {};
+  const messages = detail.messages || [];
+  const explicit = [...messages].reverse().find((message) => (
+    message.role === "assistant"
+      && String(message.runId || message.run_id || message.metadata?.runId || message.metadata?.run_id || "") === String(runId)
+  ));
+  if (explicit?.content) return explicit.content;
+  if (String(detail.latest_run?.id || detail.latestRun?.id || "") !== String(runId)) return null;
+  return [...messages].reverse().find((message) => message.role === "assistant")?.content || null;
+};
+
+const restoreMarketClarification = async (runId, conversationId) => {
+  const response = await agentAPI.getConversation(String(conversationId));
+  const prompt = [...(response?.data?.messages || [])].reverse().find(
+    (message) => message.role === "assistant" && message.message_type === "clarification_required",
+  );
+  marketClarification.value = {
+    runId: String(runId),
+    conversationId: String(conversationId),
+    question: prompt?.content || "请补充必要信息后继续分析。",
+  };
+};
+
 const loadAiHistory = async ({ resumeActive = false } = {}) => {
   if (!authStore.isAuthenticated) return [];
   const response = await marketAPI.getHistory({ limit: 30 });
   const items = response?.data?.items || [];
   aiMessages.value = [{ ...marketAiWelcome }, ...historyMessages(items)];
   if (resumeActive) {
-    const active = items.find((item) => ["queued", "running"].includes(item.latestRunStatus));
-    if (active?.latestRunId) void pollMarketRun(active.latestRunId);
+    const active = items.find((item) => ["queued", "running", "waiting_user"].includes(item.latestRunStatus));
+    if (active?.latestRunId) {
+      aiMessages.value.push({
+        id: `stream-${active.latestRunId}`,
+        runId: String(active.latestRunId),
+        role: "assistant",
+        provisional: true,
+        status: active.latestRunStatus,
+        content: "",
+      });
+      if (active.latestRunStatus === "waiting_user") {
+        await restoreMarketClarification(active.latestRunId, active.conversationId);
+      } else {
+        marketRun.start({
+          runId: active.latestRunId,
+          conversationId: active.conversationId,
+          initialStatus: active.latestRunStatus,
+        });
+      }
+    }
   }
   return items;
-};
-
-const pollMarketRun = async (runId) => {
-  const generation = ++pollGeneration;
-  for (let attempt = 0; attempt < 110; attempt += 1) {
-    const response = await agentAPI.getRun(String(runId));
-    if (generation !== pollGeneration) return null;
-    const run = response?.data || {};
-    if (!["queued", "running"].includes(run.status)) {
-      await loadAiHistory();
-      if (run.status === "failed") {
-        throw new Error("行业问数分析失败，请重新发送问题。");
-      }
-      return run;
-    }
-    await wait(1200);
-  }
-  throw new Error("分析仍在进行中，请稍后重新打开对话框查看结果。");
 };
 
 const refreshDashboard = async () => {
@@ -155,9 +245,67 @@ const matrixStyle = (item) => ({
 
 const goCareerAnalysis = () => router.push({ name: "career-analysis" });
 
+const startMarketRun = (runId, conversationId, initialStatus = "queued") => {
+  if (!aiMessages.value.some((message) => message.provisional && String(message.runId) === String(runId))) {
+    aiMessages.value.push({
+      id: `stream-${runId}`,
+      runId: String(runId),
+      role: "assistant",
+      provisional: true,
+      status: initialStatus,
+      content: "",
+    });
+  }
+  marketRun.start({ runId, conversationId, initialStatus });
+};
+
+const submitMarketClarification = async () => {
+  const current = marketClarification.value;
+  const content = clarificationAnswer.value.trim();
+  if (!current?.conversationId || !content || clarificationSubmitting.value) return;
+  clarificationSubmitting.value = true;
+  aiError.value = "";
+  try {
+    const key = globalThis.crypto?.randomUUID?.() || `market-clarify-${Date.now()}`;
+    const response = await agentAPI.sendMessage(
+      current.conversationId,
+      { content, message_type: "clarification_response", context: { source: "market_ai" } },
+      key,
+    );
+    const resumed = response?.data?.run;
+    marketClarification.value = null;
+    clarificationAnswer.value = "";
+    startMarketRun(resumed?.id || current.runId, current.conversationId, resumed?.status || "queued");
+  } catch (error) {
+    aiError.value = extractApiError(error, "补充信息发送失败，请稍后重试。").message;
+  } finally {
+    clarificationSubmitting.value = false;
+  }
+};
+
+const cancelMarketClarification = async () => {
+  const current = marketClarification.value;
+  if (!current || clarificationSubmitting.value) return;
+  clarificationSubmitting.value = true;
+  try {
+    await agentAPI.cancelRun(current.runId);
+    const provisional = aiMessages.value.find((message) => String(message.runId) === current.runId);
+    if (provisional) {
+      provisional.status = "cancelled";
+      provisional.content = "本次问题已取消，未生成完整回答，不会扣除余额。";
+    }
+    marketClarification.value = null;
+    clarificationAnswer.value = "";
+  } catch (error) {
+    aiError.value = extractApiError(error, "任务取消失败，请稍后重试。").message;
+  } finally {
+    clarificationSubmitting.value = false;
+  }
+};
+
 const sendAiQuestion = async () => {
   const question = aiQuestion.value.trim();
-  if (!question || aiSending.value) return;
+  if (!question || aiSending.value || marketClarification.value) return;
   if (!authStore.isAuthenticated) {
     router.push({
       name: "home",
@@ -177,13 +325,20 @@ const sendAiQuestion = async () => {
       { question, context: { filters: { ...filters } } },
       idempotencyKey,
     );
-    const runId = response?.data?.runId || response?.data?.run_id;
+    const runId = response?.data?.runId;
     if (!runId) throw new Error("分析任务创建失败，请稍后重试。");
-    await pollMarketRun(runId);
+    startMarketRun(runId, response?.data?.conversationId, response?.data?.status || "queued");
   } catch (error) {
-    aiError.value = error?.response?.data?.detail
-      || error?.message
-      || "问题暂时发送失败，请稍后重试。";
+    const apiError = extractApiError(
+      error,
+      "问题暂时发送失败，请稍后重试。",
+    );
+    const active = extractAgentRunReference(apiError.data);
+    if (apiError.code === "AGENT_ACTIVE_RUN_EXISTS" && active?.messageType === "market_question") {
+      startMarketRun(active.runId, active.conversationId, active.status || "queued");
+    } else {
+      aiError.value = apiError.message;
+    }
   } finally {
     aiSending.value = false;
   }
@@ -202,12 +357,18 @@ watch(
         aiError.value = "聊天记录暂时加载失败，请稍后重试。";
       });
     } else {
-      pollGeneration += 1;
+      marketRun.stop();
+      marketClarification.value = null;
+      clarificationAnswer.value = "";
       aiMessages.value = [{ ...marketAiWelcome }];
     }
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  marketRun.stop();
+});
 </script>
 
 <template>
@@ -287,16 +448,33 @@ watch(
     <aside v-show="aiOpen" class="market-ai-dialog" data-test="market-ai-dialog" aria-label="AI 行业问数">
       <header><span>AI</span><div><small>MARKET DATA COPILOT</small><strong>AI 行业问数</strong></div><i /><em>在线</em><button data-test="market-ai-close" aria-label="收起 AI 对话框" @click="aiOpen = false">×</button></header>
       <div class="ai-message-list">
-        <div v-for="(message, index) in aiMessages" :key="index" :class="message.role">
+        <div v-for="(message, index) in aiMessages" :key="message.id || index" :class="message.role">
+          <div v-if="message.provisional" class="ai-stream-state" data-test="market-ai-streaming-message">
+            <span v-if="message.status === 'queued'">正在回答（排队中）…</span>
+            <span v-else-if="message.status === 'tool'">正在查询市场数据…</span>
+            <span v-else-if="message.status === 'generating'">正在生成回答…</span>
+            <span v-else-if="message.status === 'streaming'">正在回答</span>
+            <span v-else-if="message.status === 'failed' || message.status === 'cancelled'">回答未完成</span>
+            <span v-else>正在分析…</span>
+            <div
+              class="ai-markdown"
+              v-html="renderAssistantContent(['failed', 'cancelled'].includes(message.status) ? message.content : (message.runId === marketRun.run?.id ? marketRun.content : message.content))"
+            />
+          </div>
           <div
-            v-if="message.role === 'assistant'"
+            v-else-if="message.role === 'assistant'"
             class="ai-markdown"
             v-html="renderAssistantContent(message.content)"
           />
           <template v-else>{{ message.content }}</template>
         </div>
       </div>
-      <form class="ai-composer" @submit.prevent="sendAiQuestion"><textarea v-model="aiQuestion" data-test="market-ai-input" placeholder="例如：新能源行业未来一年需要哪些技能？" /><p v-if="aiError" class="ai-error">{{ aiError }}</p><div><span>发送时需要登录 · {{ priceHint }}</span><button data-test="market-ai-send" :disabled="aiSending">{{ aiSending ? "发送中…" : "发送问题 ↑" }}</button></div></form>
+      <form v-if="marketClarification" class="market-clarification" data-test="market-ai-clarification" @submit.prevent="submitMarketClarification">
+        <p>{{ marketClarification.question }}</p>
+        <textarea v-model="clarificationAnswer" data-test="market-ai-clarification-input" placeholder="补充信息后继续" />
+        <div><button type="button" :disabled="clarificationSubmitting" @click="cancelMarketClarification">取消任务</button><button :disabled="clarificationSubmitting || !clarificationAnswer.trim()">继续分析</button></div>
+      </form>
+      <form class="ai-composer" @submit.prevent="sendAiQuestion"><textarea v-model="aiQuestion" data-test="market-ai-input" :disabled="Boolean(marketClarification)" placeholder="例如：新能源行业未来一年需要哪些技能？" /><p v-if="aiError" class="ai-error">{{ aiError }}</p><div><span>发送时需要登录 · {{ priceHint }}</span><button data-test="market-ai-send" :disabled="aiSending || Boolean(marketClarification)">{{ aiSending ? "发送中…" : "发送问题 ↑" }}</button></div></form>
     </aside>
     <button v-show="!aiOpen" class="ai-launcher" data-test="market-ai-launcher" aria-label="打开 AI 行业问数" @click="aiOpen = true"><span>AI</span><b>问行业数据</b><i /></button>
   </main>

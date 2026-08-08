@@ -15,6 +15,7 @@ from common.databases.PostgresManager import db_manager
 from crud import agent as crud_agent
 from core.logger import sys_logger as logger
 from core.metrics import agent_lock_contention, agent_run_duration, agent_runs_failed
+from services.notification_service import NotificationPersistenceError
 
 
 class AgentRunLockContention(Exception):
@@ -46,7 +47,12 @@ async def _execute_agent_run(run_id: int, user_id: int, execution_token: str) ->
     try:
         async with await db_manager.get_session() as db:
             runtime = AgentRuntime(db)
-            return await runtime.execute(run_id, user_id, execution_token=execution_token)
+            result = await runtime.execute(run_id, user_id, execution_token=execution_token)
+            # AgentRuntime has already committed the answer/run/billing state.
+            # Notification persistence deliberately happens in its own follow-up
+            # transaction, so a retry cannot duplicate the completed answer.
+            await _notify_terminal_run(db, run_id=run_id, user_id=user_id)
+            return result
     finally:
         if lock_token:
             try:
@@ -80,16 +86,42 @@ async def _mark_failed(
             agent_runs_failed.labels(
                 failure_kind=getattr(error, "code", "AGENT_RUNTIME_FAILED")
             ).inc()
-            await agent_event_publisher.publish(
-                run_id=run.id,
-                conversation_id=run.conversation_id,
-                event=AgentEventType.RUN_FAILED,
-                data={
-                    "status": "failed",
-                    "error_code": getattr(error, "code", "AGENT_RUNTIME_FAILED"),
-                    "message": "Agent 分析失败，请稍后重试",
-                },
-            )
+            await _notify_terminal_run(db, run_id=run_id, user_id=user_id)
+            # The failure state is committed and its durable notification is
+            # scheduled/persisted before publishing a best-effort SSE hint.
+            # A custom publisher must never make the worker skip this path.
+            try:
+                await agent_event_publisher.publish(
+                    run_id=run.id,
+                    conversation_id=run.conversation_id,
+                    event=AgentEventType.RUN_FAILED,
+                    data={
+                        "status": "failed",
+                        "error_code": getattr(error, "code", "AGENT_RUNTIME_FAILED"),
+                        "message": "Agent 分析失败，请稍后重试",
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Agent failure SSE publish failed: run_id={run.id}, error={exc}"
+                )
+
+
+async def _notify_terminal_run(db, *, run_id: int, user_id: int) -> None:
+    """Persist a retry-safe message after a terminal AgentRun has committed."""
+    run = await crud_agent.get_run(db, run_id=run_id, user_id=user_id)
+    if run is None or run.status not in {"completed", "failed", "cancelled"}:
+        return
+    try:
+        from tasks.notification_tasks import save_agent_run_message
+    except ImportError:
+        from jobCollectionWebApi.tasks.notification_tasks import save_agent_run_message
+    await save_agent_run_message(
+        run_id=run_id,
+        user_id=user_id,
+        status=run.status,
+        error_message=run.error_message,
+    )
 
 
 @shared_task(
@@ -110,11 +142,17 @@ def execute_agent_run(self, run_id: int, user_id: int) -> dict:
         raise self.retry(exc=exc, countdown=5, max_retries=20)
     except AgentCancelledError:
         return {"run_id": str(run_id), "status": "cancelled"}
+    except NotificationPersistenceError as exc:
+        # The business result is already committed. Re-entering this task will
+        # see an ignored terminal run and retry only the deduplicated message.
+        raise self.retry(exc=exc, countdown=5, max_retries=8)
     except Exception as exc:
         logger.exception(f"Agent run failed: run_id={run_id}, error={exc}")
         try:
             loop.run_until_complete(_mark_failed(run_id, user_id, exc, execution_token))
             agent_run_duration.observe(time.monotonic() - started)
+        except NotificationPersistenceError as notify_exc:
+            raise self.retry(exc=notify_exc, countdown=5, max_retries=8)
         except Exception as mark_exc:
             logger.error(f"Failed to mark Agent run as failed: run_id={run_id}, error={mark_exc}")
         raise

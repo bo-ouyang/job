@@ -210,15 +210,6 @@ def _mark_task_completed(
     else:
         message_text = message_record["content"]
         message_id = message_record["message_id"]
-        _publish_result(
-            user_id,
-            "new_message",
-            {
-                "message_id": message_id,
-                "title": message_record["title"],
-                "content": message_record["content"],
-            },
-        )
 
     _publish_result(
         user_id,
@@ -290,15 +281,6 @@ def _mark_task_failed(
     else:
         message_text = message_record["content"]
         message_id = message_record["message_id"]
-        _publish_result(
-            user_id,
-            "new_message",
-            {
-                "message_id": message_id,
-                "title": message_record["title"],
-                "content": message_record["content"],
-            },
-        )
 
     _publish_result(
         user_id,

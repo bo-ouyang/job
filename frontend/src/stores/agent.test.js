@@ -135,6 +135,52 @@ describe("Agent store", () => {
     expect(mocks.connect).toHaveBeenCalledOnce();
   });
 
+  it("renders canonical streamed assistant content and rejects an old stream attempt", async () => {
+    mocks.getConversation.mockResolvedValue({
+      data: {
+        conversation: { id: "conversation-1" },
+        messages: [],
+        latest_run: { id: "run-1", status: "running" },
+      },
+    });
+    mocks.connect.mockImplementation(async ({ onEvent }) => {
+      await onEvent({ event_id: "1-0", event: "message_started", run_id: "run-1", data: { streamId: "current" } });
+      await onEvent({ event_id: "2-0", event: "message_delta", run_id: "run-1", data: { streamId: "current", delta: "第一段" } });
+      await onEvent({ event_id: "3-0", event: "message_delta", run_id: "run-1", data: { streamId: "old", delta: "旧片段" } });
+      await onEvent({ event_id: "4-0", event: "message_completed", run_id: "run-1", data: { streamId: "current", content: "最终回答" } });
+    });
+    const store = useAgentStore();
+    store.activeConversation = { id: "conversation-1" };
+    store.activeRun = { id: "run-1", status: "running" };
+
+    await store.startRunStream("run-1");
+
+    expect(store.messages.find((message) => message.id === "stream-run-1")?.content).toBe("最终回答");
+    store.stopRunStream();
+  });
+
+  it("converges after repeated SSE failures and performs one final snapshot recovery", async () => {
+    vi.useFakeTimers();
+    mocks.connect.mockRejectedValue(new Error("stream offline"));
+    mocks.getRun.mockResolvedValue({ data: { id: "run-1", status: "running" } });
+    mocks.getConversation.mockResolvedValue({
+      data: { conversation: { id: "conversation-1" }, messages: [], latest_run: { id: "run-1", status: "running" } },
+    });
+    const store = useAgentStore();
+    store.activeConversation = { id: "conversation-1" };
+    store.activeRun = { id: "run-1", status: "running" };
+
+    void store.startRunStream("run-1");
+    await vi.advanceTimersByTimeAsync(120000);
+
+    expect(mocks.connect).toHaveBeenCalledTimes(6);
+    expect(mocks.getRun).toHaveBeenCalledTimes(6);
+    expect(store.connectionState).toBe("degraded");
+    store.stopRunStream();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(mocks.getRun).toHaveBeenCalledTimes(6);
+  });
+
   it("restores a waiting run without reopening the event stream", async () => {
     mocks.getRun.mockResolvedValue({ data: { id: "run-1", status: "waiting_user" } });
     mocks.getConversation.mockResolvedValue({

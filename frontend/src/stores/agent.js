@@ -58,6 +58,8 @@ export const useAgentStore = defineStore(
     const isSending = ref(false);
     const error = ref(null);
     const structuredResult = ref(null);
+    const activeMessageStreamId = ref(null);
+    const activeStreamingMessageId = ref(null);
     const featureAvailable = ref(
       DATA_SOURCE === "mock" && FRONTEND_AGENT_ENABLED,
     );
@@ -275,10 +277,37 @@ export const useAgentStore = defineStore(
       if (!activeRun.value || String(activeRun.value.id) !== String(event.run_id)) return;
       if (event.event === "run_started") activeRun.value.status = "running";
       if (event.event === "clarification_required") activeRun.value.status = "waiting_user";
-      if (event.event === "message_completed") structuredResult.value = event.data?.result || null;
+      const eventStreamId = event.data?.streamId || event.data?.stream_id || null;
+      if (event.event === "message_started") {
+        activeMessageStreamId.value = eventStreamId;
+        activeStreamingMessageId.value = `stream-${event.run_id}`;
+        messages.value = messages.value.filter((message) => message.id !== activeStreamingMessageId.value);
+        messages.value.push({
+          id: activeStreamingMessageId.value,
+          role: "assistant",
+          content: "",
+          message_type: "streaming",
+          created_at: new Date().toISOString(),
+          time: currentTime(),
+          metadata: { runId: String(event.run_id), streamId: eventStreamId },
+        });
+      }
+      if (event.event === "message_delta") {
+        if (activeMessageStreamId.value && eventStreamId !== activeMessageStreamId.value) return;
+        const streamingMessage = messages.value.find((message) => message.id === activeStreamingMessageId.value);
+        if (streamingMessage) streamingMessage.content += String(event.data?.delta || "");
+      }
+      if (event.event === "message_completed") {
+        if (activeMessageStreamId.value && eventStreamId !== activeMessageStreamId.value) return;
+        const streamingMessage = messages.value.find((message) => message.id === activeStreamingMessageId.value);
+        if (streamingMessage && typeof event.data?.content === "string") streamingMessage.content = event.data.content;
+        structuredResult.value = event.data?.result || null;
+      }
       if (event.event === "run_completed") activeRun.value.status = "completed";
       if (event.event === "run_failed") {
         activeRun.value.status = "failed";
+        const streamingMessage = messages.value.find((message) => message.id === activeStreamingMessageId.value);
+        if (streamingMessage) streamingMessage.content = "本次分析未完成，未生成可用回答。";
         error.value = event.data?.message || event.data?.error_code || "Agent 分析失败";
       }
       if (event.event === "run_cancelled") activeRun.value.status = "cancelled";
@@ -320,10 +349,10 @@ export const useAgentStore = defineStore(
     function scheduleReconnect(runId) {
       if (reconnectTimer || !ACTIVE_STATUSES.has(activeRun.value?.status)) return;
       if (reconnectAttempt.value >= 5) {
-        connectionState.value = "recovering";
+        connectionState.value = "degraded";
         reconnectTimer = setTimeout(async () => {
           reconnectTimer = null;
-          await recoverRun(runId, { reconnectActive: true });
+          await recoverRun(runId, { reconnectActive: false });
         }, 15000);
         return;
       }
@@ -347,7 +376,9 @@ export const useAgentStore = defineStore(
           return;
         }
         await refreshActiveSnapshot();
-        connectionState.value = response.data.status === "waiting_user" ? "paused" : "closed";
+        connectionState.value = response.data.status === "waiting_user"
+          ? "paused"
+          : ACTIVE_STATUSES.has(response.data.status) ? "degraded" : "closed";
       } catch (requestError) {
         connectionState.value = "failed";
         error.value = requestError?.response?.data?.msg || "运行状态恢复失败";
@@ -450,6 +481,8 @@ export const useAgentStore = defineStore(
       isSending.value = false;
       error.value = null;
       structuredResult.value = null;
+      activeMessageStreamId.value = null;
+      activeStreamingMessageId.value = null;
       featureAvailable.value = DATA_SOURCE === "mock" && import.meta.env.VITE_AGENT_ENABLED === "true";
       capabilitiesLoaded.value = DATA_SOURCE === "mock";
       uploadedDocument.value = null;
@@ -483,6 +516,7 @@ export const useAgentStore = defineStore(
       isSending,
       error,
       structuredResult,
+      activeMessageStreamId,
       featureAvailable,
       capabilitiesLoaded,
       isApiMode,

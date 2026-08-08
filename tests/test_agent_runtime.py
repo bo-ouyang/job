@@ -20,6 +20,8 @@ from agent.errors import (
 )
 from agent.policies import AgentPolicies
 from agent.runtime import AgentRuntime
+from agent.event_store import AgentEventPublisher
+from agent.events import AgentEventType
 from agent.state import AgentAnswer, AgentPlan
 from agent.tools.base import AgentTool
 from agent.tools.registry import AgentToolRegistry
@@ -39,13 +41,105 @@ class FakeDB:
         self.rollbacks += 1
 
 
+class DeadlineExpiringDB(FakeDB):
+    def __init__(self):
+        super().__init__()
+        self.on_final_commit = None
+
+    async def commit(self):
+        await super().commit()
+        if self.commits == 7 and self.on_final_commit is not None:
+            self.on_final_commit()
+
+
 class FakePublisher:
     def __init__(self):
         self.events = []
 
     async def publish(self, **kwargs):
         self.events.append(kwargs)
-        return None
+        return SimpleNamespace(**kwargs)
+
+
+class ExplodingEventStore:
+    async def append(self, **kwargs):
+        raise ConnectionError("redis unavailable")
+
+
+class ExplodingPublisher:
+    async def publish(self, **kwargs):
+        raise RuntimeError("invalid test publisher")
+
+
+class SlowStreamingPublisher(FakePublisher):
+    def __init__(self, delay_seconds=0.1):
+        super().__init__()
+        self.delay_seconds = delay_seconds
+        self.slow_waits = 0
+
+    async def publish(self, **kwargs):
+        if kwargs["event"].value in {"message_started", "message_delta"}:
+            self.slow_waits += 1
+            await asyncio.sleep(self.delay_seconds)
+        return await super().publish(**kwargs)
+
+
+class SlowRunCompletedPublisher(FakePublisher):
+    def __init__(self, delay_seconds=0.2):
+        super().__init__()
+        self.delay_seconds = delay_seconds
+        self.slow_waits = 0
+
+    async def publish(self, **kwargs):
+        if kwargs["event"].value == "run_completed":
+            self.slow_waits += 1
+            await asyncio.sleep(self.delay_seconds)
+        return await super().publish(**kwargs)
+
+
+class OwnershipLosingPublisher(FakePublisher):
+    def __init__(self, repository, *, emit_cancelled=False):
+        super().__init__()
+        self.repository = repository
+        self.emit_cancelled = emit_cancelled
+        self.triggered = False
+        self.active_stream_id = None
+        self.terminal = False
+
+    async def publish(self, **kwargs):
+        event_name = kwargs["event"].value
+        stream_id = kwargs["data"].get("streamId")
+        if self.terminal and event_name in {
+            "message_started",
+            "message_delta",
+            "message_completed",
+        }:
+            return None
+        if event_name == "message_started":
+            self.active_stream_id = stream_id
+        elif event_name in {"message_delta", "message_completed"}:
+            if not stream_id or stream_id != self.active_stream_id:
+                return None
+
+        accepted = await super().publish(**kwargs)
+        if event_name == "message_delta" and not self.triggered:
+            self.triggered = True
+            self.repository.run.status = "cancelled" if self.emit_cancelled else "running"
+            self.repository.run.execution_token = None if self.emit_cancelled else "new-owner"
+            if self.emit_cancelled:
+                self.terminal = True
+                self.events.append(
+                    {
+                        **kwargs,
+                        "event": AgentEventType.RUN_CANCELLED,
+                        "data": {"status": "cancelled"},
+                    }
+                )
+            else:
+                # Emulate a newer attempt winning the atomic active-stream gate
+                # before the stale worker tries to publish its next delta.
+                self.active_stream_id = "attempt-two"
+        return accepted
 
 
 class FakeBillingService:
@@ -78,6 +172,7 @@ class FakeRepository:
 
     async def claim_run(self, db, **kwargs):
         self.run.status = "running"
+        self.run.execution_token = kwargs["execution_token"]
         return self.run
 
     async def get_conversation(self, db, **kwargs):
@@ -89,8 +184,26 @@ class FakeRepository:
     async def get_profile(self, db, **kwargs):
         return None
 
+    async def lock_owned_running_run(self, db, **kwargs):
+        if self.run.status != "running":
+            return None
+        if self.run.execution_token != kwargs["execution_token"]:
+            return None
+        return self.run
+
+    async def is_run_owned_and_running(self, db, **kwargs):
+        return (
+            self.run.status == "running"
+            and self.run.execution_token == kwargs["execution_token"]
+        )
+
     async def transition_run(self, db, **kwargs):
         self.transitions.append(kwargs)
+        if self.run.status not in kwargs["from_statuses"]:
+            return None
+        expected_token = kwargs.get("execution_token")
+        if expected_token is not None and self.run.execution_token != expected_token:
+            return None
         if kwargs["to_status"] == self.cancel_on_status:
             return None
         self.run.status = kwargs["to_status"]
@@ -132,6 +245,18 @@ class TimeoutOnceAnswerClient(ScriptedClient):
                 raise LLMTimeoutError("transient model timeout")
             return self.answer
         raise AssertionError("unexpected schema")
+
+
+class OwnershipStealingAnswerClient(ScriptedClient):
+    def __init__(self, plan, answer, repository):
+        super().__init__(plan, answer)
+        self.repository = repository
+
+    async def complete_structured(self, system_prompt, user_prompt, schema):
+        result = await super().complete_structured(system_prompt, user_prompt, schema)
+        if schema is AgentAnswer:
+            self.repository.run.execution_token = "new-owner"
+        return result
 
 
 class SuccessfulSearchTool(AgentTool[SearchJobsInput]):
@@ -281,14 +406,331 @@ def test_runtime_completes_with_real_tool_evidence():
     assert repository.created_messages[-1].message_type == "analysis_result"
     assert repository.transitions[-1]["to_status"] == "completed"
     assert len(client.calls) == 2
-    assert [event["event"].value for event in publisher.events] == [
-        "run_started",
-        "plan_created",
-        "tool_started",
-        "tool_completed",
+    assert publisher.events[-1]["event"].value == "run_completed"
+
+
+def test_runtime_streams_final_markdown_as_ordered_bounded_message_deltas():
+    answer = answer_result()
+    publisher = FakePublisher()
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=FakeRepository(),
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    indexed_events = list(enumerate(publisher.events))
+    started_indexes = [
+        index
+        for index, event in indexed_events
+        if event["event"].value == "message_started"
+    ]
+    delta_events = [
+        (index, event)
+        for index, event in indexed_events
+        if event["event"].value == "message_delta"
+    ]
+    completed_indexes = [
+        index
+        for index, event in indexed_events
+        if event["event"].value == "message_completed"
+    ]
+
+    assert len(started_indexes) == 1
+    assert len(delta_events) >= 2
+    assert len(completed_indexes) == 1
+    assert all(
+        isinstance(event["data"].get("delta"), str)
+        and 0 < len(event["data"]["delta"]) <= 256
+        for _, event in delta_events
+    )
+    assert started_indexes[0] < min(index for index, _ in delta_events)
+    assert max(index for index, _ in delta_events) < completed_indexes[0]
+    assert "".join(event["data"]["delta"] for _, event in delta_events) == answer.to_markdown()
+    assert [event["data"]["index"] for _, event in delta_events] == list(
+        range(len(delta_events))
+    )
+    completed = publisher.events[completed_indexes[0]]["data"]
+    assert completed["content"] == answer.to_markdown()
+    assert completed["result"] == answer.model_dump(mode="json")
+    assert completed["deltaCount"] == len(delta_events)
+    run_completed_index = next(
+        index
+        for index, event in indexed_events
+        if event["event"].value == "run_completed"
+    )
+    assert completed_indexes[0] < run_completed_index
+    stream_events = [
+        event
+        for event in publisher.events
+        if event["event"].value in {
+            "message_started",
+            "message_delta",
+            "message_completed",
+        }
+    ]
+    assert {event["data"]["streamId"] for event in stream_events} == {
+        runtime.execution_token
+    }
+
+
+def test_new_attempt_restarts_delta_indexes_with_a_new_stream_id():
+    repository = FakeRepository()
+    publisher = OwnershipLosingPublisher(repository)
+    first_runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=repository,
+    )
+
+    with pytest.raises(AgentCancelledError):
+        asyncio.run(first_runtime.execute(100, 300, execution_token="attempt-one"))
+
+    repository.run.status = "queued"
+    repository.run.execution_token = None
+    second_runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=repository,
+    )
+    result = asyncio.run(
+        second_runtime.execute(100, 300, execution_token="attempt-two")
+    )
+
+    assert result["status"] == "completed"
+    deltas_by_stream = {}
+    for event in publisher.events:
+        if event["event"].value != "message_delta":
+            continue
+        deltas_by_stream.setdefault(event["data"]["streamId"], []).append(
+            event["data"]["index"]
+        )
+    assert deltas_by_stream["attempt-one"] == [0]
+    assert deltas_by_stream["attempt-two"][0] == 0
+    assert len(deltas_by_stream["attempt-two"]) >= 2
+
+
+def test_stale_attempt_does_not_publish_started_after_answer_model_returns():
+    repository = FakeRepository()
+    publisher = FakePublisher()
+    stale_runtime = AgentRuntime(
+        FakeDB(),
+        client=OwnershipStealingAnswerClient(
+            analyze_plan(),
+            answer_result(),
+            repository,
+        ),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=repository,
+    )
+
+    with pytest.raises(AgentCancelledError):
+        asyncio.run(
+            stale_runtime.execute(100, 300, execution_token="old-owner")
+        )
+
+    assert not {
+        "message_started",
+        "message_delta",
+        "message_completed",
+    } & {event["event"].value for event in publisher.events}
+
+    repository.run.status = "queued"
+    repository.run.execution_token = None
+    fresh_runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=repository,
+    )
+    result = asyncio.run(
+        fresh_runtime.execute(100, 300, execution_token="new-owner")
+    )
+
+    assert result["status"] == "completed"
+    fresh_stream_events = [
+        event
+        for event in publisher.events
+        if event["event"].value in {
+            "message_started",
+            "message_delta",
+            "message_completed",
+        }
+    ]
+    assert fresh_stream_events
+    assert {event["data"]["streamId"] for event in fresh_stream_events} == {
+        "new-owner"
+    }
+
+
+def test_cancellation_after_a_delta_prevents_every_later_delta_and_completion():
+    repository = FakeRepository()
+    publisher = OwnershipLosingPublisher(repository, emit_cancelled=True)
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=publisher,
+        repository=repository,
+    )
+
+    with pytest.raises(AgentCancelledError):
+        asyncio.run(runtime.execute(100, 300, execution_token="cancelled-attempt"))
+
+    names = [event["event"].value for event in publisher.events]
+    cancelled_index = names.index("run_cancelled")
+    assert "message_delta" not in names[cancelled_index + 1 :]
+    assert "message_completed" not in names
+    assert "run_completed" not in names
+
+
+def test_slow_stream_publisher_times_out_once_then_saves_and_charges():
+    db = FakeDB()
+    repository = FakeRepository()
+    repository.run.billing_feature_key = "career_advice"
+    repository.run.charge_amount = 1.5
+    repository.run.charged_at = None
+    billing = FakeBillingService()
+    publisher = SlowStreamingPublisher(delay_seconds=0.1)
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(stream_publish_timeout_seconds=0.01),
+        publisher=publisher,
+        repository=repository,
+        billing_service=billing,
+    )
+
+    started = time.monotonic()
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert time.monotonic() - started < 1
+    assert result["status"] == "completed"
+    assert publisher.slow_waits == 1
+    assert len(billing.charges) == 1
+    assert repository.created_messages[-1].content == answer_result().to_markdown()
+    assert [event["event"].value for event in publisher.events][-2:] == [
         "message_completed",
         "run_completed",
     ]
+
+
+def test_streaming_chunk_count_does_not_add_database_commits():
+    short_db = FakeDB()
+    short_publisher = FakePublisher()
+    short_runtime = AgentRuntime(
+        short_db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=short_publisher,
+        repository=FakeRepository(),
+    )
+    long_answer = answer_result().model_copy(
+        update={"summary": "长期职业规划与市场证据。" * 250}
+    )
+    long_db = FakeDB()
+    long_publisher = FakePublisher()
+    long_runtime = AgentRuntime(
+        long_db,
+        client=ScriptedClient(analyze_plan(), long_answer),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=long_publisher,
+        repository=FakeRepository(),
+    )
+
+    asyncio.run(short_runtime.execute(100, 300, execution_token="short-attempt"))
+    asyncio.run(long_runtime.execute(100, 300, execution_token="long-attempt"))
+
+    short_deltas = sum(
+        event["event"].value == "message_delta" for event in short_publisher.events
+    )
+    long_deltas = sum(
+        event["event"].value == "message_delta" for event in long_publisher.events
+    )
+    assert long_deltas > short_deltas
+    assert short_db.commits == long_db.commits == 7
+
+
+def test_post_commit_terminal_publish_is_extremely_bounded_after_deadline():
+    db = DeadlineExpiringDB()
+    publisher = SlowRunCompletedPublisher(delay_seconds=0.2)
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(stream_publish_timeout_seconds=0.5),
+        publisher=publisher,
+        repository=FakeRepository(),
+    )
+    db.on_final_commit = lambda: setattr(runtime, "deadline", time.monotonic() - 1)
+
+    started = time.monotonic()
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    assert publisher.slow_waits == 1
+    assert time.monotonic() - started < 0.1
+
+
+def test_safe_event_publisher_isolates_redis_failure_from_success_and_billing():
+    db = FakeDB()
+    repository = FakeRepository()
+    repository.run.billing_feature_key = "career_advice"
+    repository.run.charge_amount = 1.5
+    repository.run.charged_at = None
+    billing = FakeBillingService()
+    runtime = AgentRuntime(
+        db,
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=AgentEventPublisher(ExplodingEventStore()),
+        repository=repository,
+        billing_service=billing,
+    )
+
+    result = asyncio.run(runtime.execute(100, 300))
+
+    assert result["status"] == "completed"
+    assert repository.created_messages[-1].message_type == "analysis_result"
+    assert repository.transitions[-1]["to_status"] == "completed"
+    assert len(billing.charges) == 1
+
+
+def test_runtime_does_not_hide_an_invalid_injected_publisher():
+    repository = FakeRepository()
+    runtime = AgentRuntime(
+        FakeDB(),
+        client=ScriptedClient(analyze_plan(), answer_result()),
+        registry=make_registry(SuccessfulSearchTool()),
+        policies=make_policies(),
+        publisher=ExplodingPublisher(),
+        repository=repository,
+    )
+
+    with pytest.raises(RuntimeError, match="invalid test publisher"):
+        asyncio.run(runtime.execute(100, 300))
+
+    assert repository.created_messages == []
 
 
 def test_runtime_retries_one_transient_answer_model_timeout_within_run_budget():
@@ -434,12 +876,13 @@ def test_late_cancellation_rolls_back_agent_charge_with_result():
     repository.run.charge_amount = 1.5
     repository.run.charged_at = None
     billing = FakeBillingService()
+    publisher = FakePublisher()
     runtime = AgentRuntime(
         db,
         client=ScriptedClient(analyze_plan(), answer_result()),
         registry=make_registry(SuccessfulSearchTool()),
         policies=make_policies(),
-        publisher=FakePublisher(),
+        publisher=publisher,
         repository=repository,
         billing_service=billing,
     )
@@ -449,6 +892,10 @@ def test_late_cancellation_rolls_back_agent_charge_with_result():
 
     assert billing.committed_charges == 0
     assert db.rollbacks == 1
+    assert not {
+        "message_completed",
+        "run_completed",
+    } & {event["event"].value for event in publisher.events}
 
 
 def test_runtime_requests_one_clarification():
@@ -477,17 +924,23 @@ def test_runtime_requests_one_clarification():
 
 
 def test_runtime_refuses_to_answer_when_all_tools_fail():
+    publisher = FakePublisher()
     runtime = AgentRuntime(
         FakeDB(),
         client=ScriptedClient(analyze_plan(), answer_result()),
         registry=make_registry(FailedSearchTool()),
         policies=make_policies(),
-        publisher=FakePublisher(),
+        publisher=publisher,
         repository=FakeRepository(),
     )
 
     with pytest.raises(AgentEvidenceUnavailableError):
         asyncio.run(runtime.execute(100, 300))
+    assert not {
+        "message_started",
+        "message_completed",
+        "run_completed",
+    } & {event["event"].value for event in publisher.events}
 
 
 def test_runtime_refuses_empty_success_as_evidence():
@@ -535,16 +988,22 @@ def test_runtime_rolls_back_late_answer_after_cancellation():
 
 
 def test_runtime_enforces_whole_run_deadline():
+    publisher = FakePublisher()
     runtime = AgentRuntime(
         FakeDB(),
         client=ScriptedClient(analyze_plan(), answer_result()),
         registry=make_registry(SuccessfulSearchTool()),
         policies=make_policies(run_timeout_seconds=-1),
-        publisher=FakePublisher(),
+        publisher=publisher,
         repository=FakeRepository(),
     )
     with pytest.raises(AgentDeadlineExceededError):
         asyncio.run(runtime.execute(100, 300))
+    assert not {
+        "message_started",
+        "message_completed",
+        "run_completed",
+    } & {event["event"].value for event in publisher.events}
 
 
 def test_production_llm_client_rejects_mock_provider(monkeypatch):

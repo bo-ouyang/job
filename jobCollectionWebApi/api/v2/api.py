@@ -5,6 +5,7 @@ from api.v2.endpoints import (
     crawler_agent_controller,
     crawler_controller,
     market_controller,
+    message_controller,
     meta_controller,
     pricing_controller,
     profile_controller,
@@ -20,6 +21,7 @@ api_router.include_router(
     tags=["v2-career-analysis"],
 )
 api_router.include_router(pricing_controller.router, prefix="/ai", tags=["v2-ai"])
+api_router.include_router(message_controller.router, prefix="/messages", tags=["v2-messages"])
 api_router.include_router(
     crawler_controller.router,
     prefix="/admin/crawlers",

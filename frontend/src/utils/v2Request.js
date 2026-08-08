@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { getAccessToken, refreshAccessToken } from "@/utils/request";
+import { extractApiError } from "@/utils/apiError";
 
 
 const service = axios.create({
@@ -21,6 +22,38 @@ service.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+export const handleV2ResponseError = async (error) => {
+  const { config, response } = error;
+  const originalRequest = config || {};
+
+  if (response?.status === 401 && !originalRequest._retry) {
+    originalRequest._retry = true;
+    try {
+      const token = await refreshAccessToken();
+      originalRequest.headers = originalRequest.headers || {};
+      originalRequest.headers.Authorization = `Bearer ${token}`;
+      return service(originalRequest);
+    } catch (refreshError) {
+      return Promise.reject(refreshError);
+    }
+  }
+
+  if (response?.status === 402) {
+    const detail = extractApiError(
+      error,
+      "余额不足，请先充值后继续使用该 AI 功能",
+    ).message;
+    window.dispatchEvent(
+      new CustomEvent("billing-required", { detail: { message: detail } }),
+    );
+    if (window.location.pathname !== "/my/wallet") {
+      window.location.assign("/my/wallet");
+    }
+  }
+
+  return Promise.reject(error);
+};
+
 service.interceptors.response.use(
   (response) => {
     if (
@@ -32,36 +65,7 @@ service.interceptors.response.use(
     }
     return response;
   },
-  async (error) => {
-    const { config, response } = error;
-    const originalRequest = config || {};
-
-    if (response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      try {
-        const token = await refreshAccessToken();
-        originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers.Authorization = `Bearer ${token}`;
-        return service(originalRequest);
-      } catch (refreshError) {
-        return Promise.reject(refreshError);
-      }
-    }
-
-    if (response?.status === 402) {
-      const detail = response?.data?.detail
-        || response?.data?.message
-        || "余额不足，请先充值后继续使用该 AI 功能";
-      window.dispatchEvent(
-        new CustomEvent("billing-required", { detail: { message: detail } }),
-      );
-      if (window.location.pathname !== "/my/wallet") {
-        window.location.assign("/my/wallet");
-      }
-    }
-
-    return Promise.reject(error);
-  },
+  handleV2ResponseError,
 );
 
 export default service;

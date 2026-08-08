@@ -16,6 +16,8 @@ class AgentEventType(str, Enum):
     TOOL_PROGRESS = "tool_progress"
     TOOL_COMPLETED = "tool_completed"
     CLARIFICATION_REQUIRED = "clarification_required"
+    MESSAGE_STARTED = "message_started"
+    MESSAGE_DELTA = "message_delta"
     MESSAGE_COMPLETED = "message_completed"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
@@ -58,7 +60,11 @@ def sanitize_event_data(value: Any, depth: int = 0) -> Any:
     if isinstance(value, dict):
         blocked = {"prompt", "sql", "dsl", "api_key", "token", "traceback", "state_snapshot"}
         return {
-            str(key): sanitize_event_data(item, depth + 1)
+            str(key): (
+                item
+                if str(key).lower() == "content" and isinstance(item, str)
+                else sanitize_event_data(item, depth + 1)
+            )
             for key, item in list(value.items())[:40]
             if str(key).lower() not in blocked
         }

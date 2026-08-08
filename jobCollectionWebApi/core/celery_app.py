@@ -56,7 +56,7 @@ celery_app.conf.update(
         "tasks.fetch_proxies": {"queue": "batch"},
         "tasks.sync_proxies": {"queue": "batch"},
         "tasks.ai_task_cleanup.*": {"queue": "batch"},
-        "tasks.notification_tasks.*": {"queue": "batch"},
+        "tasks.notification_tasks.*": {"queue": "realtime"},
     },
 
     # Schedule configuration (will adhere to Celery Beat)
@@ -80,6 +80,10 @@ celery_app.conf.update(
         'cleanup-stale-ai-tasks-every-10-minutes': {
             'task': 'tasks.ai_task_cleanup.cleanup_stale_ai_tasks',
             'schedule': 600, # 每10分钟清理一次僵死AI任务
+        },
+        'reconcile-agent-run-notifications-every-5-minutes': {
+            'task': 'tasks.notification_tasks.reconcile_agent_run_notifications',
+            'schedule': 300,
         },
     }
 )

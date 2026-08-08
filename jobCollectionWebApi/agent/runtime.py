@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from common.databases.PostgresManager import db_manager
 from agent.errors import (
     AgentCancelledError,
     AgentDeadlineExceededError,
@@ -24,6 +25,7 @@ from agent.errors import (
 from agent.event_store import AgentEventPublisher, agent_event_publisher
 from agent.events import AgentEventType
 from agent.graph import AgentNode
+from agent.markdown_stream import chunk_markdown
 from agent.policies import AgentPolicies
 from agent.prompts import ANSWER_SYSTEM_PROMPT, PLANNER_SYSTEM_PROMPT
 from agent.state import (
@@ -282,16 +284,65 @@ class AgentRuntime:
             self._build_answer_input(messages, profile_data, state),
             AgentAnswer,
         )
-        result = await self._save_answer(run, user_id, answer, state)
-        await self._publish(
+        await self._ensure_current_execution_owner(run, user_id, state)
+        # The model result is validated as AgentAnswer before anything is shown.
+        # Convert it to final Markdown exactly once, then stream deterministic
+        # chunks. This is intentionally not raw model-token streaming.
+        final_markdown = answer.to_markdown()
+        chunks = chunk_markdown(final_markdown)
+        stream_available = await self._publish_stream_event(
+            run,
+            state,
+            AgentEventType.MESSAGE_STARTED,
+            {
+                "streamId": self.execution_token,
+                "streamMode": "validated_markdown_chunks",
+                "contentType": "text/markdown",
+                "deltaCount": len(chunks),
+            },
+        )
+        published_delta_count = 0
+        if stream_available:
+            for index, delta in enumerate(chunks):
+                stream_available = await self._publish_stream_event(
+                    run,
+                    state,
+                    AgentEventType.MESSAGE_DELTA,
+                    {
+                        "streamId": self.execution_token,
+                        "index": index,
+                        "delta": delta,
+                    },
+                )
+                if not stream_available:
+                    break
+                published_delta_count += 1
+
+        self._check_budget(state)
+
+        result = await self._save_answer(
+            run,
+            user_id,
+            answer,
+            final_markdown,
+            state,
+        )
+        await self._publish_post_commit(
             run,
             AgentEventType.MESSAGE_COMPLETED,
-            {"message_id": result["message_id"], "result": answer.model_dump(mode="json")},
+            {
+                "message_id": result["message_id"],
+                "streamId": self.execution_token,
+                "content": final_markdown,
+                "result": answer.model_dump(mode="json"),
+                "deltaCount": published_delta_count,
+            },
         )
-        await self._publish(
+        await self._publish_post_commit(
             run,
             AgentEventType.RUN_COMPLETED,
             {"status": "completed", "message_id": result["message_id"]},
+            allow_expired_attempt=True,
         )
         agent_runs_completed.inc()
         agent_run_duration.observe(time.monotonic() - run_started_monotonic)
@@ -383,6 +434,7 @@ class AgentRuntime:
         run,
         user_id: int,
         answer: AgentAnswer,
+        final_markdown: str,
         state: RuntimeState,
     ) -> Dict[str, Any]:
         """原子完成扣费、回答入库和运行终态更新。
@@ -391,6 +443,18 @@ class AgentRuntime:
         幂等，并与回答、completed 状态在同一数据库事务中提交；任何后续条件更新失败
         都会整体回滚，因此失败或取消的运行不会扣余额。
         """
+
+        self._check_budget(state)
+        owned_run = await self.repository.lock_owned_running_run(
+            self.db,
+            run_id=run.id,
+            user_id=user_id,
+            execution_token=self.execution_token,
+        )
+        if owned_run is None:
+            await self.db.rollback()
+            raise AgentCancelledError("保存结果时运行已取消或执行租约已转移")
+        self._check_budget(state)
 
         result_data = answer.model_dump(mode="json")
         charge_amount = float(getattr(run, "charge_amount", 0) or 0)
@@ -414,7 +478,7 @@ class AgentRuntime:
             user_id=user_id,
             role="assistant",
             message_type="analysis_result",
-            content=answer.to_markdown(),
+            content=final_markdown,
             metadata={
                 "run_id": str(run.id),
                 "schema_version": "1.0",
@@ -501,6 +565,136 @@ class AgentRuntime:
             event=event,
             data=data,
         )
+
+    async def _publish_stream_event(
+        self,
+        run,
+        state: RuntimeState,
+        event: AgentEventType,
+        data: Dict[str, Any],
+    ) -> bool:
+        """Publish one answer frame without opening a database transaction.
+
+        Ordering against cancellation and competing attempts is enforced by
+        the EventStore's atomic Redis gate. A timeout or rejected event opens a
+        run-local stream circuit breaker in ``execute``; other publisher errors
+        remain visible as programming/integration failures.
+        """
+
+        self._check_budget(state)
+        published = await self._publish_bounded(run, event, data)
+        self._check_budget(state)
+        return published
+
+    async def _ensure_current_execution_owner(
+        self,
+        run,
+        user_id: int,
+        state: RuntimeState,
+    ) -> None:
+        """Freshly verify ownership before allowing this attempt to open a stream.
+
+        Production uses a separate short-lived read-only session, so ORM identity
+        caching in the runtime session cannot hide a newer lease owner. Test
+        repositories use their injected in-memory session without adding commits.
+        Delta ordering after this check remains entirely Redis-gated.
+        """
+
+        self._check_budget(state)
+        if self.repository is crud_agent:
+            async with await db_manager.get_session() as ownership_db:
+                is_owner = await self.repository.is_run_owned_and_running(
+                    ownership_db,
+                    run_id=run.id,
+                    user_id=user_id,
+                    execution_token=self.execution_token,
+                )
+        else:
+            is_owner = await self.repository.is_run_owned_and_running(
+                self.db,
+                run_id=run.id,
+                user_id=user_id,
+                execution_token=self.execution_token,
+            )
+        self._check_budget(state)
+        if not is_owner:
+            raise AgentCancelledError(
+                "开始流式输出前运行已取消或执行租约已转移"
+            )
+
+    async def _publish_bounded(
+        self,
+        run,
+        event: AgentEventType,
+        data: Dict[str, Any],
+    ) -> bool:
+        """Bound pre-commit stream latency by both policy and run budget."""
+
+        try:
+            published = await asyncio.wait_for(
+                self.publisher.publish(
+                    run_id=run.id,
+                    conversation_id=run.conversation_id,
+                    event=event,
+                    data=data,
+                ),
+                timeout=min(
+                    self.policies.stream_publish_timeout_seconds,
+                    self._remaining_seconds(),
+                ),
+            )
+            return published is not None
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Agent event publish timed out; continuing with database snapshot: "
+                f"run_id={run.id}, event={event.value}"
+            )
+            return False
+
+    async def _publish_post_commit(
+        self,
+        run,
+        event: AgentEventType,
+        data: Dict[str, Any],
+        *,
+        allow_expired_attempt: bool = False,
+    ) -> bool:
+        """Best-effort terminal publishing that cannot undo committed business state."""
+
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            if not allow_expired_attempt:
+                return False
+            # ``run_completed`` owns the Redis terminal gate, so make one very
+            # short attempt even after the business deadline has elapsed.
+            timeout = min(self.policies.stream_publish_timeout_seconds, 0.01)
+        else:
+            timeout = min(self.policies.stream_publish_timeout_seconds, remaining)
+        try:
+            published = await asyncio.wait_for(
+                self.publisher.publish(
+                    run_id=run.id,
+                    conversation_id=run.conversation_id,
+                    event=event,
+                    data=data,
+                ),
+                timeout=timeout,
+            )
+            return published is not None
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Post-commit Agent event publish timed out: "
+                f"run_id={run.id}, event={event.value}"
+            )
+            return False
+        except Exception as exc:
+            # The answer, completed status and charge are already committed.
+            # Event infrastructure must not turn that success into task failure.
+            logger.warning(
+                "Post-commit Agent event publish failed: "
+                f"run_id={run.id}, event={event.value}, error={exc}"
+            )
+            return False
 
     @staticmethod
     def _has_usable_evidence(result) -> bool:

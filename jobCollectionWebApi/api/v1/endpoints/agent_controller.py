@@ -26,6 +26,7 @@ from core.metrics import (
     agent_sse_reconnects,
     celery_tasks_submitted,
 )
+from core.logger import sys_logger as logger
 from schemas.agent_schema import (
     AgentConversationCreate,
     AgentConversationDetailResponse,
@@ -44,6 +45,31 @@ from jobCollectionWebApi.tasks.agent_tasks import execute_agent_run
 
 
 router = APIRouter()
+
+
+def _enqueue_terminal_notification(
+    *, user_id: int, run_id: int, status: str, error_message: str | None = None
+) -> None:
+    """Best-effort immediate delivery after a committed AgentRun terminal state.
+
+    A broker failure is intentionally not propagated to the user request: the
+    periodic reconciliation task locates the terminal run later and writes the
+    same database-deduplicated notification.
+    """
+    try:
+        from tasks.notification_tasks import enqueue_agent_run_message
+
+        enqueue_agent_run_message(
+            user_id=user_id,
+            run_id=run_id,
+            status=status,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.warning(
+            "enqueue AgentRun terminal notification failed; reconciliation will retry: "
+            f"run_id={run_id}, status={status}, error={exc}"
+        )
 
 
 async def _enforce_agent_user_rate_limit(user_id: int) -> None:
@@ -103,7 +129,8 @@ async def get_agent_capabilities(
     return {
         "enabled": _agent_enabled_for_user(current_user.id),
         "supports_sse": True,
-        "supports_message_delta": False,
+        "supports_message_delta": True,
+        "message_stream_mode": "validated_markdown_chunks",
         "dashboard_mode": "hybrid",
     }
 
@@ -360,6 +387,12 @@ async def submit_message(
                 event=AgentEventType.RUN_FAILED,
                 data={"status": "failed", "error_code": "AGENT_DISPATCH_FAILED"},
             )
+            _enqueue_terminal_notification(
+                user_id=current_user.id,
+                run_id=resumed_run.id,
+                status="failed",
+                error_message=str(exc)[:1000],
+            )
             raise AppException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 code=StatusCode.EXTERNAL_SERVICE_ERROR,
@@ -475,6 +508,12 @@ async def submit_message(
             conversation_id=terminal_run.conversation_id,
             event=AgentEventType.RUN_FAILED,
             data={"status": "failed", "error_code": "AGENT_DISPATCH_FAILED"},
+        )
+        _enqueue_terminal_notification(
+            user_id=current_user.id,
+            run_id=terminal_run.id,
+            status="failed",
+            error_message=str(exc)[:1000],
         )
         raise AppException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -594,12 +633,25 @@ async def cancel_run(
         )
     await db.commit()
     agent_runs_cancelled.inc()
-    await agent_event_publisher.publish(
+    _enqueue_terminal_notification(
+        user_id=current_user.id,
         run_id=cancelled.id,
-        conversation_id=cancelled.conversation_id,
-        event=AgentEventType.RUN_CANCELLED,
-        data={"status": "cancelled"},
+        status="cancelled",
     )
+    # The committed run and durable-notification recovery path must not depend
+    # on Redis/SSE availability.  The AgentEventPublisher normally isolates
+    # errors itself, but keep this boundary defensive for alternate publishers.
+    try:
+        await agent_event_publisher.publish(
+            run_id=cancelled.id,
+            conversation_id=cancelled.conversation_id,
+            event=AgentEventType.RUN_CANCELLED,
+            data={"status": "cancelled"},
+        )
+    except Exception as exc:
+        logger.warning(
+            f"cancelled AgentRun SSE publish failed: run_id={cancelled.id}, error={exc}"
+        )
     return cancelled
 
 

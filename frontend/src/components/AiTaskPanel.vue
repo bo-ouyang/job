@@ -56,11 +56,11 @@ const handleClick = async (task) => {
   }
 
   if (task.featureKey === "career_compass") {
-    router.push({ path: "/career-compass", query: { task_id: task.taskId, feature_key: task.featureKey } });
+    router.push({ path: "/career-analysis" });
   } else if (task.featureKey === "career_advice") {
-    router.push({ path: "/major-analysis", query: { task_id: task.taskId, feature_key: task.featureKey } });
+    router.push({ path: "/career-analysis" });
   } else if (task.featureKey === "resume_parse") {
-    router.push({ path: "/my/resume", query: { task_id: task.taskId, feature_key: task.featureKey } });
+    router.push({ path: "/my/resume", query: { taskId: task.taskId } });
   }
 };
 </script>

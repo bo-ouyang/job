@@ -16,6 +16,43 @@ from .events import AgentEvent, AgentEventType, sanitize_event_data
 # 使用 Lua 把“递增序号、追加事件、设置过期时间”合并成一个原子操作，
 # 避免多个 worker 同时发布事件时出现重复或乱序的 sequence。
 _APPEND_EVENT_SCRIPT = """
+local event_name = ARGV[2]
+local ttl = ARGV[7]
+local stream_id = ARGV[8]
+local is_stream_event = (
+  event_name == 'message_started' or
+  event_name == 'message_delta' or
+  event_name == 'message_completed'
+)
+local is_terminal_event = (
+  event_name == 'run_completed' or
+  event_name == 'run_failed' or
+  event_name == 'run_cancelled'
+)
+
+-- Redis executes this script atomically. If cancellation wins first, later
+-- content frames are rejected; if a delta wins first, its event id necessarily
+-- precedes run_cancelled. Rejected frames never consume a sequence number.
+if redis.call('EXISTS', KEYS[3]) == 1 then
+  return {'rejected', redis.call('GET', KEYS[2]) or '0'}
+end
+
+if event_name == 'message_started' then
+  if stream_id == '' then
+    return {'rejected', redis.call('GET', KEYS[2]) or '0'}
+  end
+  redis.call('SET', KEYS[4], stream_id, 'EX', ttl)
+elseif event_name == 'message_delta' or event_name == 'message_completed' then
+  local active_stream_id = redis.call('GET', KEYS[4])
+  if stream_id == '' or active_stream_id ~= stream_id then
+    return {'rejected', redis.call('GET', KEYS[2]) or '0'}
+  end
+end
+
+if is_terminal_event then
+  redis.call('SET', KEYS[3], event_name, 'EX', ttl)
+end
+
 local sequence = redis.call('INCR', KEYS[2])
 local event_id = redis.call(
   'XADD', KEYS[1], 'MAXLEN', '~', ARGV[1], '*',
@@ -28,6 +65,9 @@ local event_id = redis.call(
 )
 redis.call('EXPIRE', KEYS[1], ARGV[7])
 redis.call('EXPIRE', KEYS[2], ARGV[7])
+if event_name == 'message_completed' then
+  redis.call('DEL', KEYS[4])
+end
 return {event_id, sequence}
 """
 
@@ -55,6 +95,16 @@ class AgentEventStore:
 
         return self.manager.make_key(f"agent:run:{run_id}:event_sequence")
 
+    def terminal_key(self, run_id: int) -> str:
+        """Return the atomic terminal-event gate key for a run."""
+
+        return self.manager.make_key(f"agent:run:{run_id}:terminal_event")
+
+    def active_stream_key(self, run_id: int) -> str:
+        """Return the active answer-attempt stream id key for a run."""
+
+        return self.manager.make_key(f"agent:run:{run_id}:active_stream")
+
     async def append(
         self,
         *,
@@ -62,31 +112,37 @@ class AgentEventStore:
         conversation_id: int,
         event: AgentEventType,
         data: Optional[dict] = None,
-    ) -> AgentEvent:
+    ) -> Optional[AgentEvent]:
         """原子追加一个已脱敏事件，并返回包含 Redis event id 的事件对象。"""
 
         created_at = datetime.utcnow()
+        sanitized_data = sanitize_event_data(data or {})
         result = await self.client.eval(
             _APPEND_EVENT_SCRIPT,
-            2,
+            4,
             self.stream_key(run_id),
             self.sequence_key(run_id),
+            self.terminal_key(run_id),
+            self.active_stream_key(run_id),
             settings.AGENT_EVENT_MAXLEN,
             event.value,
             str(run_id),
             str(conversation_id),
-            json.dumps(sanitize_event_data(data or {}), ensure_ascii=False, default=str),
+            json.dumps(sanitized_data, ensure_ascii=False, default=str),
             created_at.isoformat(),
             settings.AGENT_EVENT_TTL_SECONDS,
+            str(sanitized_data.get("streamId") or ""),
         )
         event_id, sequence = result
+        if str(event_id) == "rejected":
+            return None
         return AgentEvent(
             event_id=str(event_id),
             sequence=int(sequence),
             event=event,
             run_id=str(run_id),
             conversation_id=str(conversation_id),
-            data=sanitize_event_data(data or {}),
+            data=sanitized_data,
             created_at=created_at,
         )
 

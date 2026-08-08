@@ -136,3 +136,35 @@ def test_completion_callback_rejects_a_result_that_was_not_persisted(monkeypatch
             started_at=0,
             charge_amount=0.5,
         )
+
+
+def test_legacy_ai_task_persists_structured_notification_only_after_task_commit(monkeypatch):
+    events = []
+
+    async def mark_completed(**kwargs):
+        events.append("ai_task_committed")
+        return True
+
+    def save_message(**kwargs):
+        assert events == ["ai_task_committed"]
+        assert kwargs["status"] == "completed"
+        assert kwargs["feature_key"] == "career_advice"
+        return {"message_id": "9001", "title": "完成", "content": "已完成"}
+
+    def publish_result(user_id, event_type, data):
+        events.append(event_type)
+        assert data["message_id"] == "9001"
+
+    monkeypatch.setattr(crud_ai_task, "mark_completed", mark_completed)
+    monkeypatch.setattr(ai_tasks, "_save_ai_task_message", save_message)
+    monkeypatch.setattr(ai_tasks, "_publish_result", publish_result)
+
+    ai_tasks._mark_task_completed(
+        user_id=7,
+        feature_key="career_advice",
+        celery_task_id="task-123",
+        result_data='{"advice":"done"}',
+        started_at=None,
+    )
+
+    assert events == ["ai_task_committed", "ai_task_completed"]

@@ -244,6 +244,10 @@ class Settings(BaseSettings):
     AGENT_MAX_CONTEXT_MESSAGES: int = int(os.getenv("AGENT_MAX_CONTEXT_MESSAGES", 20))
     AGENT_EVENT_TTL_SECONDS: int = int(os.getenv("AGENT_EVENT_TTL_SECONDS", 86400))
     AGENT_EVENT_MAXLEN: int = int(os.getenv("AGENT_EVENT_MAXLEN", 500))
+    AGENT_STREAM_PUBLISH_TIMEOUT_SECONDS: float = max(
+        0.01,
+        float(os.getenv("AGENT_STREAM_PUBLISH_TIMEOUT_SECONDS", 0.25)),
+    )
     AGENT_LOCK_TTL_SECONDS: int = int(os.getenv("AGENT_LOCK_TTL_SECONDS", 300))
     AGENT_SSE_HEARTBEAT_SECONDS: int = int(os.getenv("AGENT_SSE_HEARTBEAT_SECONDS", 15))
     AGENT_MAX_SSE_CONNECTIONS_PER_USER: int = int(os.getenv("AGENT_MAX_SSE_CONNECTIONS_PER_USER", 2))

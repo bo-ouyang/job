@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     markCompleted: vi.fn(),
     markFailed: vi.fn(),
   },
+  getUnreadCount: vi.fn().mockResolvedValue({ data: 0 }),
 }));
 
 vi.mock("vue-router", () => ({
@@ -36,7 +37,7 @@ vi.mock("@/stores/auth", () => ({ useAuthStore: () => mocks.authStore }));
 vi.mock("@/stores/agent", () => ({ useAgentStore: () => mocks.agentStore }));
 vi.mock("@/stores/aiTask", () => ({ useAiTaskStore: () => mocks.aiTaskStore }));
 vi.mock("@/api/message", () => ({
-  messageAPI: { getUnreadCount: vi.fn().mockResolvedValue({ data: 0 }) },
+  messageAPI: { getUnreadCount: mocks.getUnreadCount },
 }));
 vi.mock("@/components/AiTaskPanel.vue", () => ({
   default: { name: "AiTaskPanel", template: "<div />" },
@@ -58,6 +59,7 @@ describe("BasicLayout login prompt", () => {
     mocks.authStore.user = null;
     mocks.authStore.walletBalance = 0;
     vi.clearAllMocks();
+    mocks.getUnreadCount.mockResolvedValue({ data: 0 });
   });
 
   it("opens login only after a protected feature redirects back with login query", async () => {
@@ -102,6 +104,48 @@ describe("BasicLayout login prompt", () => {
 
     expect(mocks.authStore.refreshWalletBalance).toHaveBeenCalledTimes(1);
     expect(wrapper.get(".balance-link").text()).toContain("12.34");
+    wrapper.unmount();
+  });
+
+  it("refreshes the unread total from the server for a new-message WebSocket event", async () => {
+    const sockets = [];
+    const WebSocketMock = class {
+      constructor() { sockets.push(this); }
+      close() {}
+    };
+    vi.stubGlobal("WebSocket", WebSocketMock);
+    window.WebSocket = WebSocketMock;
+    mocks.authStore.isAuthenticated = true;
+    mocks.authStore.user = { username: "tester" };
+    mocks.getUnreadCount.mockResolvedValue({ data: 3 });
+    localStorage.setItem("token", "test-token");
+
+    const wrapper = mount(BasicLayout);
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sockets[0].onmessage({ data: JSON.stringify({ type: "new_message" }) });
+    await nextTick();
+
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2);
+    expect(wrapper.get(".icon-link").text()).toContain("3");
+    wrapper.unmount();
+    localStorage.removeItem("token");
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes the server unread total immediately for single and bulk message reads", async () => {
+    mocks.authStore.isAuthenticated = true;
+    mocks.authStore.user = { username: "tester" };
+    mocks.getUnreadCount.mockResolvedValue({ data: 2 });
+
+    const wrapper = mount(BasicLayout);
+    await nextTick();
+    window.dispatchEvent(new CustomEvent("messages-read", { detail: { scope: "one" } }));
+    await nextTick();
+    window.dispatchEvent(new CustomEvent("messages-read", { detail: { scope: "all" } }));
+    await nextTick();
+
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(3);
     wrapper.unmount();
   });
 });

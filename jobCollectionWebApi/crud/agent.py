@@ -248,13 +248,16 @@ async def get_run_by_user_idempotency_key(
     *,
     user_id: int,
     idempotency_key: str,
+    message_type: str,
 ) -> Optional[AgentRun]:
     """Resolve V2 retries before a new conversation is created."""
     result = await db.execute(
         select(AgentRun)
+        .join(AgentMessage, AgentMessage.id == AgentRun.input_message_id)
         .where(
             AgentRun.user_id == user_id,
             AgentRun.idempotency_key == idempotency_key,
+            AgentMessage.message_type == message_type,
         )
         .order_by(desc(AgentRun.created_at), desc(AgentRun.id))
         .limit(1)
@@ -292,6 +295,32 @@ async def count_active_runs(
         )
     )
     return int(total or 0)
+
+
+async def get_latest_active_run(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    message_type: Optional[str] = None,
+    exclude_message_type: Optional[str] = None,
+) -> Optional[tuple[AgentRun, str]]:
+    filters = [
+        AgentRun.user_id == user_id,
+        AgentRun.status.in_(("queued", "running", "waiting_user")),
+    ]
+    if message_type is not None:
+        filters.append(AgentMessage.message_type == message_type)
+    if exclude_message_type is not None:
+        filters.append(AgentMessage.message_type != exclude_message_type)
+    result = await db.execute(
+        select(AgentRun, AgentMessage.message_type)
+        .join(AgentMessage, AgentMessage.id == AgentRun.input_message_id)
+        .where(*filters)
+        .order_by(desc(AgentRun.status_updated_at), desc(AgentRun.id))
+        .limit(1)
+    )
+    row = result.one_or_none()
+    return (row[0], row[1]) if row is not None else None
 
 
 async def transition_run(
@@ -361,6 +390,73 @@ async def claim_run(
         return None
     await db.flush()
     return await get_run(db, run_id=run_id, user_id=user_id)
+
+
+async def lock_owned_running_run(
+    db: AsyncSession,
+    *,
+    run_id: int,
+    user_id: int,
+    execution_token: str,
+) -> Optional[AgentRun]:
+    """Lock a running attempt's row and verify its execution-token ownership.
+
+    Cancellation uses an UPDATE on the same row, so it must wait until this
+    ``FOR UPDATE`` lock is released. The runtime only holds the lock around one
+    bounded stream publish, which guarantees a subsequent ``run_cancelled``
+    event cannot overtake that delta.
+    """
+
+    result = await db.execute(
+        select(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.user_id == user_id,
+            AgentRun.status == "running",
+            AgentRun.execution_token == execution_token,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_run_input_message_type(
+    db: AsyncSession,
+    *,
+    run_id: int,
+    user_id: int,
+) -> Optional[str]:
+    """Return the source request type without exposing its content."""
+    result = await db.execute(
+        select(AgentMessage.message_type)
+        .join(AgentRun, AgentRun.input_message_id == AgentMessage.id)
+        .where(AgentRun.id == run_id, AgentRun.user_id == user_id)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def is_run_owned_and_running(
+    db: AsyncSession,
+    *,
+    run_id: int,
+    user_id: int,
+    execution_token: str,
+) -> bool:
+    """Read the current attempt ownership without loading a cached ORM entity."""
+
+    owned_run_id = await db.scalar(
+        select(AgentRun.id)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.user_id == user_id,
+            AgentRun.status == "running",
+            AgentRun.execution_token == execution_token,
+        )
+        .limit(1)
+    )
+    return owned_run_id is not None
 
 
 async def acquire_user_admission_lock(db: AsyncSession, *, user_id: int) -> None:

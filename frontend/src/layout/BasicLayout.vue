@@ -29,6 +29,7 @@ const walletBalance = computed(() => Number(authStore.walletBalance || 0).toFixe
 let interval = null;
 let ws = null;
 let reconnectInterval = null;
+let disposed = false;
 
 const fetchUnreadCount = async () => {
   if (!authStore.isAuthenticated) return;
@@ -72,7 +73,7 @@ const connectWebSocket = () => {
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    if (data.type === "new_message") unreadCount.value += 1;
+    if (data.type === "new_message") fetchUnreadCount();
 
     if (data.type === "ai_task_completed" && data.data) {
       aiTaskStore.markCompleted(data.data.task_id, data.data, {
@@ -95,6 +96,7 @@ const connectWebSocket = () => {
   };
 
   ws.onclose = () => {
+    if (disposed) return;
     if (!reconnectInterval) {
       reconnectInterval = setInterval(() => {
         if (authStore.isAuthenticated) connectWebSocket();
@@ -130,11 +132,14 @@ watch(
 );
 
 const handleWindowFocus = () => fetchWalletBalance();
+const handleMessagesRead = () => refreshHeaderData();
 
 onMounted(() => {
+  disposed = false;
   refreshHeaderData();
   interval = setInterval(refreshHeaderData, 30000);
   window.addEventListener("focus", handleWindowFocus);
+  window.addEventListener("messages-read", handleMessagesRead);
   if (authStore.isAuthenticated) {
     agentStore.loadCapabilities();
     connectWebSocket();
@@ -143,9 +148,11 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  disposed = true;
   if (interval) clearInterval(interval);
   if (reconnectInterval) clearInterval(reconnectInterval);
   window.removeEventListener("focus", handleWindowFocus);
+  window.removeEventListener("messages-read", handleMessagesRead);
   ws?.close();
 });
 </script>

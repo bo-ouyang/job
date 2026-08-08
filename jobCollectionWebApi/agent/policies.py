@@ -19,6 +19,7 @@ class AgentPolicies:
     max_clarifications: int = 2
     max_output_tokens: int = 1200
     max_context_messages: int = 20
+    stream_publish_timeout_seconds: float = 0.25
 
     @classmethod
     def from_settings(cls) -> "AgentPolicies":
@@ -32,4 +33,5 @@ class AgentPolicies:
             max_clarifications=settings.AGENT_MAX_CLARIFICATIONS,
             max_output_tokens=settings.AGENT_MAX_OUTPUT_TOKENS,
             max_context_messages=settings.AGENT_MAX_CONTEXT_MESSAGES,
+            stream_publish_timeout_seconds=settings.AGENT_STREAM_PUBLISH_TIMEOUT_SECONDS,
         )

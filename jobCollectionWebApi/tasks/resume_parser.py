@@ -216,15 +216,6 @@ def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started
     else:
         message_text = message_record["content"]
         message_id = message_record["message_id"]
-        _publish_ws(
-            user_id,
-            "new_message",
-            {
-                "message_id": message_id,
-                "title": message_record["title"],
-                "content": message_record["content"],
-            },
-        )
 
     _publish_ws(
         user_id,
@@ -287,15 +278,6 @@ def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_
     else:
         message_text = message_record["content"]
         message_id = message_record["message_id"]
-        _publish_ws(
-            user_id,
-            "new_message",
-            {
-                "message_id": message_id,
-                "title": message_record["title"],
-                "content": message_record["content"],
-            },
-        )
 
     _publish_ws(
         user_id,

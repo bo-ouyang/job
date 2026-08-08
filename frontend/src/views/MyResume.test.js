@@ -18,12 +18,15 @@ const profileAPI = vi.hoisted(() => ({
 const aiTaskStore = vi.hoisted(() => ({
   addTask: vi.fn(),
   pollAndUpdate: vi.fn(),
+  fetchTaskById: vi.fn(),
 }));
+const route = vi.hoisted(() => ({ query: {} }));
 
 vi.mock("@/api/resume", () => ({ resumeAPI }));
 vi.mock("@/api/ai", () => ({ aiAPI }));
 vi.mock("@/api/profile", () => ({ profileAPI }));
 vi.mock("@/stores/aiTask", () => ({ useAiTaskStore: () => aiTaskStore }));
+vi.mock("vue-router", () => ({ useRoute: () => route }));
 
 import MyResume from "./MyResume.vue";
 
@@ -49,6 +52,8 @@ describe("MyResume PDF parsing", () => {
         work_experiences: [],
       },
     });
+    aiTaskStore.fetchTaskById.mockResolvedValue(null);
+    route.query = {};
     profileAPI.applyResumeCandidates.mockResolvedValue({ data: {} });
   });
 
@@ -87,5 +92,21 @@ describe("MyResume PDF parsing", () => {
       }),
     );
     expect(resumeAPI.createResume).not.toHaveBeenCalled();
+  });
+
+  it("loads only the resume parse result selected by a safe camelCase taskId", async () => {
+    route.query = { taskId: "parse_123" };
+    aiTaskStore.fetchTaskById.mockResolvedValue({
+      taskId: "parse_123",
+      featureKey: "resume_parse",
+      status: "completed",
+      result: { result_payload: { name: "Route candidate", skills: ["Python"] } },
+    });
+
+    const wrapper = mount(MyResume, { global: { plugins: [createPinia()] } });
+    await flushPromises();
+
+    expect(aiTaskStore.fetchTaskById).toHaveBeenCalledWith("parse_123", "resume_parse");
+    expect(wrapper.get('[data-testid="resume-parse-preview"]').text()).toContain("Route candidate");
   });
 });

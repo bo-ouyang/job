@@ -17,13 +17,22 @@ async def read_messages(
     db: AsyncSession = Depends(db_manager.get_db),
     skip: int = 0,
     limit: int = 20,
+    unread_only: bool = False,
+    category: str = None,
+    status: str = None,
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """
     Get current user's messages
     """
     messages = await crud_message.get_my_messages(
-        db, receiver_id=current_user.id, skip=skip, limit=limit
+        db,
+        receiver_id=current_user.id,
+        skip=skip,
+        limit=limit,
+        unread_only=unread_only,
+        category=category,
+        status=status,
     )
     return messages
 

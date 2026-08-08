@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useResumeStore } from "../stores/resume";
 import { useAiTaskStore } from "@/stores/aiTask";
 import { aiAPI } from "@/api/ai";
@@ -8,6 +9,7 @@ import { storeToRefs } from "pinia";
 
 const store = useResumeStore();
 const aiTaskStore = useAiTaskStore();
+const route = useRoute();
 const { resume, isLoading } = storeToRefs(store);
 
 // UI States
@@ -21,6 +23,7 @@ const workForm = reactive({});
 
 onMounted(async () => {
   await store.fetchMyResume();
+  await loadRouteParseTask(route.query.taskId);
 });
 
 // --- Basic Info ---
@@ -125,6 +128,21 @@ const normalizeTaskPayload = (result) => {
   }
   return payload && typeof payload === "object" ? payload : {};
 };
+
+const loadRouteParseTask = async (candidateTaskId) => {
+  const taskId = String(candidateTaskId ?? "").trim();
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) return;
+  const task = await aiTaskStore.fetchTaskById(taskId, "resume_parse");
+  if (task?.featureKey !== "resume_parse" || task.status !== "completed") return;
+  parseCandidates.value = buildParseCandidates(normalizeTaskPayload(task.result));
+};
+
+watch(
+  () => route.query.taskId,
+  (taskId, previousTaskId) => {
+    if (taskId !== previousTaskId) void loadRouteParseTask(taskId);
+  },
+);
 
 const buildParseCandidates = (payload) => {
   const candidates = [];

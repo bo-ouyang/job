@@ -31,6 +31,7 @@ from services.v2.profile_service import (  # noqa: E402
     normalize_profile_item_name,
 )
 from agent.runtime import AgentRuntime  # noqa: E402
+from core.exceptions import AppException  # noqa: E402
 from services.ai_access_service import AIAccessService  # noqa: E402
 from services.v2.career_service import CareerService  # noqa: E402
 
@@ -374,7 +375,7 @@ async def test_career_submission_reuses_run_for_same_user_idempotency_key(monkey
         call_order.append("lock")
 
     async def get_existing(*args, **kwargs):
-        call_order.append("lookup")
+        call_order.append(("lookup", kwargs["message_type"]))
         return existing_run
 
     async def should_not_create(*args, **kwargs):
@@ -397,7 +398,119 @@ async def test_career_submission_reuses_run_for_same_user_idempotency_key(monkey
     assert result.conversation_id == "201"
     assert result.run_id == "301"
     assert result.status == "queued"
-    assert call_order == ["lock", "lookup"]
+    assert call_order == ["lock", ("lookup", "career_report_request")]
+
+
+@pytest.mark.asyncio
+async def test_career_submission_returns_stable_active_run_conflict(monkeypatch):
+    active_run = SimpleNamespace(
+        id=901,
+        conversation_id=801,
+        status="running",
+    )
+
+    async def acquire_lock(*args, **kwargs):
+        return None
+
+    async def no_idempotent_match(*args, **kwargs):
+        return None
+
+    async def get_active(*args, **kwargs):
+        if kwargs.get("message_type") == "career_report_request":
+            return active_run, "career_report_request"
+        return None
+
+    async def should_not_create(*args, **kwargs):
+        raise AssertionError("an active run conflict must not create a conversation")
+
+    monkeypatch.setattr("services.v2.career_service.crud_agent.acquire_user_admission_lock", acquire_lock)
+    monkeypatch.setattr("services.v2.career_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
+    monkeypatch.setattr(
+        "services.v2.career_service.crud_agent.get_latest_active_run",
+        get_active,
+        raising=False,
+    )
+    monkeypatch.setattr("services.v2.career_service.crud_agent.create_conversation", should_not_create)
+
+    with pytest.raises(AppException) as exc_info:
+        await CareerService().submit_agent_request(
+            db=object(),
+            user=SimpleNamespace(id=100),
+            content="分析我的职业方向",
+            filters={"city": "杭州"},
+            idempotency_key="career-request-002",
+            title="职业分析报告",
+            message_type="career_report_request",
+        )
+
+    error = exc_info.value
+    assert error.status_code == 409
+    assert error.code == "AGENT_ACTIVE_RUN_EXISTS"
+    assert error.data == {
+        "runId": "901",
+        "conversationId": "801",
+        "status": "running",
+        "messageType": "career_report_request",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("active_message_type", "requested_message_type"),
+    [
+        ("market_question", "career_report_request"),
+        ("career_report_request", "career_question"),
+    ],
+)
+async def test_career_submission_does_not_recover_another_feature_run(
+    monkeypatch,
+    active_message_type,
+    requested_message_type,
+):
+    active_run = SimpleNamespace(id=902, conversation_id=802, status="running")
+
+    async def acquire_lock(*args, **kwargs):
+        return None
+
+    async def no_idempotent_match(*args, **kwargs):
+        assert kwargs["message_type"] == requested_message_type
+        return None
+
+    async def get_active(*args, **kwargs):
+        if kwargs.get("message_type") == requested_message_type:
+            return None
+        if kwargs.get("exclude_message_type") == requested_message_type:
+            return active_run, active_message_type
+        return None
+
+    async def should_not_create(*args, **kwargs):
+        raise AssertionError("another active Agent feature must block before conversation creation")
+
+    monkeypatch.setattr("services.v2.career_service.crud_agent.acquire_user_admission_lock", acquire_lock)
+    monkeypatch.setattr("services.v2.career_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
+    monkeypatch.setattr("services.v2.career_service.crud_agent.get_latest_active_run", get_active)
+    monkeypatch.setattr("services.v2.career_service.crud_agent.create_conversation", should_not_create)
+
+    with pytest.raises(AppException) as exc_info:
+        await CareerService().submit_agent_request(
+            db=object(),
+            user=SimpleNamespace(id=100),
+            content="分析我的职业方向",
+            filters={"city": "杭州"},
+            idempotency_key="career-request-cross-feature",
+            title="职业分析",
+            message_type=requested_message_type,
+        )
+
+    error = exc_info.value
+    assert error.status_code == 409
+    assert error.code == "AGENT_OTHER_RUN_ACTIVE"
+    assert error.data == {
+        "runId": "902",
+        "conversationId": "802",
+        "status": "running",
+        "messageType": active_message_type,
+    }
 
 
 @pytest.mark.asyncio

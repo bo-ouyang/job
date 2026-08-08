@@ -83,13 +83,43 @@ describe("frontend API contracts", () => {
     expect(v2Request.get).toHaveBeenCalledWith("/ai/pricing");
   });
 
-  it("keeps career generation idempotent", () => {
-    careerAPI.generateReport({ city: "杭州" }, "request-1");
+  it("keeps career generation idempotent", async () => {
+    v2Request.post.mockResolvedValue({
+      data: {
+        conversationId: "8001",
+        runId: "9001",
+        status: "queued",
+      },
+    });
+
+    const response = await careerAPI.generateReport({ city: "杭州" }, "request-1");
     expect(v2Request.post).toHaveBeenCalledWith(
       "/career-analysis/reports",
       { city: "杭州" },
       { headers: { "Idempotency-Key": "request-1" } },
     );
+    expect(response.data).toEqual({
+      conversationId: "8001",
+      runId: "9001",
+      status: "queued",
+    });
+  });
+
+  it("does not accept snake_case fields as a V2 career contract", async () => {
+    v2Request.get.mockResolvedValue({
+      data: {
+        status: "completed",
+        run_id: "9001",
+        created_at: "2026-08-07T08:00:00Z",
+      },
+    });
+
+    const response = await careerAPI.getLatestReport();
+
+    expect(response.data.runId).toBeUndefined();
+    expect(response.data.createdAt).toBeUndefined();
+    expect(response.data).not.toHaveProperty("run_id");
+    expect(response.data).not.toHaveProperty("created_at");
   });
 
   it("exposes profile course and skill collections", () => {

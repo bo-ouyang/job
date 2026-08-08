@@ -7,6 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.databases.models.agent_message import AgentMessage
+from core.exceptions import AppException
 from crud import agent as crud_agent
 from schemas.agent_schema import AgentConversationCreate, AgentMessageCreate
 from schemas.v2.career import (
@@ -355,12 +356,51 @@ class CareerService:
             db,
             user_id=user.id,
             idempotency_key=idempotency_key,
+            message_type=message_type,
         )
         if existing_run is not None:
             return CareerSubmissionResponse(
                 conversation_id=existing_run.conversation_id,
                 run_id=existing_run.id,
                 status=existing_run.status,
+            )
+
+        matching_active = await crud_agent.get_latest_active_run(
+            db,
+            user_id=user.id,
+            message_type=message_type,
+        )
+        if matching_active is not None:
+            active_run, active_message_type = matching_active
+            raise AppException(
+                status_code=409,
+                code="AGENT_ACTIVE_RUN_EXISTS",
+                message="任务已经创建，正在恢复进度。",
+                data={
+                    "runId": str(active_run.id),
+                    "conversationId": str(active_run.conversation_id),
+                    "status": active_run.status,
+                    "messageType": active_message_type,
+                },
+            )
+
+        other_active = await crud_agent.get_latest_active_run(
+            db,
+            user_id=user.id,
+            exclude_message_type=message_type,
+        )
+        if other_active is not None:
+            active_run, active_message_type = other_active
+            raise AppException(
+                status_code=409,
+                code="AGENT_OTHER_RUN_ACTIVE",
+                message="其他 AI 任务正在处理中，请等待完成或先取消该任务。",
+                data={
+                    "runId": str(active_run.id),
+                    "conversationId": str(active_run.conversation_id),
+                    "status": active_run.status,
+                    "messageType": active_message_type,
+                },
             )
 
         conversation = await crud_agent.create_conversation(

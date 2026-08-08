@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Enum, BigInteger, Index
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, BigInteger, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -26,6 +27,19 @@ class Message(Base):
     content = Column(Text, nullable=False)
     
     is_read = Column(Boolean, default=False)
+
+    # Structured notification metadata.  All fields stay nullable because this
+    # table also contains historical direct messages created before V2.
+    category = Column(String(30), nullable=True)
+    status = Column(String(30), nullable=True)
+    action_type = Column(String(30), nullable=True)
+    action_data = Column(JSONB, nullable=True)
+    source_type = Column(String(50), nullable=True)
+    source_id = Column(String(128), nullable=True)
+    # The named database constraint is owned by the Alembic revision.  Do not
+    # use ``unique=True`` here: a metadata-derived baseline would generate an
+    # anonymous duplicate constraint before that revision can run.
+    dedupe_key = Column(String(180), nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
