@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from io import BytesIO
 import os
 from pathlib import Path, PurePosixPath
 import shlex
@@ -75,9 +76,22 @@ def local_checks(production_env: Path) -> None:
         "tests/test_webapi_source_hygiene.py",
         "tests/test_pytest_configuration.py",
         "tests/test_test_layout.py",
+        "tests/test_v2_message_api.py",
+        "tests/test_llm_client.py",
+        "tests/test_message_notification_migration.py",
+        "tests/test_notification_service.py",
+        "tests/test_notification_tasks.py",
+        "tests/test_agent_markdown_stream.py",
+        "tests/test_agent_events.py",
+        "tests/test_agent_runtime.py",
+        "tests/test_ai_task_billing.py",
+        "tests/test_celery_notification_routing.py",
+        "tests/test_resume_parser.py",
+        "tests/test_v2_career_profile.py",
     ]
     run([sys.executable, "-m", "pytest", "-q", *test_files])
     run([npm, "test"], cwd=PROJECT_ROOT / "frontend")
+    run([npm, "run", "lint:dead-code"], cwd=PROJECT_ROOT / "frontend")
     run([npm, "run", "build"], cwd=PROJECT_ROOT / "frontend")
 
     compose_env = os.environ.copy()
@@ -163,7 +177,9 @@ def upload_release(
 
     with client.open_sftp() as sftp:
         ensure_remote_directory(sftp, REMOTE_BASE)
-        sftp.put(str(PROJECT_ROOT / "deploy" / "remote_release.sh"), str(remote_script))
+        script_source = (PROJECT_ROOT / "deploy" / "remote_release.sh").read_bytes()
+        script_source = script_source.replace(b"\r\n", b"\n")
+        sftp.putfo(BytesIO(script_source), str(remote_script), file_size=len(script_source))
         sftp.chmod(str(remote_script), 0o700)
     return remote_script
 

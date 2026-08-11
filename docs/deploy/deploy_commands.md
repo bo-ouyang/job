@@ -25,6 +25,9 @@ Docker PostgreSQL/Redis，不部署 Elasticsearch。
 凭据不会写入 Git、镜像或命令输出。生产配置只保存在服务器
 `/opt/job/.env.production`，不会由每次发布上传或覆盖。
 
+支付密钥文件统一放在服务器 `/opt/job/certs`，生产环境变量中的支付宝/微信密钥路径也应
+指向该目录。Compose 只读挂载该目录；发布脚本不会生成、上传或打印任何密钥。
+
 ## 首次 Docker 切换
 
 首次执行会在镜像构建完成后暂停旧的 Job Supervisor 进程，使用 `pg_dump` 备份宿主机

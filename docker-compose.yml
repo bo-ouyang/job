@@ -61,8 +61,9 @@ services:
     container_name: job_api
     restart: always
     command: uvicorn jobCollectionWebApi.main:app --host 0.0.0.0 --port 8000 --workers 4
-    volumes:
+    volumes: &backend-volumes
       - ${JOB_STATIC_DIR:-/opt/job/static}:/app/static
+      - ${JOB_CERTS_DIR:-/opt/job/certs}:/opt/job/certs:ro
     ports:
       - "127.0.0.1:18000:8000"
     env_file:
@@ -80,8 +81,7 @@ services:
     container_name: job_admin
     restart: always
     command: uvicorn jobCollectionWebApi.main_admin:app --host 0.0.0.0 --port 8001
-    volumes:
-      - ${JOB_STATIC_DIR:-/opt/job/static}:/app/static
+    volumes: *backend-volumes
     ports:
       - "127.0.0.1:18002:8001"
     env_file:
@@ -99,6 +99,7 @@ services:
     container_name: job_worker_realtime
     restart: always
     command: celery -A jobCollectionWebApi.worker.celery_app worker -Q realtime --concurrency=4 --loglevel=info
+    volumes: *backend-volumes
     env_file:
       - .env.production
     environment:
@@ -117,6 +118,7 @@ services:
     restart: always
     profiles: ["batch"]
     command: celery -A jobCollectionWebApi.worker.celery_app worker -Q batch --concurrency=2 --loglevel=info
+    volumes: *backend-volumes
     env_file:
       - .env.production
     environment:
@@ -135,6 +137,7 @@ services:
     restart: always
     profiles: ["batch"]
     command: celery -A jobCollectionWebApi.worker.celery_app beat --loglevel=info
+    volumes: *backend-volumes
     env_file:
       - .env.production
     environment:

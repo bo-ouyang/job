@@ -29,6 +29,7 @@ def test_compose_runs_job_services_without_elasticsearch_or_duplicate_monitoring
     assert '"127.0.0.1:18000:8000"' in compose
     assert '"127.0.0.1:18080:80"' in compose
     assert "ES_ENABLED: \"false\"" in compose
+    assert "${JOB_CERTS_DIR:-/opt/job/certs}:/opt/job/certs:ro" in compose
 
 
 def test_backend_image_excludes_the_crawler_project():
@@ -74,6 +75,7 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "deploy.py" in launcher_source
     assert "remote_ip" in client_source
     assert "remote_pd" in client_source
+    assert 'replace(b"\\r\\n", b"\\n")' in client_source
     assert "git status --porcelain" in client_source
     assert "git push" in client_source
     assert "git fetch" in remote_source

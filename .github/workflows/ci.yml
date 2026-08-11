@@ -21,6 +21,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: npm run lint:dead-code
       - run: npm run build
 
   web-api:
@@ -44,6 +45,18 @@ jobs:
           tests/test_test_layout.py
           tests/test_pytest_configuration.py
           tests/test_webapi_source_hygiene.py
+          tests/test_v2_message_api.py
+          tests/test_llm_client.py
+          tests/test_message_notification_migration.py
+          tests/test_notification_service.py
+          tests/test_notification_tasks.py
+          tests/test_agent_markdown_stream.py
+          tests/test_agent_events.py
+          tests/test_agent_runtime.py
+          tests/test_ai_task_billing.py
+          tests/test_celery_notification_routing.py
+          tests/test_resume_parser.py
+          tests/test_v2_career_profile.py
       - run: cp .env.production.example .env.production
       - run: >-
           BACKEND_IMAGE=registry.example/job-api:ci

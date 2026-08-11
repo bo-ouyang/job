@@ -32,6 +32,8 @@ committed=0
 
 mkdir -p "$base_dir/releases" "$backup_dir" "$state_dir"
 chmod 700 "$backup_dir" "$state_dir"
+mkdir -p /opt/job/certs
+chmod 700 /opt/job/certs
 exec 9>"$base_dir/.deploy/release.lock"
 if ! flock -n 9; then
     echo "Another release is already running." >&2
