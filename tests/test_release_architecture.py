@@ -78,6 +78,7 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert '"--skip-push"' in client_source
     assert '"--bootstrap-bundle"' in client_source
     assert "git bundle create" in client_source
+    assert '["git", "bundle", "create", str(bundle), "HEAD"]' in client_source
     assert 'replace(b"\\r\\n", b"\\n")' in client_source
     assert "git status --porcelain" in client_source
     assert "git push" in client_source

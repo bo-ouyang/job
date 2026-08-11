@@ -165,10 +165,12 @@ def connect(host: str, password: str) -> paramiko.SSHClient:
 
 
 def create_repository_bundle(commit: str) -> Path:
+    if git_output("rev-parse", "HEAD") != commit:
+        raise RuntimeError("The bundle commit must match the current Git HEAD")
     DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
     bundle = DEPLOY_DIR / f"repository-{commit[:12]}.bundle"
     # git bundle create preserves the exact commit and complete Git history.
-    run(["git", "bundle", "create", str(bundle), commit])
+    run(["git", "bundle", "create", str(bundle), "HEAD"])
     return bundle
 
 
