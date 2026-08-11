@@ -58,6 +58,33 @@ git_with_retry() {
     return 1
 }
 
+docker_pull_with_retry() {
+    local image=$1
+    local attempt
+    for attempt in 1 2 3; do
+        if timeout --signal=TERM 300 docker pull "$image"; then
+            return 0
+        fi
+        if (( attempt < 3 )); then
+            echo "Image pull failed (attempt $attempt/3); retrying..." >&2
+            sleep $((attempt * 2))
+        fi
+    done
+    return 1
+}
+
+backup_running_database() {
+    local output_path=$1
+    local current_db_user
+    local current_db_name
+    [[ $(docker inspect -f '{{.State.Running}}' job_postgres 2>/dev/null) == true ]]
+    current_db_user=$(docker exec job_postgres sh -c 'printf %s "$POSTGRES_USER"')
+    current_db_name=$(docker exec job_postgres sh -c 'printf %s "$POSTGRES_DB"')
+    docker exec job_postgres pg_dump --format=custom \
+        -U "$current_db_user" "$current_db_name" > "$output_path"
+    chmod 600 "$output_path"
+}
+
 compose_new() {
     (
         cd "$release_dir"
@@ -146,8 +173,8 @@ printf 'BACKEND_IMAGE=%q\nFRONTEND_IMAGE=%q\n' \
 chmod 600 "$release_dir/.release.env"
 
 echo "[2/8] Pulling and verifying immutable release images"
-docker pull "$backend_image"
-docker pull "$frontend_image"
+docker_pull_with_retry "$backend_image"
+docker_pull_with_retry "$frontend_image"
 backend_revision=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$backend_image")
 frontend_revision=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$frontend_image")
 [[ "$backend_revision" == "$commit" ]]
@@ -156,6 +183,10 @@ compose_new config --quiet
 compose_new run --rm --no-deps api python -c "import jobCollectionWebApi.main; import jobCollectionWebApi.main_admin; import jobCollectionWebApi.worker"
 
 echo "[3/8] Starting isolated data services"
+if [[ -f "$state_dir/docker-database-initialized" ]]; then
+    echo "Backing up the currently running Docker PostgreSQL database before reconciliation"
+    backup_running_database "$database_backup"
+fi
 compose_new up -d db redis
 for _ in $(seq 1 30); do
     if [[ $(docker inspect -f '{{.State.Health.Status}}' job_postgres 2>/dev/null || true) == healthy ]] && \
@@ -180,8 +211,7 @@ if [[ ! -f "$state_dir/docker-database-initialized" ]]; then
     docker exec -i job_postgres pg_restore --exit-on-error --no-owner --no-privileges \
         -U "$db_user" -d "$db_name" < "$database_backup"
 else
-    echo "[4/8] Backing up the Docker PostgreSQL database"
-    docker exec job_postgres pg_dump --format=custom -U "$db_user" "$db_name" > "$database_backup"
+    echo "[4/8] Current Docker PostgreSQL backup already recorded"
 fi
 chmod 600 "$database_backup"
 

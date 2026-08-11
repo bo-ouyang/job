@@ -43,7 +43,9 @@ def test_release_please_owns_semantic_version_creation():
     source = read_text(".github/workflows/release.yml")
 
     assert workflow["on"]["push"]["branches"] == ["main"]
+    assert set(workflow["on"]["workflow_dispatch"]["inputs"]) == {"tag", "sha"}
     assert "googleapis/release-please-action" in source
+    assert "token: ${{ secrets.RELEASE_PLEASE_TOKEN }}" in source
     assert "release_created" in source
     assert '"release-type": "simple"' in config
     assert '".": "1.0.0"' in manifest
@@ -54,8 +56,13 @@ def test_release_builds_traceable_ghcr_images_once():
     source = read_text(".github/workflows/release.yml")
     build = workflow["jobs"]["build-images"]
 
-    assert workflow["permissions"]["packages"] == "write"
-    assert workflow["permissions"]["id-token"] == "write"
+    assert workflow["permissions"] == {}
+    assert workflow["jobs"]["release"]["permissions"] == {
+        "contents": "write",
+        "pull-requests": "write",
+    }
+    assert build["permissions"]["packages"] == "write"
+    assert build["permissions"]["id-token"] == "write"
     assert build["if"] == "needs.release.outputs.release_created == 'true'"
     assert build["strategy"]["matrix"]["image"] == ["backend", "frontend"]
     assert "ghcr.io/${{ github.repository_owner }}/job-" in source
@@ -73,6 +80,7 @@ def test_production_deployment_uses_keys_and_protected_environment():
 
     assert deploy["environment"]["name"] == "production"
     assert "build-images" in deploy["needs"]
+    assert deploy["permissions"] == {"contents": "read", "packages": "read"}
     assert "PRODUCTION_SSH_KEY" in source
     assert "PRODUCTION_KNOWN_HOSTS" in source
     assert "PRODUCTION_PASSWORD" not in source
@@ -86,8 +94,9 @@ def test_remote_release_verifies_images_before_database_changes():
     source = read_text("deploy/remote_image_release.sh")
 
     assert "flock -n" in source
-    assert 'docker pull "$backend_image"' in source
-    assert 'docker pull "$frontend_image"' in source
+    assert 'docker_pull_with_retry "$backend_image"' in source
+    assert 'docker_pull_with_retry "$frontend_image"' in source
+    assert "timeout --signal=TERM 300 docker pull" in source
     assert "org.opencontainers.image.revision" in source
     assert "docker build" not in source
     assert "start_previous_release" in source
@@ -97,8 +106,11 @@ def test_remote_release_verifies_images_before_database_changes():
     assert "curl --fail" in source
 
     revision_check = source.index("org.opencontainers.image.revision")
-    assert revision_check < source.index("pg_dump")
+    backup_call = source.index("backup_running_database \"$database_backup\"")
+    assert revision_check < backup_call
+    assert revision_check < source.index("runuser -u postgres -- pg_dump")
     assert revision_check < source.index("compose_new run --rm migration")
+    assert backup_call < source.index("compose_new up -d db redis")
 
 
 def test_operations_guide_defines_normal_and_emergency_release_paths():
