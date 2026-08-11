@@ -81,6 +81,8 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "git push" in client_source
     assert "git fetch" in remote_source
     assert "git worktree add" in remote_source
+    assert "http.version=HTTP/1.1" in remote_source
+    assert "git_with_retry" in remote_source
     assert "/opt/job/.env.production" in remote_source
     assert "pg_dump" in remote_source
     assert "pg_restore" in remote_source
