@@ -101,6 +101,7 @@ def local_checks(production_env: Path) -> None:
         "tests/test_production_safety.py",
         "tests/test_admin_deployment_config.py",
         "tests/test_release_architecture.py",
+        "tests/test_cicd_architecture.py",
         "tests/test_webapi_source_hygiene.py",
         "tests/test_pytest_configuration.py",
         "tests/test_test_layout.py",

@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -13,8 +20,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
@@ -27,8 +34,8 @@ jobs:
   web-api:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -42,6 +49,7 @@ jobs:
           tests/test_production_safety.py
           tests/test_admin_deployment_config.py
           tests/test_release_architecture.py
+          tests/test_cicd_architecture.py
           tests/test_test_layout.py
           tests/test_pytest_configuration.py
           tests/test_webapi_source_hygiene.py
@@ -59,6 +67,17 @@ jobs:
           tests/test_v2_career_profile.py
       - run: cp .env.production.example .env.production
       - run: >-
-          BACKEND_IMAGE=registry.example/job-api:ci
-          FRONTEND_IMAGE=registry.example/job-frontend:ci
+          BACKEND_IMAGE=job-backend:ci
+          FRONTEND_IMAGE=job-frontend:ci
           docker compose config --quiet
+
+  docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: docker build -t job-backend:ci -f jobCollectionWebApi/backend.Dockerfile .
+      - run: >-
+          docker run --rm --env-file .env.production.example
+          job-backend:ci
+          python -c "import jobCollectionWebApi.main; import jobCollectionWebApi.main_admin; import jobCollectionWebApi.worker"
+      - run: docker build -t job-frontend:ci -f frontend/Dockerfile .
