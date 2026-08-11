@@ -81,6 +81,7 @@ def test_production_deployment_uses_keys_and_protected_environment():
     assert deploy["environment"]["name"] == "production"
     assert "build-images" in deploy["needs"]
     assert "needs.build-images.result == 'skipped'" in deploy["if"]
+    assert "github.ref == 'refs/heads/main'" in deploy["if"]
     assert deploy["permissions"] == {"contents": "read", "packages": "read"}
     assert "PRODUCTION_SSH_KEY" in source
     assert "PRODUCTION_KNOWN_HOSTS" in source
@@ -132,3 +133,5 @@ def test_operations_guide_defines_normal_and_emergency_release_paths():
     assert "emergency" in guide.lower()
     assert "/opt/job/backups" in guide
     assert "database" in guide.lower()
+    assert "deployment branch policy" in guide.lower()
+    assert "main" in guide

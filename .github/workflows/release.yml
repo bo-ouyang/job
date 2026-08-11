@@ -122,6 +122,7 @@ jobs:
   deploy-production:
     if: >-
       always() &&
+      github.ref == 'refs/heads/main' &&
       needs.release.outputs.release_created == 'true' &&
       (needs.build-images.result == 'success' ||
       (github.event_name == 'workflow_dispatch' && needs.build-images.result == 'skipped'))

@@ -60,6 +60,11 @@ The key is dedicated to GitHub Actions. The root password is never stored in
 GitHub. GHCR authentication uses the short-lived workflow token and is removed
 from the server after every deployment.
 
+The `production` Environment deployment branch policy must allow only `main`.
+This setting is a security boundary: it prevents a workflow modified on another
+branch from receiving the production SSH key. The deploy job also checks
+`github.ref == 'refs/heads/main'` as defense in depth.
+
 ## Local verification
 
 Use the Conda `job` environment, which provides Python 3.11:
