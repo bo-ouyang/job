@@ -47,7 +47,7 @@ fi
 git_with_retry() {
     local attempt
     for attempt in 1 2 3; do
-        if git -c http.version=HTTP/1.1 "$@"; then
+        if timeout --signal=TERM 120 git -c http.version=HTTP/1.1 "$@"; then
             return 0
         fi
         if (( attempt < 3 )); then
@@ -117,18 +117,22 @@ trap rollback ERR INT TERM
 
 echo "[1/8] Fetching exact Git commit $commit"
 [[ -f "$production_env_path" ]] || { echo "Missing $production_env_path" >&2; exit 1; }
+if [[ -d "$repository_dir/.git" ]] && \
+   [[ $(git -C "$repository_dir" config --bool remote.origin.promisor || true) == true ]]; then
+    mv "$repository_dir" "$repository_dir.partial-$timestamp"
+fi
 if [[ ! -d "$repository_dir/.git" ]]; then
     if [[ -e "$repository_dir" ]]; then
         mv "$repository_dir" "$repository_dir.incomplete-$timestamp"
     fi
-    git_with_retry clone --filter=blob:none --no-checkout "$repository_url" "$repository_dir"
+    git_with_retry clone --depth=1 --no-checkout "$repository_url" "$repository_dir"
 else
     git -C "$repository_dir" remote set-url origin "$repository_url"
 fi
 (
     cd "$repository_dir"
     # git fetch is retried because GitHub HTTP transport can fail transiently.
-    git_with_retry fetch --prune origin
+    git_with_retry fetch --depth=1 --prune origin "$commit"
     git cat-file -e "$commit^{commit}"
     [[ $(git rev-parse "$commit^{commit}") == "$commit" ]]
     git worktree prune
