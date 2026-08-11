@@ -6,6 +6,7 @@ commit=${2:?commit SHA is required}
 release_id=${3:?release id is required}
 server_name=${4:?server name is required}
 repository_bundle=${5:-}
+server_git_proxy=${6:-http://127.0.0.1:10809}
 
 base_dir=/opt/job
 release_dir="$base_dir/releases/$release_id"
@@ -48,7 +49,8 @@ fi
 git_with_retry() {
     local attempt
     for attempt in 1 2 3; do
-        if timeout --signal=TERM 120 git -c http.version=HTTP/1.1 "$@"; then
+        if timeout --signal=TERM 120 git -c http.version=HTTP/1.1 \
+            -c http.proxy="$server_git_proxy" "$@"; then
             return 0
         fi
         if (( attempt < 3 )); then
@@ -165,6 +167,7 @@ docker build --pull -t "$backend_image" \
     -f "$release_dir/jobCollectionWebApi/backend.Dockerfile" "$release_dir"
 docker build --pull -t "$frontend_image" \
     -f "$release_dir/frontend/Dockerfile" "$release_dir"
+compose_new run --rm --no-deps api python -c "import jobCollectionWebApi.main; import jobCollectionWebApi.main_admin; import jobCollectionWebApi.worker"
 
 echo "[3/8] Starting isolated data services"
 compose_new up -d db redis

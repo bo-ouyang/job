@@ -1,5 +1,67 @@
 from pathlib import Path
 
+import pytest
+
+from deploy import deploy as release
+
+
+def test_git_release_uses_proxy_environment_without_logging_proxy(monkeypatch):
+    commit = "a" * 40
+    run_calls = []
+    git_calls = []
+
+    def fake_run(command, *, cwd=release.PROJECT_ROOT, env=None):
+        run_calls.append((command, cwd, env))
+
+    def fake_git_output(*args, env=None):
+        git_calls.append((args, env))
+        if args == ("status", "--porcelain"):
+            return ""
+        if args == ("branch", "--show-current"):
+            return "main"
+        if args == ("rev-parse", "HEAD"):
+            return commit
+        if args == ("remote", "get-url", "origin"):
+            return "https://github.com/example/job.git"
+        if args == ("ls-remote", "origin", "refs/heads/main"):
+            return f"{commit}\trefs/heads/main"
+        raise AssertionError(f"Unexpected git command: {args}")
+
+    monkeypatch.setattr(release, "run", fake_run)
+    monkeypatch.setattr(release, "git_output", fake_git_output)
+
+    release.prepare_git_release(local_git_proxy="http://127.0.0.1:11123")
+
+    push_command, _, push_env = run_calls[0]
+    assert push_command == ["git", "push", "origin", "HEAD:main"]
+    assert push_env["GIT_CONFIG_COUNT"] == "1"
+    assert push_env["GIT_CONFIG_KEY_0"] == "http.proxy"
+    assert push_env["GIT_CONFIG_VALUE_0"] == "http://127.0.0.1:11123"
+    assert git_calls[-1][0] == ("ls-remote", "origin", "refs/heads/main")
+    assert git_calls[-1][1]["GIT_CONFIG_VALUE_0"] == "http://127.0.0.1:11123"
+
+
+def test_authenticated_proxy_urls_are_rejected():
+    with pytest.raises(ValueError, match="must not contain credentials"):
+        release.validate_proxy_url(
+            "local_git_proxy", "http://proxy-user:proxy-password@127.0.0.1:11123"
+        )
+
+
+def test_backend_declares_pydantic_email_validation_dependency():
+    project_root = Path(__file__).resolve().parents[1]
+    requirements = (
+        project_root / "jobCollectionWebApi" / "requirements.txt"
+    ).read_text(encoding="utf-8")
+
+    declared_packages = {
+        line.split("==", 1)[0].split(">=", 1)[0].strip().lower()
+        for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert "email-validator" in declared_packages
+
 
 def test_release_process_has_one_docker_compose_entrypoint():
     project_root = Path(__file__).resolve().parents[1]
@@ -94,6 +156,11 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert 'replace(b"\\r\\n", b"\\n")' in client_source
     assert "git status --porcelain" in client_source
     assert "git push" in client_source
+    assert '"local_git_proxy", "http://127.0.0.1:11123"' in client_source
+    assert '"server_git_proxy", "http://127.0.0.1:10809"' in client_source
+    assert '"GIT_CONFIG_KEY_0": "http.proxy"' in client_source
+    assert "server_git_proxy" in remote_source
+    assert 'http.proxy="$server_git_proxy"' in remote_source
     assert "git fetch" in remote_source
     assert "git worktree add" in remote_source
     assert "http.version=HTTP/1.1" in remote_source
@@ -106,5 +173,14 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "pg_dump" in remote_source
     assert "pg_restore" in remote_source
     assert "supervisorctl stop" in remote_source
+    smoke_test = (
+        'python -c "import jobCollectionWebApi.main; '
+        'import jobCollectionWebApi.main_admin; import jobCollectionWebApi.worker"'
+    )
+    assert smoke_test in remote_source
+    assert remote_source.index(smoke_test) < remote_source.index("supervisorctl stop")
+    assert remote_source.index(smoke_test) < remote_source.index("dropdb --if-exists")
+    assert remote_source.index(smoke_test) < remote_source.index("pg_restore --exit-on-error")
+    assert remote_source.index(smoke_test) < remote_source.index("compose_new run --rm migration")
     assert "rollback" in remote_source
     assert "curl --fail" in remote_source

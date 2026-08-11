@@ -22,6 +22,18 @@ Docker PostgreSQL/Redis，不部署 Elasticsearch。
 6. 备份 PostgreSQL，执行 Alembic 迁移，启动 API、管理端、实时 worker 和前端。
 7. 健康检查通过后切换宿主机 Nginx，并将 Prometheus 目标切到 Docker API。
 
+Git 传输默认使用以下代理：
+
+```dotenv
+local_git_proxy=http://127.0.0.1:11123
+server_git_proxy=http://127.0.0.1:10809
+```
+
+这两个值可在根目录 `.env` 中覆盖。`local_git_proxy` 只用于本机的 `git push` 和
+`git ls-remote`，`server_git_proxy` 只用于服务器的 `git clone` 和 `git fetch`；它们不会
+传入应用容器。代理 URL 不允许包含用户名、密码、查询参数或片段，避免凭据进入命令日志或
+服务器进程参数。
+
 凭据不会写入 Git、镜像或命令输出。生产配置只保存在服务器
 `/opt/job/.env.production`，不会由每次发布上传或覆盖。
 

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import paramiko
 
@@ -36,9 +37,35 @@ def read_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
-def run(command: list[str], *, cwd: Path = PROJECT_ROOT) -> None:
+def run(
+    command: list[str],
+    *,
+    cwd: Path = PROJECT_ROOT,
+    env: dict[str, str] | None = None,
+) -> None:
     print(f"\n> {shlex.join(command)}", flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def validate_proxy_url(name: str, proxy: str) -> None:
+    parsed = urlsplit(proxy)
+    if parsed.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed.hostname:
+        raise ValueError(f"{name} must be a valid HTTP, HTTPS, or SOCKS proxy URL")
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        raise ValueError(f"{name} must not contain credentials, query parameters, or fragments")
+
+
+def git_proxy_environment(proxy: str) -> dict[str, str]:
+    validate_proxy_url("Git proxy", proxy)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.proxy",
+            "GIT_CONFIG_VALUE_0": proxy,
+        }
+    )
+    return environment
 
 
 def validate_environment(production_env: Path) -> None:
@@ -111,7 +138,7 @@ def local_checks(production_env: Path) -> None:
     )
 
 
-def git_output(*args: str) -> str:
+def git_output(*args: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=PROJECT_ROOT,
@@ -119,11 +146,14 @@ def git_output(*args: str) -> str:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
     return result.stdout.strip()
 
 
-def prepare_git_release(*, skip_push: bool = False) -> tuple[str, str]:
+def prepare_git_release(
+    *, local_git_proxy: str, skip_push: bool = False
+) -> tuple[str, str]:
     # Keep these command names visible because they are part of the release contract:
     # git status --porcelain, followed by git push of the exact commit.
     if git_output("status", "--porcelain"):
@@ -142,8 +172,17 @@ def prepare_git_release(*, skip_push: bool = False) -> tuple[str, str]:
     if skip_push:
         print("Skipping the local Git push; the server will verify the exact commit before build.")
     else:
-        run(["git", "push", "origin", f"HEAD:{branch}"])
-        remote_commit = git_output("ls-remote", "origin", f"refs/heads/{branch}").split()
+        proxy_environment = git_proxy_environment(local_git_proxy)
+        run(
+            ["git", "push", "origin", f"HEAD:{branch}"],
+            env=proxy_environment,
+        )
+        remote_commit = git_output(
+            "ls-remote",
+            "origin",
+            f"refs/heads/{branch}",
+            env=proxy_environment,
+        ).split()
         if not remote_commit or remote_commit[0] != commit:
             raise RuntimeError("The pushed branch does not resolve to the local commit")
     return commit, repository_url
@@ -259,14 +298,21 @@ def main() -> int:
     credentials = read_dotenv(credentials_path)
     host = credentials.get("remote_ip", "")
     password = credentials.get("remote_pd", "")
+    local_git_proxy = credentials.get("local_git_proxy", "http://127.0.0.1:11123")
+    server_git_proxy = credentials.get("server_git_proxy", "http://127.0.0.1:10809")
     if not host or not password:
         raise ValueError("Root .env must define remote_ip and remote_pd")
+    validate_proxy_url("local_git_proxy", local_git_proxy)
+    validate_proxy_url("server_git_proxy", server_git_proxy)
     validate_environment(production_env)
 
     if not args.skip_checks:
         local_checks(production_env)
 
-    commit, repository_url = prepare_git_release(skip_push=args.skip_push)
+    commit, repository_url = prepare_git_release(
+        local_git_proxy=local_git_proxy,
+        skip_push=args.skip_push,
+    )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     release_id = f"{timestamp}-{commit[:12]}"
     print(f"\nRelease: {release_id}")
@@ -285,6 +331,7 @@ def main() -> int:
                 release_id,
                 host,
                 str(remote_bundle) if remote_bundle is not None else "",
+                server_git_proxy,
             )
         )
         status = stream_remote_command(client, command)
