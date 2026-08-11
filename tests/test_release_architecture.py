@@ -75,6 +75,7 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "deploy.py" in launcher_source
     assert "remote_ip" in client_source
     assert "remote_pd" in client_source
+    assert '"--skip-push"' in client_source
     assert 'replace(b"\\r\\n", b"\\n")' in client_source
     assert "git status --porcelain" in client_source
     assert "git push" in client_source

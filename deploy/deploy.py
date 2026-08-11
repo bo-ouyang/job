@@ -122,7 +122,7 @@ def git_output(*args: str) -> str:
     return result.stdout.strip()
 
 
-def prepare_git_release() -> tuple[str, str]:
+def prepare_git_release(*, skip_push: bool = False) -> tuple[str, str]:
     # Keep these command names visible because they are part of the release contract:
     # git status --porcelain, followed by git push of the exact commit.
     if git_output("status", "--porcelain"):
@@ -138,10 +138,13 @@ def prepare_git_release() -> tuple[str, str]:
     if "@" in repository_url.partition("//")[2].partition("/")[0]:
         raise RuntimeError("The origin URL must not contain embedded credentials")
 
-    run(["git", "push", "origin", f"HEAD:{branch}"])
-    remote_commit = git_output("ls-remote", "origin", f"refs/heads/{branch}").split()
-    if not remote_commit or remote_commit[0] != commit:
-        raise RuntimeError("The pushed branch does not resolve to the local commit")
+    if skip_push:
+        print("Skipping the local Git push; the server will verify the exact commit before build.")
+    else:
+        run(["git", "push", "origin", f"HEAD:{branch}"])
+        remote_commit = git_output("ls-remote", "origin", f"refs/heads/{branch}").split()
+        if not remote_commit or remote_commit[0] != commit:
+            raise RuntimeError("The pushed branch does not resolve to the local commit")
     return commit, repository_url
 
 
@@ -212,6 +215,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip local tests/build checks (emergency use only)",
     )
+    parser.add_argument(
+        "--skip-push",
+        action="store_true",
+        help="Skip a redundant push when the exact commit is already on origin",
+    )
     return parser.parse_args()
 
 
@@ -234,7 +242,7 @@ def main() -> int:
     if not args.skip_checks:
         local_checks(production_env)
 
-    commit, repository_url = prepare_git_release()
+    commit, repository_url = prepare_git_release(skip_push=args.skip_push)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     release_id = f"{timestamp}-{commit[:12]}"
     print(f"\nRelease: {release_id}")

@@ -53,3 +53,5 @@ Docker PostgreSQL/Redis，不部署 Elasticsearch。
 - 每次合并前必须通过 CI；只从已评审且绿色的主分支创建版本标签。
 - 服务器实际镜像标签包含发布时间和完整可追溯的 Git SHA，禁止使用 `latest`。
 - 紧急情况下可使用 `.\deploy\deploy.ps1 --skip-checks`，使用后必须补跑完整 CI 并记录原因。
+- 已确认当前 SHA 推送成功但本机 GitHub 网络异常时，可使用 `--skip-push`；服务器仍会在
+  构建前验证该 SHA 能从 `origin` 获取。
