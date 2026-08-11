@@ -14,6 +14,9 @@ RUN apt-get update \
 COPY jobCollectionWebApi/requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
 
-COPY . /app
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic/
+COPY common/ /app/common/
+COPY jobCollectionWebApi/ /app/jobCollectionWebApi/
 
 EXPOSE 8000

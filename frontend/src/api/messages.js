@@ -55,5 +55,3 @@ export const messagesAPI = {
     return legacyMessageAPI.getUnreadCount();
   },
 };
-
-export default messagesAPI;

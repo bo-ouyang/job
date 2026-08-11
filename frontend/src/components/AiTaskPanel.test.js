@@ -41,7 +41,10 @@ describe("AiTaskPanel", () => {
     const wrapper = mount(AiTaskPanel);
     await wrapper.get(".task-item").trigger("click");
 
-    expect(mocks.push).toHaveBeenCalledWith({ path: "/career-analysis" });
+    expect(mocks.push).toHaveBeenCalledWith({
+      path: "/career-analysis",
+      query: { taskId: "legacy-career-1" },
+    });
     expect(mocks.push).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/career-compass" }));
   });
 });

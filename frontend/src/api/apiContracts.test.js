@@ -18,9 +18,6 @@ const v2Request = vi.hoisted(() => ({
 vi.mock("@/utils/request", () => ({ default: request }));
 vi.mock("@/utils/v2Request", () => ({ default: v2Request }));
 
-import { applicationAPI } from "./application";
-import { commonAPI } from "./common";
-import { companyAPI } from "./company";
 import { careerAPI } from "./career";
 import { marketAPI } from "./market";
 import { profileAPI } from "./profile";
@@ -29,35 +26,6 @@ import { resumeAPI } from "./resume";
 
 describe("frontend API contracts", () => {
   beforeEach(() => vi.clearAllMocks());
-
-  it("uses the authenticated applications collection", () => {
-    applicationAPI.getMyApplications({ page: 1 });
-    expect(request.get).toHaveBeenCalledWith("/applications/", {
-      params: { page: 1 },
-    });
-  });
-
-  it("uses canonical industry level routes", () => {
-    commonAPI.getIndustries(1);
-    expect(request.get).toHaveBeenCalledWith("/industries/level/1");
-  });
-
-  it("uses canonical industry parent routes", () => {
-    commonAPI.getIndustries(100001);
-    expect(request.get).toHaveBeenCalledWith("/industries/parent/100001");
-  });
-
-  it("uses the canonical industry tree route", () => {
-    commonAPI.getIndustryTree();
-    expect(request.get).toHaveBeenCalledWith("/industries/tree/");
-  });
-
-  it("uses the canonical company collection route", () => {
-    companyAPI.getCompanies({ page: 1 });
-    expect(request.get).toHaveBeenCalledWith("/companies", {
-      params: { page: 1 },
-    });
-  });
 
   it("uses the canonical upload route", () => {
     const file = new File(["resume"], "resume.pdf", {

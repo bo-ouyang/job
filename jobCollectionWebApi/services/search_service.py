@@ -398,16 +398,4 @@ class SearchService:
                 })
             return job_list, total
 
-    async def upsert_job(self, job_data: dict):
-        """
-        同步更新单个职位到 ES
-        """
-        pass
-
-    async def delete_job(self, job_id: int):
-        """
-        从 ES 删除单个职位
-        """
-        pass
-
 search_service = SearchService()

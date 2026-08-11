@@ -24,11 +24,13 @@ vi.mock("@/router", () => ({
   },
 }));
 
-import { getApiBaseUrl } from "./request";
-
-
 describe("production-safe API defaults", () => {
-  it("uses the same-origin V1 API when no build-time override is provided", () => {
+  it("uses the same-origin V1 API when no build-time override is provided", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "");
+    vi.resetModules();
+    const { getApiBaseUrl } = await import("./request");
+
     expect(getApiBaseUrl()).toBe("/api/v1");
+    vi.unstubAllEnvs();
   });
 });

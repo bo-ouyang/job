@@ -7,7 +7,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import settings
 from core.security import verify_token, is_token_blacklisted
 from crud import user as crud_user
-from schemas.token_schema import TokenData
 from common.databases.PostgresManager import db_manager
 from common.databases.RedisManager import get_redis, RedisManager
 

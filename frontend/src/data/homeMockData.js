@@ -1,4 +1,4 @@
-export const homeMockData = {
+const homeMockData = {
   updatedAt: "2026-07-28T14:20:00+08:00",
   filters: {
     ranges: [

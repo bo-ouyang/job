@@ -23,5 +23,3 @@ export const profileAPI = {
     return v2Request.put("/profile/skills", payload);
   },
 };
-
-export default profileAPI;

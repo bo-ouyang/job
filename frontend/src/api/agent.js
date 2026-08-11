@@ -13,9 +13,6 @@ export const agentAPI = {
   getConversation(conversationId) {
     return request.get(`/agent/conversations/${conversationId}`);
   },
-  updateConversation(conversationId, payload) {
-    return request.patch(`/agent/conversations/${conversationId}`, payload);
-  },
   sendMessage(conversationId, payload, idempotencyKey) {
     return request.post(`/agent/conversations/${conversationId}/messages`, payload, {
       headers: { "Idempotency-Key": idempotencyKey },
@@ -30,9 +27,4 @@ export const agentAPI = {
   getProfile() {
     return request.get("/agent/profile");
   },
-  updateProfile(payload) {
-    return request.patch("/agent/profile", payload);
-  },
 };
-
-export default agentAPI;

@@ -13,8 +13,6 @@ from common.databases.models.industry import Industry
 from sqlalchemy.orm import selectinload, defer
 from jobCollectionWebApi.schemas.job_schema import JobCreate, JobUpdate
 from .base import CRUDBase
-from sqlalchemy.orm import selectinload, aliased
-from common.databases.models.industry import Industry
 
 class CRUDJob(CRUDBase[Job, JobCreate, JobUpdate]):
     """职位 CRUD 操作"""

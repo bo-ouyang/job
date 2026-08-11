@@ -1,5 +1,9 @@
 """V2 message-center API with paginated, structured notification fields."""
 
+from __future__ import annotations
+
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,10 +20,10 @@ router = APIRouter()
 async def list_messages(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    unread_only: bool | None = Query(default=None, alias="unreadOnly"),
-    legacy_unread_only: bool | None = Query(default=None, alias="unread_only"),
-    category: str | None = Query(default=None, max_length=30),
-    status: str | None = Query(default=None, max_length=30),
+    unread_only: Optional[bool] = Query(default=None, alias="unreadOnly"),
+    legacy_unread_only: Optional[bool] = Query(default=None, alias="unread_only"),
+    category: Optional[str] = Query(default=None, max_length=30),
+    status: Optional[str] = Query(default=None, max_length=30),
     db: AsyncSession = Depends(db_manager.get_db),
     current_user=Depends(get_current_user),
 ):

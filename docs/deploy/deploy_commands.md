@@ -1,66 +1,52 @@
-# SFTP/发布命令清单
+# 一键发布流程
 
-## 1) 本地一键打包并上传（PowerShell）
+生产环境统一使用 Docker Compose 运行本项目。宿主机只保留 TLS Nginx、
+Prometheus/Grafana，以及供其他项目使用的 PostgreSQL 和 Redis；本项目使用独立的
+Docker PostgreSQL/Redis，不部署 Elasticsearch。
 
-在 `d:\Code\job` 执行：
+## 发布命令
 
-```powershell
-$ErrorActionPreference = "Stop"
-$Server = "deploy@YOUR_SERVER_IP_OR_DOMAIN"
-$RemoteZip = "/opt/job/upload/job_release.zip"
-
-Set-Location d:\Code\job
-
-if (Test-Path .\job_release.zip) { Remove-Item .\job_release.zip -Force }
-
-Compress-Archive `
-  -Path .\frontend,.\jobCollectionWebApi,.\common,.\static,.\requirements.txt,.\prometheus.yml,.\grafana,.\deploy `
-  -DestinationPath .\job_release.zip `
-  -Force
-
-scp .\job_release.zip $Server:$RemoteZip
-```
-
-## 2) 服务器一键发布（SSH）
-
-```bash
-set -e
-cd /opt/job
-release_dir=/opt/job/releases/$(date +%Y%m%d_%H%M%S)
-mkdir -p "$release_dir"
-unzip -q /opt/job/upload/job_release.zip -d "$release_dir"
-rsync -a "$release_dir"/ /opt/job/
-
-source /opt/job/jobCollectionWebApi/venv/bin/activate
-pip install -r /opt/job/jobCollectionWebApi/requirements.txt
-
-cd /opt/job/frontend
-npm ci
-npm run build
-sudo rsync -av --delete /opt/job/frontend/dist/ /var/www/job/dist/
-
-sudo supervisorctl restart all
-sudo supervisorctl status
-```
-
-## 3) 本地一条命令上传并远程发布（PowerShell）
+在项目根目录执行唯一入口：
 
 ```powershell
-$ErrorActionPreference = "Stop"
-$Server = "deploy@YOUR_SERVER_IP_OR_DOMAIN"
-
-Set-Location d:\Code\job
-if (Test-Path .\job_release.zip) { Remove-Item .\job_release.zip -Force }
-Compress-Archive -Path .\frontend,.\jobCollectionWebApi,.\common,.\static,.\requirements.txt,.\prometheus.yml,.\grafana,.\deploy -DestinationPath .\job_release.zip -Force
-scp .\job_release.zip "$Server:/opt/job/upload/job_release.zip"
-ssh $Server 'bash -lc "set -e; cd /opt/job; release_dir=/opt/job/releases/\$(date +%Y%m%d_%H%M%S); mkdir -p \$release_dir; unzip -q /opt/job/upload/job_release.zip -d \$release_dir; rsync -a \$release_dir/ /opt/job/; source /opt/job/jobCollectionWebApi/venv/bin/activate; pip install -r /opt/job/jobCollectionWebApi/requirements.txt; cd /opt/job/frontend; npm ci; npm run build; sudo rsync -av --delete /opt/job/frontend/dist/ /var/www/job/dist/; sudo supervisorctl restart all; sudo supervisorctl status"'
+.\deploy\deploy.ps1
 ```
 
-## 4) Nginx 配置落地
+该命令依次完成：
 
-```bash
-sudo cp /opt/job/deploy/nginx/job.conf /etc/nginx/sites-available/job.conf
-sudo ln -sf /etc/nginx/sites-available/job.conf /etc/nginx/sites-enabled/job.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
+1. 运行后端边界/契约/生产安全测试、前端测试和生产构建。
+2. 校验 `docker compose` 配置。
+3. 要求 Git 工作区干净，将当前分支推送到 `origin`，并锁定精确 commit SHA。
+4. 从根目录 `.env` 读取 `remote_ip` 和 `remote_pd`，通过已固定主机密钥的 SSH 登录。
+5. 服务器执行 `git fetch`，为该 commit 建立独立 worktree，再构建不可变镜像。
+6. 备份 PostgreSQL，执行 Alembic 迁移，启动 API、管理端、实时 worker 和前端。
+7. 健康检查通过后切换宿主机 Nginx，并将 Prometheus 目标切到 Docker API。
+
+凭据不会写入 Git、镜像或命令输出。生产配置只保存在服务器
+`/opt/job/.env.production`，不会由每次发布上传或覆盖。
+
+## 首次 Docker 切换
+
+首次执行会在镜像构建完成后暂停旧的 Job Supervisor 进程，使用 `pg_dump` 备份宿主机
+`job` 数据库，再用 `pg_restore` 导入 Docker PostgreSQL。宿主机 PostgreSQL/Redis
+不会停止，因此其他应用不受影响。旧 Job Supervisor 配置只在新服务通过公网健康检查后
+才会禁用。
+
+默认只启动实时队列。`worker_batch` 和 `beat` 属于 Compose 的 `batch` profile，发布时
+不会自动启动。
+
+## 回滚与备份
+
+远端脚本持有发布锁。构建、备份、迁移、容器启动、Nginx 校验或健康检查任一步失败时，
+会自动恢复上一版 Nginx/Prometheus 配置，并重新启动上一版 Docker 镜像；首次切换失败则
+恢复旧 Supervisor 服务。
+
+数据库备份保存在 `/opt/job/backups`，版本目录保存在 `/opt/job/releases`，当前版本由
+`/opt/job/current` 指向。数据库迁移通常不可自动降级，因此发布前备份是强制步骤。
+
+## 版本规范
+
+- 正常迭代使用语义化版本 `MAJOR.MINOR.PATCH` 和 Git 标签 `vMAJOR.MINOR.PATCH`。
+- 每次合并前必须通过 CI；只从已评审且绿色的主分支创建版本标签。
+- 服务器实际镜像标签包含发布时间和完整可追溯的 Git SHA，禁止使用 `latest`。
+- 紧急情况下可使用 `.\deploy\deploy.ps1 --skip-checks`，使用后必须补跑完整 CI 并记录原因。

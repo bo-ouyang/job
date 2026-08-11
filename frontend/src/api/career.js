@@ -48,5 +48,3 @@ export const careerAPI = {
     ), SUBMISSION_KEYS);
   },
 };
-
-export default careerAPI;

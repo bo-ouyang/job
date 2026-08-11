@@ -13,5 +13,3 @@ export const marketAPI = {
     });
   },
 };
-
-export default marketAPI;

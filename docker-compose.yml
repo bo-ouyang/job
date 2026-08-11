@@ -1,16 +1,16 @@
+name: job
+
 services:
   db:
     image: postgres:15-alpine
     container_name: job_postgres
     restart: always
     env_file:
-      - .env
+      - .env.production
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-job}
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -25,9 +25,11 @@ services:
     image: redis:7-alpine
     container_name: job_redis
     restart: always
-    command: ["sh", "-c", "exec redis-server --requirepass \"$${REDIS_PASSWORD}\""]
-    ports:
-      - "127.0.0.1:6379:6379"
+    env_file:
+      - .env.production
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    volumes:
+      - redis_data:/data
     networks:
       - job_net
     healthcheck:
@@ -36,40 +38,16 @@ services:
       timeout: 5s
       retries: 20
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.16.0
-    container_name: job_elasticsearch
-    restart: always
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    ports:
-      - "127.0.0.1:9200:9200"
-    networks:
-      - job_net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
   migration:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     command: alembic upgrade head
     env_file:
-      - .env
+      - .env.production
     environment: &backend-environment
       POSTGRES_HOST: db
       REDIS_HOST: redis
-      ES_HOST: elasticsearch
-      ES_SCHEME: http
+      ES_ENABLED: "false"
       ENVIRONMENT: production
-      SCRAPY_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
     depends_on:
       db:
         condition: service_healthy
@@ -79,67 +57,50 @@ services:
       - job_net
 
   api:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_api
     restart: always
-    command: uvicorn jobCollectionWebApi.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn jobCollectionWebApi.main:app --host 0.0.0.0 --port 8000 --workers 4
     volumes:
-      - ./jobCollectionWebApi:/app/jobCollectionWebApi
-      - ./common:/app/common
-      - ./static:/app/static
+      - ${JOB_STATIC_DIR:-/opt/job/static}:/app/static
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:18000:8000"
     env_file:
-      - .env
+      - .env.production
     environment:
       <<: *backend-environment
     depends_on:
       migration:
         condition: service_completed_successfully
-      elasticsearch:
-        condition: service_healthy
     networks:
       - job_net
 
   admin:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_admin
     restart: always
     command: uvicorn jobCollectionWebApi.main_admin:app --host 0.0.0.0 --port 8001
     volumes:
-      - ./jobCollectionWebApi:/app/jobCollectionWebApi
-      - ./common:/app/common
-      - ./static:/app/static
+      - ${JOB_STATIC_DIR:-/opt/job/static}:/app/static
     ports:
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:18002:8001"
     env_file:
-      - .env
+      - .env.production
     environment:
       <<: *backend-environment
     depends_on:
       migration:
         condition: service_completed_successfully
-      elasticsearch:
-        condition: service_healthy
     networks:
       - job_net
 
   worker_realtime:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_worker_realtime
     restart: always
-    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q realtime --concurrency=2 --loglevel=info
-    volumes:
-      - ./jobCollectionWebApi:/app/jobCollectionWebApi
-      - ./common:/app/common
+    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q realtime --concurrency=4 --loglevel=info
     env_file:
-      - .env
+      - .env.production
     environment:
       <<: *backend-environment
     depends_on:
@@ -151,17 +112,13 @@ services:
       - job_net
 
   worker_batch:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_worker_batch
     restart: always
+    profiles: ["batch"]
     command: celery -A jobCollectionWebApi.worker.celery_app worker -Q batch --concurrency=2 --loglevel=info
-    volumes:
-      - ./jobCollectionWebApi:/app/jobCollectionWebApi
-      - ./common:/app/common
     env_file:
-      - .env
+      - .env.production
     environment:
       <<: *backend-environment
     depends_on:
@@ -173,17 +130,13 @@ services:
       - job_net
 
   beat:
-    build:
-      context: .
-      dockerfile: jobCollectionWebApi/backend.Dockerfile
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_beat
     restart: always
+    profiles: ["batch"]
     command: celery -A jobCollectionWebApi.worker.celery_app beat --loglevel=info
-    volumes:
-      - ./jobCollectionWebApi:/app/jobCollectionWebApi
-      - ./common:/app/common
     env_file:
-      - .env
+      - .env.production
     environment:
       <<: *backend-environment
     depends_on:
@@ -199,60 +152,21 @@ services:
       - job_net
 
   frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
+    image: ${FRONTEND_IMAGE:?set FRONTEND_IMAGE to an immutable release tag}
     container_name: job_frontend
     restart: always
     ports:
-      - "8080:80"
+      - "127.0.0.1:18080:80"
+    volumes:
+      - ${JOB_STATIC_DIR:-/opt/job/static}:/usr/share/nginx/html/static:ro
     depends_on:
       - api
-    networks:
-      - job_net
-
-  # ── Monitoring ──────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: job_prometheus
-    restart: always
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=30d"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "127.0.0.1:9090:9090"
-    depends_on:
-      - api
-    networks:
-      - job_net
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: job_grafana
-    restart: always
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "127.0.0.1:3000:3000"
-    depends_on:
-      - prometheus
     networks:
       - job_net
 
 volumes:
   postgres_data:
-  prometheus_data:
-  grafana_data:
-  elasticsearch_data:
+  redis_data:
 
 networks:
   job_net:

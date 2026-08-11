@@ -65,5 +65,3 @@ export const extractAgentRunReference = (data) => {
     messageType: typeof data.messageType === "string" ? data.messageType : null,
   };
 };
-
-export default extractApiError;

@@ -1,4 +1,4 @@
-export const careerMockData = {
+const careerMockData = {
   profile: {
     name: "林晓雨",
     completion: 78,

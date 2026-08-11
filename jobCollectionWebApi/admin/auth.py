@@ -1,8 +1,8 @@
 from starlette_admin.auth import AuthProvider
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import Response
 from services.auth_service import auth_service
-from core.security import verify_token, create_access_token
+from core.security import verify_token
 from common.databases.PostgresManager import db_manager
 from schemas.token_schema import LoginRequest
 from common.databases.models.user import UserRole
@@ -19,9 +19,7 @@ class AdminAuth(AuthProvider):
                 #print(result)
                 # If successful, we get token.
                 token = result.token.access_token
-                # Use the provided response (which is a RedirectResponse from render_login)
-                # Or create a new one if we want to force specific behavior
-                # But treating the passed response is better.
+                # Reuse the response provided by the admin login flow.
                 response.set_cookie("access_token", token, httponly=True, max_age=86400)
                 return response
             except Exception as e:

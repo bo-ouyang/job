@@ -208,7 +208,7 @@ onUnmounted(() => {
     <main class="app-main">
       <RouterView v-slot="{ Component, route: currentRoute }">
         <transition name="fade" mode="out-in">
-          <keep-alive include="CareerCompass,MajorAnalysis">
+          <keep-alive>
             <component :is="Component" :key="currentRoute.path" />
           </keep-alive>
         </transition>

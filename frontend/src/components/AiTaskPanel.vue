@@ -55,10 +55,8 @@ const handleClick = async (task) => {
     await store.fetchTaskById(task.taskId, task.featureKey);
   }
 
-  if (task.featureKey === "career_compass") {
-    router.push({ path: "/career-analysis" });
-  } else if (task.featureKey === "career_advice") {
-    router.push({ path: "/career-analysis" });
+  if (["career_compass", "career_advice"].includes(task.featureKey)) {
+    router.push({ path: "/career-analysis", query: { taskId: task.taskId } });
   } else if (task.featureKey === "resume_parse") {
     router.push({ path: "/my/resume", query: { taskId: task.taskId } });
   }

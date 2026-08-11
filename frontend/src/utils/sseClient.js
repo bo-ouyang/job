@@ -4,7 +4,7 @@ import {
   refreshAccessToken,
 } from "@/utils/request";
 
-export class SSERequestError extends Error {
+class SSERequestError extends Error {
   constructor(message, status = 0) {
     super(message);
     this.name = "SSERequestError";

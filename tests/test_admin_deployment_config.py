@@ -20,14 +20,13 @@ def test_nginx_routes_admin_before_spa_fallback():
     assert "proxy_pass http://127.0.0.1:8002;" in config[admin_location:spa_location]
 
 
-def test_supervisor_runs_the_independent_admin_service():
-    config = (PROJECT_ROOT / "deploy" / "supervisor" / "jobcollection.conf").read_text(
-        encoding="utf-8"
-    )
+def test_compose_uses_versioned_images_for_the_independent_admin_service():
+    config = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert "[program:job-admin]" in config
-    assert "uvicorn main_admin:app --host 127.0.0.1 --port 8002" in config
-    assert "autostart=true" in config
+    assert "image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}" in config
+    assert "command: uvicorn jobCollectionWebApi.main_admin:app --host 0.0.0.0 --port 8001" in config
+    assert "./jobCollectionWebApi:/app/jobCollectionWebApi" not in config
+    assert "./common:/app/common" not in config
 
 
 def test_admin_can_start_without_optional_babel_dependency(monkeypatch):

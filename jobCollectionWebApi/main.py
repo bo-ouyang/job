@@ -225,15 +225,9 @@ async def global_exception_handler(request, exc):
         },
     )
 
-from fastapi.staticfiles import StaticFiles
-
 # 包含 API 路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(api_v2_router, prefix=settings.API_V2_STR)
-
-# 挂载静态文件目录
-# 确保目录存在
-static_dir = os.path.join(project_root, "static")
 
 @app.get("/")
 async def root():

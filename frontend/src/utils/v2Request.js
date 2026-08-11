@@ -9,8 +9,6 @@ const service = axios.create({
   timeout: 8000,
 });
 
-export const getV2ApiBaseUrl = () => service.defaults.baseURL;
-
 service.interceptors.request.use(
   (config) => {
     const token = getAccessToken();

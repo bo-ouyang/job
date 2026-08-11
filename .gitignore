@@ -18,6 +18,9 @@ __pycache__/
 # IDE / Editor
 .idea/
 .vscode/
+.history/
+.deploy/
+.backups/
 *.swp
 *.swo
 
