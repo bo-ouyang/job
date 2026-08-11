@@ -55,7 +55,9 @@ jobs:
           [[ $(git rev-list -n 1 "$RELEASE_TAG") == "$RELEASE_SHA" ]]
 
   build-images:
-    if: needs.release.outputs.release_created == 'true'
+    if: >-
+      needs.release.outputs.release_created == 'true' &&
+      github.event_name != 'workflow_dispatch'
     needs: release
     runs-on: ubuntu-latest
     permissions:
@@ -118,7 +120,11 @@ jobs:
           category: trivy-${{ matrix.image }}
 
   deploy-production:
-    if: needs.release.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      needs.release.outputs.release_created == 'true' &&
+      (needs.build-images.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && needs.build-images.result == 'skipped'))
     needs: [release, build-images]
     runs-on: ubuntu-latest
     permissions:
@@ -136,9 +142,8 @@ jobs:
       PRODUCTION_SERVER_NAME: ${{ vars.PRODUCTION_SERVER_NAME }}
       SERVER_GIT_PROXY: ${{ vars.SERVER_GIT_PROXY }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ needs.release.outputs.sha }}
+      - name: Check out trusted deployment runner
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Configure pinned SSH identity
         env:
           PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}

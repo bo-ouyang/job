@@ -63,7 +63,7 @@ def test_release_builds_traceable_ghcr_images_once():
     }
     assert build["permissions"]["packages"] == "write"
     assert build["permissions"]["id-token"] == "write"
-    assert build["if"] == "needs.release.outputs.release_created == 'true'"
+    assert "github.event_name != 'workflow_dispatch'" in build["if"]
     assert build["strategy"]["matrix"]["image"] == ["backend", "frontend"]
     assert "ghcr.io/${{ github.repository_owner }}/job-" in source
     assert "push: true" in source
@@ -80,6 +80,7 @@ def test_production_deployment_uses_keys_and_protected_environment():
 
     assert deploy["environment"]["name"] == "production"
     assert "build-images" in deploy["needs"]
+    assert "needs.build-images.result == 'skipped'" in deploy["if"]
     assert deploy["permissions"] == {"contents": "read", "packages": "read"}
     assert "PRODUCTION_SSH_KEY" in source
     assert "PRODUCTION_KNOWN_HOSTS" in source
@@ -88,6 +89,13 @@ def test_production_deployment_uses_keys_and_protected_environment():
     assert "docker login ghcr.io" in source
     assert "--password-stdin" in source
     assert "docker logout ghcr.io" in source
+
+    checkout = next(
+        step
+        for step in deploy["steps"]
+        if step.get("name") == "Check out trusted deployment runner"
+    )
+    assert "with" not in checkout
 
 
 def test_remote_release_verifies_images_before_database_changes():
