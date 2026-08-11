@@ -26,6 +26,8 @@ RUN pip install --index-url "$PIP_INDEX_URL" --upgrade pip \
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic/
 COPY common/ /app/common/
+# Admin task generation imports shared task contracts from this package.
+COPY jobCollection/ /app/jobCollection/
 COPY jobCollectionWebApi/ /app/jobCollectionWebApi/
 
 EXPOSE 8000

@@ -94,16 +94,21 @@ def test_compose_runs_job_services_without_elasticsearch_or_duplicate_monitoring
     assert "${JOB_CERTS_DIR:-/opt/job/certs}:/opt/job/certs:ro" in compose
 
 
-def test_backend_image_excludes_the_crawler_project():
+def test_backend_image_includes_the_admin_task_contract_dependency():
     project_root = Path(__file__).resolve().parents[1]
     dockerfile = (
         project_root / "jobCollectionWebApi" / "backend.Dockerfile"
     ).read_text(encoding="utf-8")
+    dockerignore = (project_root / ".dockerignore").read_text(encoding="utf-8")
 
     assert "COPY . /app" not in dockerfile
     assert "COPY jobCollectionWebApi/ /app/jobCollectionWebApi/" in dockerfile
     assert "COPY common/ /app/common/" in dockerfile
-    assert "COPY jobCollection/" not in dockerfile
+    assert "COPY jobCollection/ /app/jobCollection/" in dockerfile
+    assert "scrapy crawl" not in dockerfile
+    assert "jobCollection/failure_logs/" in dockerignore
+    assert "jobCollection/**/logs/" in dockerignore
+    assert "jobCollection/**/*.log" in dockerignore
     assert "mirrors.cloud.tencent.com/debian" in dockerfile
     assert "pypi.tuna.tsinghua.edu.cn" in dockerfile
 
