@@ -42,6 +42,18 @@ def test_backend_image_excludes_the_crawler_project():
     assert "COPY jobCollectionWebApi/ /app/jobCollectionWebApi/" in dockerfile
     assert "COPY common/ /app/common/" in dockerfile
     assert "COPY jobCollection/" not in dockerfile
+    assert "mirrors.cloud.tencent.com/debian" in dockerfile
+    assert "pypi.tuna.tsinghua.edu.cn" in dockerfile
+
+
+def test_frontend_image_uses_a_configurable_npm_registry():
+    project_root = Path(__file__).resolve().parents[1]
+    dockerfile = (project_root / "frontend" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ARG NPM_REGISTRY=" in dockerfile
+    assert "registry.npmmirror.com" in dockerfile
 
 
 def test_local_migration_chain_includes_the_production_database_head():

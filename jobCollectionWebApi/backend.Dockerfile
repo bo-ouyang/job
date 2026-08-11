@@ -7,12 +7,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+ARG APT_MIRROR=https://mirrors.cloud.tencent.com/debian
+ARG APT_SECURITY_MIRROR=https://mirrors.cloud.tencent.com/debian-security
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+RUN sed -i \
+        -e "s|http://deb.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends build-essential libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY jobCollectionWebApi/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
+RUN pip install --index-url "$PIP_INDEX_URL" --upgrade pip \
+    && pip install --index-url "$PIP_INDEX_URL" -r /tmp/requirements.txt
 
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic/

@@ -2,7 +2,8 @@ FROM node:20.19-alpine AS build
 
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN npm ci
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm ci --registry "$NPM_REGISTRY"
 COPY frontend/ ./
 ARG VITE_API_BASE_URL=/api/v1
 ARG VITE_AGENT_ENABLED=true
