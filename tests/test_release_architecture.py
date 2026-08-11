@@ -76,6 +76,8 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "remote_ip" in client_source
     assert "remote_pd" in client_source
     assert '"--skip-push"' in client_source
+    assert '"--bootstrap-bundle"' in client_source
+    assert "git bundle create" in client_source
     assert 'replace(b"\\r\\n", b"\\n")' in client_source
     assert "git status --porcelain" in client_source
     assert "git push" in client_source
@@ -86,6 +88,7 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert "timeout --signal=TERM 120" in remote_source
     assert "clone --depth=1 --no-checkout" in remote_source
     assert "--filter=blob:none" not in remote_source
+    assert "repository_bundle" in remote_source
     assert "/opt/job/.env.production" in remote_source
     assert "pg_dump" in remote_source
     assert "pg_restore" in remote_source

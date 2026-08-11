@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -21,6 +22,12 @@ describe("frontend source boundary", () => {
 
     expect(retiredFiles.filter((path) => existsSync(resolve(srcRoot, path)))).toEqual([]);
     expect(existsSync(resolve(frontendRoot, "public/vite.svg"))).toBe(false);
+    const trackedNpmCache = execFileSync(
+      "git",
+      ["ls-files", "frontend/.npm-cache"],
+      { cwd: resolve(frontendRoot, ".."), encoding: "utf8" },
+    ).trim();
+    expect(trackedNpmCache).toBe("");
   });
 
   it("does not install the retired word-cloud renderer", () => {

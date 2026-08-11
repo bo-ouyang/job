@@ -5,6 +5,7 @@ repository_url=${1:?repository URL is required}
 commit=${2:?commit SHA is required}
 release_id=${3:?release id is required}
 server_name=${4:?server name is required}
+repository_bundle=${5:-}
 
 base_dir=/opt/job
 release_dir="$base_dir/releases/$release_id"
@@ -117,8 +118,15 @@ trap rollback ERR INT TERM
 
 echo "[1/8] Fetching exact Git commit $commit"
 [[ -f "$production_env_path" ]] || { echo "Missing $production_env_path" >&2; exit 1; }
-if [[ -d "$repository_dir/.git" ]] && \
-   [[ $(git -C "$repository_dir" config --bool remote.origin.promisor || true) == true ]]; then
+if [[ -n "$repository_bundle" ]]; then
+    [[ -f "$repository_bundle" ]] || { echo "Missing Git bootstrap bundle" >&2; exit 1; }
+    if [[ -e "$repository_dir" ]]; then
+        mv "$repository_dir" "$repository_dir.pre-bootstrap-$timestamp"
+    fi
+    git clone --no-checkout "$repository_bundle" "$repository_dir"
+    git -C "$repository_dir" remote set-url origin "$repository_url"
+elif [[ -d "$repository_dir/.git" ]] && \
+     [[ $(git -C "$repository_dir" config --bool remote.origin.promisor || true) == true ]]; then
     mv "$repository_dir" "$repository_dir.partial-$timestamp"
 fi
 if [[ ! -d "$repository_dir/.git" ]]; then
@@ -131,8 +139,10 @@ else
 fi
 (
     cd "$repository_dir"
-    # git fetch is retried because GitHub HTTP transport can fail transiently.
-    git_with_retry fetch --depth=1 --prune origin "$commit"
+    if ! git cat-file -e "$commit^{commit}" 2>/dev/null; then
+        # git fetch is retried because GitHub HTTP transport can fail transiently.
+        git_with_retry fetch --depth=1 --prune origin "$commit"
+    fi
     git cat-file -e "$commit^{commit}"
     [[ $(git rev-parse "$commit^{commit}") == "$commit" ]]
     git worktree prune

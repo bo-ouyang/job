@@ -53,6 +53,7 @@ jobCollection/school.html
 
 # Node
 node_modules/
+.npm-cache/
 dist/
 dist-ssr/
 *.local

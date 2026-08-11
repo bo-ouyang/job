@@ -18,6 +18,7 @@ import paramiko
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEPLOY_DIR = PROJECT_ROOT / ".deploy"
 REMOTE_BASE = PurePosixPath("/opt/job/.deploy")
 
 
@@ -163,6 +164,14 @@ def connect(host: str, password: str) -> paramiko.SSHClient:
     return client
 
 
+def create_repository_bundle(commit: str) -> Path:
+    DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
+    bundle = DEPLOY_DIR / f"repository-{commit[:12]}.bundle"
+    # git bundle create preserves the exact commit and complete Git history.
+    run(["git", "bundle", "create", str(bundle), commit])
+    return bundle
+
+
 def ensure_remote_directory(sftp: paramiko.SFTPClient, path: PurePosixPath) -> None:
     current = PurePosixPath("/")
     for part in path.parts[1:]:
@@ -175,8 +184,12 @@ def ensure_remote_directory(sftp: paramiko.SFTPClient, path: PurePosixPath) -> N
 
 def upload_release(
     client: paramiko.SSHClient,
-) -> PurePosixPath:
+    repository_bundle: Path | None = None,
+) -> tuple[PurePosixPath, PurePosixPath | None]:
     remote_script = REMOTE_BASE / "remote_release.sh"
+    remote_bundle = (
+        REMOTE_BASE / repository_bundle.name if repository_bundle is not None else None
+    )
 
     with client.open_sftp() as sftp:
         ensure_remote_directory(sftp, REMOTE_BASE)
@@ -184,7 +197,11 @@ def upload_release(
         script_source = script_source.replace(b"\r\n", b"\n")
         sftp.putfo(BytesIO(script_source), str(remote_script), file_size=len(script_source))
         sftp.chmod(str(remote_script), 0o700)
-    return remote_script
+        if repository_bundle is not None and remote_bundle is not None:
+            size_mib = repository_bundle.stat().st_size / 1024 / 1024
+            print(f"Uploading Git bootstrap bundle ({size_mib:.1f} MiB)...", flush=True)
+            sftp.put(str(repository_bundle), str(remote_bundle))
+    return remote_script, remote_bundle
 
 
 def stream_remote_command(client: paramiko.SSHClient, command: str) -> int:
@@ -220,6 +237,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip a redundant push when the exact commit is already on origin",
     )
+    parser.add_argument(
+        "--bootstrap-bundle",
+        action="store_true",
+        help="Upload a Git bundle when the server cannot clone from GitHub",
+    )
     return parser.parse_args()
 
 
@@ -246,10 +268,11 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     release_id = f"{timestamp}-{commit[:12]}"
     print(f"\nRelease: {release_id}")
+    repository_bundle = create_repository_bundle(commit) if args.bootstrap_bundle else None
 
     client = connect(host, password)
     try:
-        remote_script = upload_release(client)
+        remote_script, remote_bundle = upload_release(client, repository_bundle)
         command = " ".join(
             shlex.quote(value)
             for value in (
@@ -259,6 +282,7 @@ def main() -> int:
                 commit,
                 release_id,
                 host,
+                str(remote_bundle) if remote_bundle is not None else "",
             )
         )
         status = stream_remote_command(client, command)
@@ -266,6 +290,8 @@ def main() -> int:
             raise RuntimeError(f"Remote release failed with exit status {status}")
     finally:
         client.close()
+        if repository_bundle is not None:
+            repository_bundle.unlink(missing_ok=True)
 
     print(f"\nRelease {release_id} is live: https://{host}/health")
     return 0

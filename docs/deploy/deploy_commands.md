@@ -55,3 +55,6 @@ Docker PostgreSQL/Redis，不部署 Elasticsearch。
 - 紧急情况下可使用 `.\deploy\deploy.ps1 --skip-checks`，使用后必须补跑完整 CI 并记录原因。
 - 已确认当前 SHA 推送成功但本机 GitHub 网络异常时，可使用 `--skip-push`；服务器仍会在
   构建前验证该 SHA 能从 `origin` 获取。
+- 服务器首次部署无法稳定连接 GitHub 时，使用
+  `.\deploy\deploy.ps1 --skip-push --bootstrap-bundle` 通过 Git 原生 bundle 初始化仓库；
+  后续版本仍使用普通 `git fetch`。
