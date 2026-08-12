@@ -13,15 +13,17 @@ GitHub has built, attested, and deployed the exact release images.
 4. Merge only after all required checks pass.
 5. Release Please creates or updates a release pull request containing the next
    semantic version and `CHANGELOG.md` changes.
-6. Merge the Release Please pull request to create `vMAJOR.MINOR.PATCH` and a
+6. The release workflow explicitly dispatches `ci.yml` for that bot-created
+   branch, so the same required checks run without a long-lived user PAT.
+7. Merge the Release Please pull request to create `vMAJOR.MINOR.PATCH` and a
    GitHub Release.
-7. The release workflow builds the backend and frontend once, publishes them to
+8. The release workflow builds the backend and frontend once, publishes them to
    GHCR with OCI source/version/revision labels, generates provenance and SBOM
    attestations, and records Trivy results.
-8. The protected `production` job authenticates with a dedicated SSH key,
+9. The protected `production` job authenticates with a dedicated SSH key,
    temporarily authenticates the server to GHCR, and invokes
    `deploy/remote_image_release.sh` with the exact release tag and commit.
-9. Production pulls both images, verifies their
+10. Production pulls both images, verifies their
    `org.opencontainers.image.revision` labels, imports all application entry
    points in an isolated container, backs up the database, runs Alembic, starts
    the new services, verifies health, and switches Nginx and Prometheus.

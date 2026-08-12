@@ -20,6 +20,7 @@ def test_pull_requests_run_frontend_web_api_and_docker_gates():
 
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["on"]["pull_request"]["branches"] == ["main"]
+    assert "workflow_dispatch" in workflow["on"]
     assert workflow["concurrency"]["cancel-in-progress"] == "true"
     assert {"frontend", "web-api", "docker-images"} <= set(workflow["jobs"])
     assert "npm test" in source
@@ -45,7 +46,10 @@ def test_release_please_owns_semantic_version_creation():
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert set(workflow["on"]["workflow_dispatch"]["inputs"]) == {"tag", "sha"}
     assert "googleapis/release-please-action" in source
-    assert "token: ${{ secrets.RELEASE_PLEASE_TOKEN }}" in source
+    assert "RELEASE_PLEASE_TOKEN" not in source
+    assert workflow["jobs"]["release"]["permissions"]["actions"] == "write"
+    assert "steps.release.outputs.prs_created == 'true'" in source
+    assert "gh workflow run ci.yml --ref" in source
     assert "release_created" in source
     assert '"release-type": "simple"' in config
     assert '".": "1.0.0"' in manifest
@@ -58,6 +62,7 @@ def test_release_builds_traceable_ghcr_images_once():
 
     assert workflow["permissions"] == {}
     assert workflow["jobs"]["release"]["permissions"] == {
+        "actions": "write",
         "contents": "write",
         "pull-requests": "write",
     }
