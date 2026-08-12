@@ -31,6 +31,17 @@ def test_pull_requests_run_frontend_web_api_and_docker_gates():
     assert "import jobCollectionWebApi.main_admin" in source
 
 
+def test_web_api_ci_installs_emergency_release_dependencies():
+    source = read_text(".github/workflows/ci.yml")
+    requirements = read_text("deploy/requirements.txt")
+
+    assert requirements.strip() == "paramiko==5.0.0"
+    assert (
+        "pip install -r jobCollectionWebApi/requirements.txt "
+        "-r deploy/requirements.txt"
+    ) in source
+
+
 def test_emergency_release_runs_the_cicd_contracts_locally():
     client = read_text("deploy/deploy.py")
 
