@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+import re
 
 import yaml
 
@@ -51,7 +53,7 @@ def test_emergency_release_runs_the_cicd_contracts_locally():
 def test_release_please_owns_semantic_version_creation():
     workflow = read_workflow(".github/workflows/release.yml")
     config = read_text("release-please-config.json")
-    manifest = read_text(".release-please-manifest.json")
+    manifest = json.loads(read_text(".release-please-manifest.json"))
     source = read_text(".github/workflows/release.yml")
 
     assert workflow["on"]["push"]["branches"] == ["main"]
@@ -63,7 +65,12 @@ def test_release_please_owns_semantic_version_creation():
     assert "gh workflow run ci.yml --ref" in source
     assert "release_created" in source
     assert '"release-type": "simple"' in config
-    assert '".": "1.0.0"' in manifest
+    version = manifest.get(".")
+    assert isinstance(version, str)
+    assert re.fullmatch(
+        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version
+    )
+    assert tuple(map(int, version.split("."))) >= (1, 0, 0)
 
 
 def test_release_builds_traceable_ghcr_images_once():
