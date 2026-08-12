@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semantic release tag to redeploy
+        required: true
+        type: string
+      sha:
+        description: Full commit SHA that the tag and images must contain
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.release.outputs.release_created }}
+      tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || steps.release.outputs.tag_name }}
+      sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || steps.release.outputs.sha }}
+    steps:
+      - id: release
+        if: github.event_name == 'push'
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Dispatch required CI for the Release Please pull request
+        if: github.event_name == 'push' && steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          release_branch=$(jq -r '.headBranchName // empty' <<< "$RELEASE_PR")
+          [[ "$release_branch" == release-please--* ]]
+          gh workflow run ci.yml --ref "$release_branch" --repo "$GITHUB_REPOSITORY"
+      - name: Check out repository for manual redeploy validation
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Validate manual release tag and commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          [[ $(git rev-list -n 1 "$RELEASE_TAG") == "$RELEASE_SHA" ]]
+
+  build-images:
+    if: >-
+      needs.release.outputs.release_created == 'true' &&
+      github.event_name != 'workflow_dispatch'
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.image == 'backend' && 'jobCollectionWebApi/backend.Dockerfile' || 'frontend/Dockerfile' }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/job-${{ matrix.image }}:${{ needs.release.outputs.tag_name }}
+            ghcr.io/${{ github.repository_owner }}/job-${{ matrix.image }}:sha-${{ needs.release.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.release.outputs.tag_name }}
+            org.opencontainers.image.revision=${{ needs.release.outputs.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/job-${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/job-${{ matrix.image }}:${{ needs.release.outputs.tag_name }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          exit-code: "0"
+          severity: HIGH,CRITICAL
+      - name: Upload vulnerability report
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+  deploy-production:
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      needs.release.outputs.release_created == 'true' &&
+      (needs.build-images.result == 'success' ||
+      (github.event_name == 'workflow_dispatch' && needs.build-images.result == 'skipped'))
+    needs: [release, build-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: https://${{ vars.PRODUCTION_SERVER_NAME }}
+    env:
+      BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/job-backend:${{ needs.release.outputs.tag_name }}
+      FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/job-frontend:${{ needs.release.outputs.tag_name }}
+      PRODUCTION_HOST: ${{ vars.PRODUCTION_HOST }}
+      PRODUCTION_USER: ${{ vars.PRODUCTION_USER }}
+      PRODUCTION_PORT: ${{ vars.PRODUCTION_PORT }}
+      PRODUCTION_SERVER_NAME: ${{ vars.PRODUCTION_SERVER_NAME }}
+      SERVER_GIT_PROXY: ${{ vars.SERVER_GIT_PROXY }}
+    steps:
+      - name: Check out trusted deployment runner
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configure pinned SSH identity
+        env:
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ vars.PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          : "${PRODUCTION_HOST:?missing production host}"
+          : "${PRODUCTION_USER:?missing production user}"
+          : "${PRODUCTION_PORT:?missing production SSH port}"
+          : "${PRODUCTION_SERVER_NAME:?missing production server name}"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PRODUCTION_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Upload committed deployment runner
+        run: >-
+          scp -P "$PRODUCTION_PORT"
+          deploy/remote_image_release.sh
+          "$PRODUCTION_USER@$PRODUCTION_HOST:/opt/job/.deploy/remote_image_release.sh"
+      - name: Authenticate production to GHCR
+        run: >-
+          printf '%s' '${{ github.token }}' |
+          ssh -p "$PRODUCTION_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST"
+          "docker login ghcr.io --username '${{ github.actor }}' --password-stdin"
+      - name: Deploy exact release images
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+        run: |
+          release_id="${RELEASE_TAG}-${RELEASE_SHA:0:12}-run${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          proxy="${SERVER_GIT_PROXY:-http://127.0.0.1:10809}"
+          printf -v remote_command 'bash %q %q %q %q %q %q %q %q' \
+            /opt/job/.deploy/remote_image_release.sh \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+            "$RELEASE_SHA" "$release_id" "$PRODUCTION_SERVER_NAME" \
+            "$BACKEND_IMAGE" "$FRONTEND_IMAGE" "$proxy"
+          ssh -p "$PRODUCTION_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" "$remote_command"
+      - name: Verify public health
+        run: >-
+          curl --fail --silent --show-error --retry 10 --retry-all-errors
+          --retry-delay 3 --insecure
+          "https://$PRODUCTION_SERVER_NAME/health"
+      - name: Remove transient registry credentials
+        if: always()
+        run: |
+          ssh -p "$PRODUCTION_PORT" "$PRODUCTION_USER@$PRODUCTION_HOST" "docker logout ghcr.io" || true
+          rm -f ~/.ssh/id_ed25519

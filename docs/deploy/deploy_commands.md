@@ -1,10 +1,14 @@
-# 一键发布流程
+# 应急一键发布流程
+
+正常版本发布使用 GitHub Actions、Release Please 和 GHCR，完整流程见
+[`docs/deploy/cicd.md`](cicd.md)。本文件描述的本地命令是 emergency fallback，只有
+GitHub Actions 或 GHCR 不可用且生产必须修复时才使用。
 
 生产环境统一使用 Docker Compose 运行本项目。宿主机只保留 TLS Nginx、
 Prometheus/Grafana，以及供其他项目使用的 PostgreSQL 和 Redis；本项目使用独立的
 Docker PostgreSQL/Redis，不部署 Elasticsearch。
 
-## 发布命令
+## 应急发布命令
 
 在项目根目录执行唯一入口：
 
