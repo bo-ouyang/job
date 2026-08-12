@@ -13,8 +13,9 @@ GitHub has built, attested, and deployed the exact release images.
 4. Merge only after all required checks pass.
 5. Release Please creates or updates a release pull request containing the next
    semantic version and `CHANGELOG.md` changes.
-6. The release workflow explicitly dispatches `ci.yml` for that bot-created
-   branch, so the same required checks run without a long-lived user PAT.
+6. The release workflow validates the bot-created branch and approves its
+   pending `pull_request` run, so the same required checks satisfy branch
+   protection without a long-lived user PAT.
 7. Merge the Release Please pull request to create `vMAJOR.MINOR.PATCH` and a
    GitHub Release.
 8. The release workflow builds the backend and frontend once, publishes them to

@@ -62,7 +62,13 @@ def test_release_please_owns_semantic_version_creation():
     assert "RELEASE_PLEASE_TOKEN" not in source
     assert workflow["jobs"]["release"]["permissions"]["actions"] == "write"
     assert "steps.release.outputs.prs_created == 'true'" in source
-    assert "gh workflow run ci.yml --ref" in source
+    assert '"action_required"' in source
+    assert '"github-actions[bot]"' in source
+    assert ".head.repo.full_name" in source
+    assert '"queued", "in_progress"' in source
+    assert "for _ in {1..24}" in source
+    assert "/approve" in source
+    assert "gh workflow run" not in source
     assert "release_created" in source
     assert '"release-type": "simple"' in config
     version = manifest.get(".")

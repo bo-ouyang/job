@@ -38,15 +38,50 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      - name: Dispatch required CI for the Release Please pull request
+      - name: Approve required CI for the Release Please pull request
         if: github.event_name == 'push' && steps.release.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
+          release_number=$(jq -r '.number // empty' <<< "$RELEASE_PR")
           release_branch=$(jq -r '.headBranchName // empty' <<< "$RELEASE_PR")
+          [[ "$release_number" =~ ^[0-9]+$ ]]
           [[ "$release_branch" == release-please--* ]]
-          gh workflow run ci.yml --ref "$release_branch" --repo "$GITHUB_REPOSITORY"
+
+          pull=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$release_number")
+          [[ $(jq -r '.base.ref' <<< "$pull") == main ]]
+          [[ $(jq -r '.head.ref' <<< "$pull") == "$release_branch" ]]
+          [[ $(jq -r '.head.repo.full_name' <<< "$pull") == "$GITHUB_REPOSITORY" ]]
+          release_sha=$(jq -r '.head.sha' <<< "$pull")
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+
+          run_id=
+          run_conclusion=
+          for _ in {1..24}; do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&branch=$release_branch&per_page=20")
+            candidate=$(jq -r --arg sha "$release_sha" --argjson number "$release_number" '
+              ([.workflow_runs[] | select(
+                .head_sha == $sha and
+                .actor.login == "github-actions[bot]" and
+                (.pull_requests | any(.number == $number)) and
+                (
+                  .conclusion == "action_required" or
+                  (.status | IN("queued", "in_progress")) or
+                  (.status == "completed" and .conclusion != "action_required")
+                )
+              )][0] // empty) | [.id, (.conclusion // "")] | @tsv
+            ' <<< "$runs")
+            if [[ -n "$candidate" ]]; then
+              IFS=$'\t' read -r run_id run_conclusion <<< "$candidate"
+              break
+            fi
+            sleep 5
+          done
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          if [[ "$run_conclusion" == action_required ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve"
+          fi
       - name: Check out repository for manual redeploy validation
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
