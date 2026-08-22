@@ -337,3 +337,24 @@ def test_remote_release_validates_the_complete_agent_rollout_contract_before_bui
     assert remote_source.index(validation_call) < remote_source.index(
         "docker build --pull"
     )
+
+
+def test_remote_release_preflights_and_reloads_host_nginx_via_systemd():
+    project_root = Path(__file__).resolve().parents[1]
+    remote_source = (project_root / "deploy" / "remote_release.sh").read_text(
+        encoding="utf-8"
+    )
+
+    preflight_call = 'echo "[preflight] Checking host Nginx service"\nensure_host_nginx_ready'
+    cutover = 'echo "[7/8] Switching host Nginx and Prometheus"'
+
+    assert "systemctl is-active --quiet nginx" in remote_source
+    assert 'nginx_pid_file=/run/nginx.pid' in remote_source
+    assert '-s "$nginx_pid_file"' in remote_source
+    assert 'kill -0 "$nginx_pid"' in remote_source
+    assert 'systemctl reload nginx' in remote_source
+    assert "nginx -s reload" not in remote_source
+    assert "if ! ensure_host_nginx_ready; then" in remote_source
+    assert "if ! nginx -t; then" in remote_source
+    assert remote_source.index(preflight_call) < remote_source.index(cutover)
+    assert remote_source.count("if ! reload_host_nginx; then") == 2

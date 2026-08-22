@@ -18,6 +18,7 @@ production_env_path=/opt/job/.env.production
 supervisor_config=/etc/supervisor/conf.d/jobcollection.conf
 supervisor_disabled=/etc/supervisor/conf.d/jobcollection.conf.disabled
 nginx_config=/etc/nginx/sites-available/job.conf
+nginx_pid_file=/run/nginx.pid
 prometheus_config=/etc/prometheus/prometheus.yml
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 database_backup="$backup_dir/job-$release_id.dump"
@@ -128,6 +129,48 @@ validate_agent_rollout_configuration() {
     fi
 }
 
+ensure_host_nginx_ready() {
+    local nginx_pid
+
+    if ! systemctl is-active --quiet nginx; then
+        echo "Host Nginx service is not active." >&2
+        return 1
+    fi
+    if [[ ! -s "$nginx_pid_file" ]]; then
+        echo "Host Nginx PID file is missing or empty: $nginx_pid_file" >&2
+        return 1
+    fi
+
+    nginx_pid=$(<"$nginx_pid_file")
+    if ! [[ "$nginx_pid" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Host Nginx PID file contains an invalid PID: $nginx_pid_file" >&2
+        return 1
+    fi
+    if ! kill -0 "$nginx_pid" 2>/dev/null; then
+        echo "Host Nginx PID is not running: $nginx_pid" >&2
+        return 1
+    fi
+    if [[ ! -r "/proc/$nginx_pid/comm" ]] || [[ $(<"/proc/$nginx_pid/comm") != nginx ]]; then
+        echo "Host Nginx PID does not identify an nginx process: $nginx_pid" >&2
+        return 1
+    fi
+}
+
+reload_host_nginx() {
+    if ! ensure_host_nginx_ready; then
+        return 1
+    fi
+    if ! nginx -t; then
+        echo "Host Nginx configuration validation failed." >&2
+        return 1
+    fi
+    if ! systemctl reload nginx; then
+        echo "Host Nginx reload failed." >&2
+        return 1
+    fi
+    ensure_host_nginx_ready
+}
+
 compose_new() {
     (
         cd "$release_dir"
@@ -160,13 +203,19 @@ start_legacy_services() {
 
 rollback() {
     status=$?
+    rollback_failed=0
     trap - ERR INT TERM
     if (( committed == 0 )); then
         echo "Release failed; rollback is starting." >&2
         set +e
         if (( nginx_changed == 1 )) && [[ -f "$nginx_backup" ]]; then
-            cp "$nginx_backup" "$nginx_config"
-            nginx -t && nginx -s reload
+            if ! cp "$nginx_backup" "$nginx_config"; then
+                echo "Rollback failed: unable to restore host Nginx configuration." >&2
+                rollback_failed=1
+            elif ! reload_host_nginx; then
+                echo "Rollback failed: host Nginx could not be reloaded safely." >&2
+                rollback_failed=1
+            fi
         fi
         if (( prometheus_changed == 1 )) && [[ -f "$prometheus_backup" ]]; then
             cp "$prometheus_backup" "$prometheus_config"
@@ -179,7 +228,12 @@ rollback() {
                 start_legacy_services
             fi
         fi
-        echo "Rollback finished." >&2
+        if (( rollback_failed == 1 )); then
+            echo "Rollback completed with errors." >&2
+            status=1
+        else
+            echo "Rollback finished." >&2
+        fi
     fi
     exit "$status"
 }
@@ -224,6 +278,9 @@ host_nginx_template="$release_dir/deploy/nginx/host.conf"
 host_prometheus_template="$release_dir/deploy/prometheus/prometheus.yml"
 [[ -f "$host_nginx_template" ]] || { echo "Missing host Nginx template" >&2; exit 1; }
 [[ -f "$host_prometheus_template" ]] || { echo "Missing Prometheus template" >&2; exit 1; }
+
+echo "[preflight] Checking host Nginx service"
+ensure_host_nginx_ready
 
 printf 'BACKEND_IMAGE=%q\nFRONTEND_IMAGE=%q\n' \
     "$backend_image" "$frontend_image" > "$release_dir/.release.env"
@@ -288,8 +345,10 @@ echo "[7/8] Switching host Nginx and Prometheus"
 cp "$nginx_config" "$nginx_backup"
 sed "s/__SERVER_NAME__/$server_name/g" "$host_nginx_template" > "$nginx_config"
 nginx_changed=1
-nginx -t
-nginx -s reload
+if ! reload_host_nginx; then
+    echo "Host Nginx cutover failed; triggering rollback." >&2
+    exit 1
+fi
 
 cp "$prometheus_config" "$prometheus_backup"
 cp "$host_prometheus_template" "$prometheus_config"
