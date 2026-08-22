@@ -1,10 +1,13 @@
 import asyncio
+import inspect
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from elasticsearch import ConnectionTimeout
 from pydantic import BaseModel
 
 ROOT = Path(__file__).parents[1]
@@ -25,6 +28,7 @@ from agent.tools.registry import AgentToolRegistry, agent_tool_registry
 from agent.tools.resolvers import ResolvedDimension, ToolResolutionError, resolve_city
 from agent.tools.schemas import CompareCitiesInput, SkillDemandInput, ToolResult
 from schemas.analysis_schema import CompareAnalysisResponse
+from services.market.query_service import MarketQueryService, MarketStatisticsSnapshot
 
 
 class DummyInput(BaseModel):
@@ -59,6 +63,77 @@ def test_default_registry_contains_only_approved_tools():
         "get_skill_demand",
         "search_jobs",
     ]
+
+
+def test_agent_market_tools_depend_on_market_query_service_not_low_level_services():
+    analysis_source = Path(
+        __import__("agent.tools.analysis_tools", fromlist=["__file__"]).__file__
+    ).read_text(encoding="utf-8")
+    job_source = Path(
+        __import__("agent.tools.job_tools", fromlist=["__file__"]).__file__
+    ).read_text(encoding="utf-8")
+
+    assert "services.market.query_service" in analysis_source
+    assert "services.analysis_service" not in analysis_source
+    assert "crud.job" not in analysis_source
+    assert "services.market.query_service" in job_source
+    assert "services.search_service" not in job_source
+    assert ".resolvers" not in job_source
+    assert "query_service" in inspect.signature(GetMarketOverviewTool).parameters
+    assert "query_service" in inspect.signature(SearchJobsTool).parameters
+
+
+def test_agent_tool_base_only_depends_on_lightweight_market_error():
+    source = Path(
+        __import__("agent.tools.base", fromlist=["__file__"]).__file__
+    ).read_text(encoding="utf-8")
+
+    assert "services.market.errors import MarketResolutionError" in source
+    assert "services.market.query_service" not in source
+
+
+def test_market_error_import_does_not_load_query_service():
+    script = (
+        "import sys; "
+        f"sys.path.insert(0, {str(ROOT / 'jobCollectionWebApi')!r}); "
+        "import services.market.errors; "
+        "assert 'services.market.query_service' not in sys.modules"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_tool_base_import_does_not_load_market_query_dependencies():
+    script = (
+        "import sys; "
+        f"sys.path.insert(0, {str(ROOT / 'jobCollectionWebApi')!r}); "
+        "import agent.tools.base; "
+        "assert 'services.market.query_service' not in sys.modules; "
+        "assert 'services.analysis_service' not in sys.modules; "
+        "assert 'services.search_service' not in sys.modules"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_tools_package_lazily_exposes_working_registry():
+    import agent.tools as tools
+
+    assert tools.agent_tool_registry.names() == agent_tool_registry.names()
 
 
 def test_registry_validates_arguments_and_rejects_unknown_tools():
@@ -126,7 +201,7 @@ def test_search_jobs_normalizes_backend_results():
         )
     )
     result = asyncio.run(
-        SearchJobsTool(service=service).invoke(
+        SearchJobsTool(query_service=MarketQueryService(job_search_service=service)).invoke(
             {"keyword": "数据分析", "limit": 10},
             ToolContext(db=AsyncMock(), user_id=1),
         )
@@ -148,7 +223,7 @@ def test_search_jobs_treats_an_unknown_industry_label_as_a_keyword():
     )
 
     result = asyncio.run(
-        SearchJobsTool(service=service).invoke(
+        SearchJobsTool(query_service=MarketQueryService(job_search_service=service)).invoke(
             {"keyword": "人工智能", "industries": ["人工智能"], "limit": 10},
             ToolContext(db=db, user_id=1),
         )
@@ -161,22 +236,29 @@ def test_search_jobs_treats_an_unknown_industry_label_as_a_keyword():
     assert any("关键词" in warning for warning in result.warnings)
 
 
-def test_market_overview_falls_back_to_postgresql():
-    service = SimpleNamespace(get_faceted_job_stats=AsyncMock(side_effect=RuntimeError("es down")))
+def test_market_overview_falls_back_to_postgresql(monkeypatch):
+    query_module = __import__("services.market.query_service", fromlist=["settings"])
+    monkeypatch.setattr(query_module.settings, "ES_ENABLED", True)
+    service = SimpleNamespace(
+        get_faceted_job_stats=AsyncMock(side_effect=ConnectionTimeout("es down"))
+    )
     fallback = {
         "salary": [{"name": "10k-15k", "value": 5}],
         "skills": [{"name": "SQL", "value": 4}],
         "industries": [{"name": "互联网", "value": 5}],
         "total_jobs": 5,
     }
+    fallback_loader = AsyncMock(return_value=fallback)
     with patch.object(
-        __import__("agent.tools.analysis_tools", fromlist=["crud_job"]).crud_job,
+        __import__("services.market.query_service", fromlist=["crud_job"]).crud_job,
         "get_statistics_from_db",
-        AsyncMock(return_value=fallback),
+        fallback_loader,
     ):
         result = asyncio.run(
-            GetMarketOverviewTool(service=service).invoke(
-                {"keyword": "数据分析"},
+            GetMarketOverviewTool(
+                query_service=MarketQueryService(statistics_service=service)
+            ).invoke(
+                {"keyword": "数据分析", "education": "本科"},
                 ToolContext(db=AsyncMock(), user_id=1),
             )
         )
@@ -185,9 +267,15 @@ def test_market_overview_falls_back_to_postgresql():
     assert result.source == "postgresql"
     assert result.sample_size == 5
     assert result.data["skill_distribution"][0] == {"name": "SQL", "count": 4}
+    assert any("已降级到 PostgreSQL" in warning for warning in result.warnings)
+    assert not any(warning.startswith("market.stats.es_fallback:") for warning in result.warnings)
+    service.get_faceted_job_stats.assert_awaited_once()
+    assert fallback_loader.await_args.kwargs["education"] == "本科"
 
 
-def test_market_overview_treats_an_unknown_industry_label_as_a_keyword():
+def test_market_overview_treats_an_unknown_industry_label_as_a_keyword(monkeypatch):
+    query_module = __import__("services.market.query_service", fromlist=["settings"])
+    monkeypatch.setattr(query_module.settings, "ES_ENABLED", True)
     empty_result = SimpleNamespace(
         scalars=lambda: SimpleNamespace(all=lambda: [])
     )
@@ -204,8 +292,14 @@ def test_market_overview_treats_an_unknown_industry_label_as_a_keyword():
     )
 
     result = asyncio.run(
-        GetMarketOverviewTool(service=service).invoke(
-            {"keyword": "人工智能", "industries": ["人工智能"]},
+        GetMarketOverviewTool(
+            query_service=MarketQueryService(statistics_service=service)
+        ).invoke(
+            {
+                "keyword": "人工智能",
+                "industries": ["人工智能"],
+                "education": "本科",
+            },
             ToolContext(db=db, user_id=1),
         )
     )
@@ -214,7 +308,9 @@ def test_market_overview_treats_an_unknown_industry_label_as_a_keyword():
     assert result.sample_size == 3
     assert service.get_faceted_job_stats.await_args.kwargs["keyword"] == "人工智能"
     assert service.get_faceted_job_stats.await_args.kwargs["industry"] is None
+    assert service.get_faceted_job_stats.await_args.kwargs["education"] is None
     assert any("关键词" in warning for warning in result.warnings)
+    assert any("学历" in warning for warning in result.warnings)
 
 
 def test_skill_demand_caps_duplicate_tag_ratios():
@@ -285,7 +381,7 @@ def test_compare_cities_normalizes_service_response():
     )
     service = SimpleNamespace(compare_cities=AsyncMock(return_value=response))
     with patch(
-        "agent.tools.analysis_tools.resolve_city",
+        "services.market.query_service.resolve_city",
         AsyncMock(
             side_effect=[
                 ResolvedDimension(code=101, name="杭州", level=1),
@@ -307,7 +403,7 @@ def test_compare_cities_normalizes_service_response():
 def test_compare_industries_returns_safe_failure():
     service = SimpleNamespace(compare_industries=AsyncMock(side_effect=RuntimeError("es down")))
     with patch(
-        "agent.tools.analysis_tools.resolve_industry",
+        "services.market.query_service.resolve_industry",
         AsyncMock(
             side_effect=[
                 ResolvedDimension(code=1, name="互联网", level=0),

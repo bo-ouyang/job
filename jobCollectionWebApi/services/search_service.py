@@ -4,6 +4,7 @@ from common.databases.PostgresManager import db_manager # Use PostgresManager
 from crud.job import job as crud_job # Reuse existing DB search logic
 from common.search.conn import get_es
 from config import settings
+from services.market.es_availability import classify_es_fallback
 
 
 class SearchService:
@@ -59,6 +60,7 @@ class SearchService:
         """
         # --- 优先尝试 Elasticsearch 查询 ---
         requested_skills = list(skills or [])
+        fallback = None
         try:
             es = await get_es() # Connects to ES implicitly via ESManager
             
@@ -149,8 +151,19 @@ class SearchService:
             logger.info("Successfully fetched search results from Elasticsearch.")
             return job_list, total, "elasticsearch", []
 
-        except Exception as e:
-            logger.error(f"Elasticsearch search failed: {e}. Falling back to PostgreSQL DB.")
+        except Exception as exc:
+            fallback = classify_es_fallback(exc)
+            if fallback is None:
+                raise
+            logger.bind(
+                component="search_service",
+                operation="job_search",
+                source="elasticsearch",
+                fallback="postgresql",
+                reason=fallback.reason,
+            ).opt(exception=exc).warning(
+                "Elasticsearch search unavailable; using PostgreSQL fallback"
+            )
             
         # --- 如果 ES 宕机或者报错，降级 (Fallback) 到原有的 PostgreSQL `ILIKE` 查询保护主链路 ---
         async with db_manager.async_session() as session:
@@ -212,7 +225,10 @@ class SearchService:
                 }
                 job_list.append(job_dict)
                 
-            warnings = []
+            warnings = [
+                "Elasticsearch 查询暂时不可用，已降级到 PostgreSQL",
+                fallback.warning_code("search"),
+            ]
             if requested_skills:
                 required = {str(skill).strip().lower() for skill in requested_skills if str(skill).strip()}
                 job_list = [

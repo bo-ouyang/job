@@ -29,6 +29,18 @@ local_git_proxy=http://127.0.0.1:11123
 server_git_proxy=http://127.0.0.1:10809
 ```
 
+## Runtime services
+
+Each release starts `api`, `admin`, `worker_realtime`, `worker_batch`, `beat`,
+and `frontend`. The release check verifies all three Celery containers are
+running and uses Celery `inspect ping` to verify both workers can reach Redis.
+
+Agent rollout is explicit in `/opt/job/.env.production`. Set
+`AGENT_ENABLED=false`, `AGENT_ROLLOUT_PERCENT=0`, and leave
+`AGENT_ROLLOUT_USER_IDS` empty until a rollout is approved. When enabled, use a
+non-zero percentage or a non-empty allow-list. The frontend build receives
+`VITE_AGENT_ENABLED` from this same production setting.
+
 这两个值可在根目录 `.env` 中覆盖。`local_git_proxy` 只用于本机的 `git push` 和
 `git ls-remote`，`server_git_proxy` 只用于服务器的 `git clone` 和 `git fetch`；它们不会
 传入应用容器。代理 URL 不允许包含用户名、密码、查询参数或片段，避免凭据进入命令日志或
@@ -47,8 +59,7 @@ server_git_proxy=http://127.0.0.1:10809
 不会停止，因此其他应用不受影响。旧 Job Supervisor 配置只在新服务通过公网健康检查后
 才会禁用。
 
-默认只启动实时队列。`worker_batch` 和 `beat` 属于 Compose 的 `batch` profile，发布时
-不会自动启动。
+发布会启动实时与批处理队列，以及 `beat` 定时调度器。
 
 ## 回滚与备份
 

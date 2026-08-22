@@ -76,6 +76,8 @@ def validate_environment(production_env: Path) -> None:
         "POSTGRES_PASSWORD",
         "POSTGRES_DB",
         "REDIS_PASSWORD",
+        "AGENT_ENABLED",
+        "AGENT_ROLLOUT_PERCENT",
     )
     missing = [key for key in required if not values.get(key)]
     if missing:
@@ -84,6 +86,24 @@ def validate_environment(production_env: Path) -> None:
         )
     if values.get("ENVIRONMENT", "").lower() != "production":
         raise ValueError(".env.production must set ENVIRONMENT=production")
+    agent_enabled = values["AGENT_ENABLED"].lower()
+    if agent_enabled not in {"true", "false"}:
+        raise ValueError("AGENT_ENABLED must be true or false")
+    rollout_percent_text = values["AGENT_ROLLOUT_PERCENT"]
+    if not rollout_percent_text.isascii() or not rollout_percent_text.isdecimal():
+        raise ValueError("AGENT_ROLLOUT_PERCENT must be an integer from 0 to 100")
+    rollout_percent = int(rollout_percent_text)
+    if not 0 <= rollout_percent <= 100:
+        raise ValueError("AGENT_ROLLOUT_PERCENT must be an integer from 0 to 100")
+    rollout_user_ids = values.get("AGENT_ROLLOUT_USER_IDS", "").strip()
+    if agent_enabled == "false" and (rollout_percent or rollout_user_ids):
+        raise ValueError(
+            "Disabled Agent requires AGENT_ROLLOUT_PERCENT=0 and no rollout users"
+        )
+    if agent_enabled == "true" and not rollout_percent and not rollout_user_ids:
+        raise ValueError(
+            "Enabled Agent requires a rollout percentage or at least one rollout user"
+        )
 
 
 def local_checks(production_env: Path) -> None:
@@ -98,6 +118,8 @@ def local_checks(production_env: Path) -> None:
         "tests/test_api_contracts.py",
         "tests/test_v2_api_contracts.py",
         "tests/test_agent_api_contract.py",
+        "tests/test_agent_submission_service.py",
+        "tests/test_agent_tools.py",
         "tests/test_production_safety.py",
         "tests/test_admin_deployment_config.py",
         "tests/test_release_architecture.py",
@@ -112,10 +134,18 @@ def local_checks(production_env: Path) -> None:
         "tests/test_agent_markdown_stream.py",
         "tests/test_agent_events.py",
         "tests/test_agent_runtime.py",
+        "tests/test_market_query_service.py",
+        "tests/test_market_es_availability.py",
+        "tests/test_market_skill_buckets.py",
+        "tests/test_analysis_service.py",
+        "tests/test_search_service_fallback.py",
         "tests/test_ai_task_billing.py",
+        "tests/test_ai_task_lifecycle.py",
+        "tests/test_ai_task_ownership.py",
         "tests/test_celery_notification_routing.py",
         "tests/test_resume_parser.py",
         "tests/test_v2_career_profile.py",
+        "tests/test_v2_market_dashboard.py",
     ]
     run([sys.executable, "-m", "pytest", "-q", *test_files])
     run([npm, "test"], cwd=PROJECT_ROOT / "frontend")

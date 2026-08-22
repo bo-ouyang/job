@@ -1,55 +1,19 @@
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import hashlib
 import json
-import re
 from config import settings
-from common.databases.RedisManager import redis_manager
 from common.databases.PostgresManager import db_manager
 from crud.job import job as crud_job
 from crud.industry import industry as crud_industry
 from common.search.conn import get_es
 from core.cache import cache
 from core.logger import sys_logger as logger
-from collections import Counter
 from sqlalchemy import or_, select
 from common.databases.models.industry import Industry
-from common.databases.models.system_config import SystemConfig
+from services.market.skill_buckets import build_skill_aggregations, merge_skill_buckets
+from services.market.skill_noise import get_skill_noise_rules
 class AnalysisService:
     """数据分析服务（ES 聚合 + PostgreSQL 降级）。"""
-
-    _CONFIG_KEY_SKILL_NOISE_EXACT = "analysis_skill_noise_exact"
-    _CONFIG_KEY_SKILL_NOISE_CONTAINS = "analysis_skill_noise_contains"
-    _SKILL_NOISE_CACHE_KEY = "analysis:config:skill_noise:v1"
-    _SKILL_NOISE_CACHE_EXPIRE_SECONDS = 300
-    _DEFAULT_SKILL_NOISE_EXACT = {
-        "\u5176\u4ed6",
-        "\u5176\u5b83",
-        "\u4e0d\u9650",
-        "\u65e0",
-        "\u6682\u65e0",
-        "n/a",
-        "na",
-        "none",
-        "null",
-        "unknown",
-        "others",
-        "other",
-    }
-    _DEFAULT_SKILL_NOISE_CONTAINS = (
-        "\u4e0d\u63a5\u53d7\u5c45\u5bb6\u529e\u516c",
-        "\u5c45\u5bb6\u529e\u516c",
-        "\u8fdc\u7a0b\u529e\u516c",
-        "\u53cc\u4f11",
-        "\u4e94\u9669",
-        "\u793e\u4fdd",
-        "\u516c\u79ef\u91d1",
-        "\u5305\u5403",
-        "\u5305\u4f4f",
-        "\u5e74\u7ec8\u5956",
-        "\u7ecf\u9a8c\u4e0d\u9650",
-        "\u5b66\u5386\u4e0d\u9650",
-        "\u63a5\u53d7\u5c0f\u767d",
-    )
 
     def __init__(self):
         pass
@@ -75,126 +39,53 @@ class AnalysisService:
         return hashlib.md5(serialized.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _normalize_skill_tag(tag: Any) -> str:
-        text = str(tag or "").strip()
-        if not text:
-            return ""
-        return re.sub(r"\s+", " ", text)
-
-    @classmethod
-    def _parse_noise_tokens(cls, raw_value: Any) -> List[str]:
-        if raw_value is None:
-            return []
-
-        if isinstance(raw_value, list):
-            return [
-                cls._normalize_skill_tag(item)
-                for item in raw_value
-                if cls._normalize_skill_tag(item)
-            ]
-
-        raw_text = str(raw_value).strip()
-        if not raw_text:
-            return []
-
-        try:
-            parsed = json.loads(raw_text)
-            if isinstance(parsed, list):
-                return [
-                    cls._normalize_skill_tag(item)
-                    for item in parsed
-                    if cls._normalize_skill_tag(item)
-                ]
-        except json.JSONDecodeError:
-            pass
-
-        parts = re.split(r"[\r\n,;\uff0c\uff1b]+", raw_text)
-        return [cls._normalize_skill_tag(item) for item in parts if cls._normalize_skill_tag(item)]
-
-    async def _get_skill_noise_rules(self) -> Tuple[set[str], Tuple[str, ...]]:
-        default_exact = {token.lower() for token in self._DEFAULT_SKILL_NOISE_EXACT}
-        default_contains = tuple(self._DEFAULT_SKILL_NOISE_CONTAINS)
-
-        cached_rules = await redis_manager.get_cache(self._SKILL_NOISE_CACHE_KEY)
-        if isinstance(cached_rules, dict):
-            exact_values = cached_rules.get("exact", [])
-            contains_values = cached_rules.get("contains", [])
-            exact_set = {
-                self._normalize_skill_tag(v).lower()
-                for v in exact_values
-                if self._normalize_skill_tag(v)
-            }
-            contains_tuple = tuple(
-                self._normalize_skill_tag(v)
-                for v in contains_values
-                if self._normalize_skill_tag(v)
-            )
-            if exact_set or contains_tuple:
-                return exact_set or default_exact, contains_tuple or default_contains
-
-        try:
-            async with db_manager.async_session() as session:
-                stmt = select(SystemConfig.key, SystemConfig.value).where(
-                    SystemConfig.is_active == True,
-                    SystemConfig.key.in_(
-                        [self._CONFIG_KEY_SKILL_NOISE_EXACT, self._CONFIG_KEY_SKILL_NOISE_CONTAINS]
-                    ),
-                )
-                rows = await session.execute(stmt)
-                row_map = {row.key: row.value for row in rows}
-        except Exception as exc:
-            logger.warning(f"从数据库加载技能噪声配置失败: {exc}")
-            return default_exact, default_contains
-
-        exact_tokens = set(default_exact)
-        exact_tokens.update(self._parse_noise_tokens(row_map.get(self._CONFIG_KEY_SKILL_NOISE_EXACT)))
-
-        contains_tokens = list(default_contains)
-        contains_tokens.extend(self._parse_noise_tokens(row_map.get(self._CONFIG_KEY_SKILL_NOISE_CONTAINS)))
-
-        normalized_exact = {
-            self._normalize_skill_tag(token).lower()
-            for token in exact_tokens
-            if self._normalize_skill_tag(token)
+    def _build_market_aggregation_dsl(bool_query: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Build the shared ES aggregation used by career, home, and faceted stats."""
+        return {
+            "query": {"bool": bool_query} if bool_query else {"match_all": {}},
+            "size": 0,
+            "track_total_hits": True,
+            "aggs": {
+                "salary_ranges": {
+                    "range": {
+                        "field": "salary_min",
+                        "ranges": [
+                            {"to": 10000.0, "key": "10k以下"},
+                            {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
+                            {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
+                            {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
+                            {"from": 35000.0, "key": "35k以上"},
+                        ],
+                    }
+                },
+                "top_industries": {"terms": {"field": "industry_code", "size": 10}},
+                **build_skill_aggregations(15),
+            },
         }
-        normalized_contains = tuple(
-            self._normalize_skill_tag(token)
-            for token in contains_tokens
-            if self._normalize_skill_tag(token)
+
+    async def _project_skill_buckets(
+        self,
+        aggs_result: Dict[str, Any],
+        *,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Merge ES skill buckets after applying the shared noise policy."""
+        exact_rules, contains_rules = await get_skill_noise_rules()
+        return merge_skill_buckets(
+            aggs_result,
+            exact_noise=exact_rules,
+            contains_noise=contains_rules,
+            limit=limit,
         )
 
-        await redis_manager.set_cache(
-            self._SKILL_NOISE_CACHE_KEY,
-            {"exact": sorted(normalized_exact), "contains": list(normalized_contains)},
-            expire=self._SKILL_NOISE_CACHE_EXPIRE_SECONDS,
-            jitter=False,
-        )
-
-        return normalized_exact or default_exact, normalized_contains or default_contains
-
-    @classmethod
-    def _is_noise_skill_tag(
-        cls,
-        tag: str,
-        exact_rules: set[str],
-        contains_rules: Tuple[str, ...],
-    ) -> bool:
-        normalized = cls._normalize_skill_tag(tag)
-        if not normalized:
-            return True
-
-        lowered = normalized.lower()
-        if lowered in exact_rules:
-            return True
-
-        if any(token in normalized for token in contains_rules):
-            return True
-
-        # 过滤仅由数字/符号组成、无语义价值的标签。
-        if re.fullmatch(r"[0-9\W_]+", normalized):
-            return True
-
-        return False
+    async def _project_market_aggregations(self, aggs_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Project shared market aggregation buckets without choosing caller DTOs."""
+        salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs_result)
+        return {
+            "salary": salary_dist,
+            "skills": skill_dist,
+            "industries": industry_dist[:5],
+        }
 
     async def _get_es_career_analysis(self, keywords: List[str],industry: int, industry_name: str, major_name: str) -> Dict[str, Any]:
         """优先使用 ES 聚合获取岗位统计。"""
@@ -225,28 +116,7 @@ class AnalysisService:
         if filter_clauses:
             bool_query["filter"] = filter_clauses
 
-        query_dsl = {
-            "query": {"bool": bool_query} if bool_query else {"match_all": {}},
-            "size": 0,
-            "track_total_hits": True,
-            "aggs": {
-                "salary_ranges": {
-                    "range": {
-                        "field": "salary_min",
-                        "ranges": [
-                            {"to": 10000.0, "key": "10k以下"},
-                            {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
-                            {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
-                            {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
-                            {"from": 35000.0, "key": "35k以上"},
-                        ],
-                    }
-                },
-                "top_industries": {"terms": {"field": "industry_code", "size": 10}},
-                "top_skills": {"terms": {"field": "skills", "size": 15}},
-                "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
-            },
-        }
+        query_dsl = self._build_market_aggregation_dsl(bool_query)
 
 
         try:
@@ -257,11 +127,8 @@ class AnalysisService:
 
         # 5. 解析聚合结果
         aggs = resp.get("aggregations", {})
-        salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
         return {
-            "salary": salary_dist,
-            "skills": skill_dist,
-            "industries": industry_dist[:5],
+            **await self._project_market_aggregations(aggs),
             "total_jobs": self._extract_total_hits(resp),
         }
 
@@ -270,37 +137,12 @@ class AnalysisService:
         """专门为前端首页量身定制的无参数全局统查询。缓存时间长。"""
         try:
             es = await get_es()
-            query_dsl = {
-                "query": {"match_all": {}},
-                "size": 0,
-                "track_total_hits": True,
-                "aggs": {
-                    "salary_ranges": {
-                        "range": {
-                            "field": "salary_min",
-                            "ranges": [
-                                {"to": 10000.0, "key": "10k以下"},
-                                {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
-                                {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
-                                {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
-                                {"from": 35000.0, "key": "35k以上"},
-                            ],
-                        }
-                    },
-                    "top_industries": {"terms": {"field": "industry_code", "size": 10}},
-                    "top_skills": {"terms": {"field": "skills", "size": 15}},
-                    "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
-                },
-            }
+            query_dsl = self._build_market_aggregation_dsl()
 
             resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
             aggs = resp.get("aggregations", {})
-            salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
-            
             return {
-                "salary": salary_dist,
-                "skills": skill_dist,
-                "industries": industry_dist[:5],
+                **await self._project_market_aggregations(aggs),
                 "total_jobs": self._extract_total_hits(resp),
             }
         except Exception as e:
@@ -364,37 +206,12 @@ class AnalysisService:
             if filter_clauses:
                 bool_query["filter"] = filter_clauses
 
-            query_dsl = {
-                "query": {"bool": bool_query} if bool_query else {"match_all": {}},
-                "size": 0,
-                "track_total_hits": True,
-                "aggs": {
-                    "salary_ranges": {
-                        "range": {
-                            "field": "salary_min",
-                            "ranges": [
-                                {"to": 10000.0, "key": "10k以下"},
-                                {"from": 10000.0, "to": 15000.0, "key": "10k-15k"},
-                                {"from": 15000.0, "to": 25000.0, "key": "15k-25k"},
-                                {"from": 25000.0, "to": 35000.0, "key": "25k-35k"},
-                                {"from": 35000.0, "key": "35k以上"},
-                            ],
-                        }
-                    },
-                    "top_industries": {"terms": {"field": "industry_code", "size": 10}},
-                    "top_skills": {"terms": {"field": "skills", "size": 15}},
-                    "top_ai_skills": {"terms": {"field": "ai_skills", "size": 15}},
-                },
-            }
+            query_dsl = self._build_market_aggregation_dsl(bool_query)
 
             resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
             aggs = resp.get("aggregations", {})
-            salary_dist, industry_dist, skill_dist = await self.resove_agg_bucket(aggs)
-            
             return {
-                "salary": salary_dist,
-                "skills": skill_dist,
-                "industries": industry_dist[:5],
+                **await self._project_market_aggregations(aggs),
                 "total_jobs": self._extract_total_hits(resp),
             }
         except Exception as e:
@@ -647,47 +464,20 @@ class AnalysisService:
                 ""
             }) if keyword else [""]
             
+            skill_aggregations = build_skill_aggregations(limit * 2)
+            for aggregation in skill_aggregations.values():
+                aggregation["terms"]["exclude"] = exclude_list
+
             query_dsl = {
                 "query": {"bool": bool_query} if bool_query else {"match_all": {}},
                 "size": 0,
-                "aggs": {
-                    "top_skills": {
-                        "terms": {
-                            "field": "skills",
-                            "size": limit * 2,
-                            "exclude": exclude_list 
-                        }
-                    },
-                    "top_ai_skills": {
-                        "terms": {
-                            "field": "ai_skills",
-                            "size": limit * 2,
-                            "exclude": exclude_list
-                        }
-                    }
-                }
+                "aggs": skill_aggregations,
             }
             
             resp = await es.search(index=settings.ES_INDEX_JOB, body=query_dsl)
             aggs = resp.get("aggregations", {})
             
-            exact_rules, contains_rules = await self._get_skill_noise_rules()
-            skill_counter = Counter()
-            
-            for b in aggs.get("top_skills", {}).get("buckets", []):
-                label = self._normalize_skill_tag(b.get("key"))
-                if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                    continue
-                skill_counter[label] += b["doc_count"]
-                    
-            for b in aggs.get("top_ai_skills", {}).get("buckets", []):
-                label = self._normalize_skill_tag(b.get("key"))
-                if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                    continue
-                skill_counter[label] += b["doc_count"]
-                    
-            result = [{"name": k, "value": v} for k, v in skill_counter.most_common(limit)]
-            return result
+            return await self._project_skill_buckets(aggs, limit=limit)
             
         except Exception as e:
             logger.error(f"Failed to fetch skill cloud stats from ES: {e}", exc_info=True)
@@ -713,20 +503,7 @@ class AnalysisService:
                     if code in code_to_name:
                         industry_dist.append({"name": code_to_name[code], "value": b["doc_count"]})
         
-        exact_rules, contains_rules = await self._get_skill_noise_rules()
-        skill_counter = Counter()
-        for b in aggs_result.get("top_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-        for b in aggs_result.get("top_ai_skills", {}).get("buckets", []):
-            label = self._normalize_skill_tag(b.get("key"))
-            if self._is_noise_skill_tag(label, exact_rules, contains_rules):
-                continue
-            skill_counter[label] += b["doc_count"]
-            
-        skill_dist = [{"name": k, "value": v} for k, v in skill_counter.most_common(15)]
+        skill_dist = await self._project_skill_buckets(aggs_result, limit=15)
         return salary_dist,industry_dist,skill_dist
 analysis_service = AnalysisService()
 

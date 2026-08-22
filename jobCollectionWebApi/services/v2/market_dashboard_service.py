@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
-from config import settings
-from crud import job as crud_job
 from common.databases.PostgresManager import db_manager
 from schemas.v2.common import DataStatus
 from schemas.v2.market import (
@@ -17,9 +15,8 @@ from schemas.v2.market import (
     TalentStructure,
     TrendData,
 )
-from services.analysis_service import analysis_service
+from services.market.query_service import MarketResolutionError, market_query_service
 from services.v2.market_test_data import MARKET_TEST_DATA
-from agent.tools.resolvers import ToolResolutionError, resolve_city, resolve_industry
 
 
 StatsLoader = Callable[[MarketDashboardQuery], Awaitable[Tuple[Dict, str]]]
@@ -41,9 +38,11 @@ class MarketDashboardService:
         self,
         stats_loader: Optional[StatsLoader] = None,
         now: Optional[Callable[[], datetime]] = None,
+        query_service=market_query_service,
     ):
         self._stats_loader = stats_loader or self._load_stats
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._query_service = query_service
 
     @staticmethod
     def _numeric_code(value: Optional[str]) -> Optional[int]:
@@ -67,8 +66,8 @@ class MarketDashboardService:
         if numeric is not None or not value:
             return numeric
         try:
-            return (await resolve_city(session, value)).code
-        except ToolResolutionError:
+            return (await self._query_service.resolve_city(session, value)).code
+        except MarketResolutionError:
             # An unknown filter must return no matches instead of silently
             # falling back to nationwide data.
             return -1
@@ -78,8 +77,8 @@ class MarketDashboardService:
         if numeric is not None or not value:
             return numeric
         try:
-            return (await resolve_industry(session, value)).code
-        except ToolResolutionError:
+            return (await self._query_service.resolve_industry(session, value)).code
+        except MarketResolutionError:
             return -1
 
     async def _load_stats(self, query: MarketDashboardQuery) -> Tuple[Dict, str]:
@@ -87,28 +86,16 @@ class MarketDashboardService:
             city_code = await self._resolve_city_code(session, query.city)
             industry_code = await self._resolve_industry_code(session, query.industry)
             published_after = self._published_after(query.range)
-            if settings.ES_ENABLED:
-                try:
-                    data = await analysis_service.get_faceted_job_stats(
-                        location=city_code,
-                        experience=query.experience,
-                        education=query.education,
-                        industry=industry_code,
-                        published_after=published_after,
-                    )
-                    return data, "elasticsearch"
-                except Exception:
-                    pass
-
-            data = await crud_job.get_statistics_from_db(
+            snapshot = await self._query_service.get_faceted_stats(
                 session,
                 location=city_code,
                 experience=query.experience,
-                education=query.education,
+                es_education=query.education,
+                pg_education=query.education,
                 industry=industry_code,
                 published_after=published_after,
             )
-        return data, "postgresql"
+        return snapshot.data, snapshot.source
 
     @staticmethod
     def _distribution(items: list) -> list[DistributionItem]:

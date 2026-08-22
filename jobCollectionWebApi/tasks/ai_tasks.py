@@ -21,6 +21,7 @@ from celery import shared_task
 
 from config import settings
 from core.logger import sys_logger as logger
+from services.ai_task_lifecycle_service import AiTaskLifecycle
 
 
 def _get_event_loop():
@@ -149,79 +150,63 @@ def _mark_task_completed(
     request_params: dict = None,
     charge_amount: float = 0.0,
 ):
-    """Persist final task state, cache dedup and notify the user."""
+    """Finalize a successful legacy AiTask through the shared lifecycle."""
     from crud import ai_task as crud_ai_task
 
     loop = _get_event_loop()
-    execution_time = round(time.time() - started_at, 2) if started_at else None
-
-    try:
+    def persist_completed(**kwargs):
         persisted = loop.run_until_complete(
             crud_ai_task.mark_completed(
-                user_id=user_id,
-                feature_key=feature_key,
-                celery_task_id=celery_task_id,
-                result_data=result_data,
-                started_at=started_at,
-                charge_amount=charge_amount,
+                user_id=kwargs["user_id"],
+                feature_key=kwargs["feature_key"],
+                celery_task_id=kwargs["celery_task_id"],
+                result_data=kwargs["result_data"],
+                started_at=kwargs["started_at"],
+                charge_amount=kwargs["charge_amount"],
             )
         )
-        if not persisted:
-            raise RuntimeError(
-                f"AI task result was not persisted: task_id={celery_task_id}"
-            )
-    except Exception as exc:
-        logger.error(f"mark_completed callback failed: {exc}")
-        raise
+        if persisted:
+            try:
+                loop.run_until_complete(
+                    crud_ai_task.set_dedup_cache(
+                        kwargs["feature_key"],
+                        kwargs["request_params"],
+                        kwargs["celery_task_id"],
+                    )
+                )
+            except Exception as exc:
+                logger.warning(f"set_dedup_cache failed: {exc}")
+        return persisted
 
-    try:
-        loop.run_until_complete(
-            crud_ai_task.set_dedup_cache(feature_key, request_params, celery_task_id)
-        )
-    except Exception as exc:
-        logger.warning(f"set_dedup_cache failed: {exc}")
+    def persist_failed(**kwargs):
+        return loop.run_until_complete(crud_ai_task.mark_failed(**kwargs))
 
-    try:
+    def record_metrics(*, status, feature_key, execution_time):
         from core.metrics import ai_task_completed, ai_task_duration
+        from core.metrics import ai_task_failed
 
-        ai_task_completed.labels(feature=feature_key).inc()
+        metric = ai_task_completed if status == "completed" else ai_task_failed
+        metric.labels(feature=feature_key).inc()
         if execution_time is not None:
             ai_task_duration.labels(feature=feature_key).observe(execution_time)
-    except Exception:
-        pass
 
-    message_record = _save_ai_task_message(
+    lifecycle = AiTaskLifecycle(
+        persist_completed=persist_completed,
+        persist_failed=persist_failed,
+        save_notification=_save_ai_task_message,
+        enqueue_notification=_enqueue_ai_task_message,
+        publish_event=_publish_result,
+        feature_display=_feature_display,
+        record_metrics=record_metrics,
+    )
+    return lifecycle.complete(
         user_id=user_id,
         feature_key=feature_key,
         celery_task_id=celery_task_id,
-        status="completed",
-        execution_time=execution_time,
-    )
-    if not message_record:
-        _enqueue_ai_task_message(
-            user_id=user_id,
-            feature_key=feature_key,
-            celery_task_id=celery_task_id,
-            status="completed",
-            execution_time=execution_time,
-        )
-        message_text = f"Your {_feature_display(feature_key)} task has completed"
-        message_id = None
-    else:
-        message_text = message_record["content"]
-        message_id = message_record["message_id"]
-
-    _publish_result(
-        user_id,
-        "ai_task_completed",
-        {
-            "task_id": celery_task_id,
-            "feature_key": feature_key,
-            "status": "completed",
-            "execution_time": execution_time,
-            "message": message_text,
-            "message_id": message_id,
-        },
+        result_data=result_data,
+        started_at=started_at,
+        request_params=request_params,
+        charge_amount=charge_amount,
     )
 
 def _mark_task_failed(
@@ -231,68 +216,39 @@ def _mark_task_failed(
     error_message: str,
     started_at: float,
 ):
-    """Persist failed task state and notify the user."""
+    """Finalize a failed legacy AiTask through the shared lifecycle."""
     from crud import ai_task as crud_ai_task
 
     loop = _get_event_loop()
-    execution_time = round(time.time() - started_at, 2) if started_at else None
+    def persist_completed(**kwargs):
+        return loop.run_until_complete(crud_ai_task.mark_completed(**kwargs))
 
-    try:
-        loop.run_until_complete(
-            crud_ai_task.mark_failed(
-                user_id=user_id,
-                feature_key=feature_key,
-                celery_task_id=celery_task_id,
-                error_message=error_message,
-                started_at=started_at,
-            )
-        )
-    except Exception as exc:
-        logger.error(f"mark_failed callback failed: {exc}")
+    def persist_failed(**kwargs):
+        return loop.run_until_complete(crud_ai_task.mark_failed(**kwargs))
 
-    try:
-        from core.metrics import ai_task_failed, ai_task_duration
+    def record_metrics(*, status, feature_key, execution_time):
+        from core.metrics import ai_task_completed, ai_task_duration, ai_task_failed
 
-        ai_task_failed.labels(feature=feature_key).inc()
+        metric = ai_task_completed if status == "completed" else ai_task_failed
+        metric.labels(feature=feature_key).inc()
         if execution_time is not None:
             ai_task_duration.labels(feature=feature_key).observe(execution_time)
-    except Exception:
-        pass
 
-    message_record = _save_ai_task_message(
+    lifecycle = AiTaskLifecycle(
+        persist_completed=persist_completed,
+        persist_failed=persist_failed,
+        save_notification=_save_ai_task_message,
+        enqueue_notification=_enqueue_ai_task_message,
+        publish_event=_publish_result,
+        feature_display=_feature_display,
+        record_metrics=record_metrics,
+    )
+    return lifecycle.fail(
         user_id=user_id,
         feature_key=feature_key,
         celery_task_id=celery_task_id,
-        status="failed",
-        execution_time=execution_time,
         error_message=error_message,
-    )
-    if not message_record:
-        _enqueue_ai_task_message(
-            user_id=user_id,
-            feature_key=feature_key,
-            celery_task_id=celery_task_id,
-            status="failed",
-            execution_time=execution_time,
-            error_message=error_message,
-        )
-        message_text = f"Your {_feature_display(feature_key)} task has failed"
-        message_id = None
-    else:
-        message_text = message_record["content"]
-        message_id = message_record["message_id"]
-
-    _publish_result(
-        user_id,
-        "ai_task_failed",
-        {
-            "task_id": celery_task_id,
-            "feature_key": feature_key,
-            "status": "failed",
-            "error": error_message,
-            "message": message_text,
-            "message_id": message_id,
-        },
+        started_at=started_at,
     )
 
 def _feature_display(feature_key: str) -> str:
@@ -382,8 +338,8 @@ def career_advice_task(
         return {"status": "success", "advice": result}
     except Exception as exc:
         logger.error(f"career_advice_task failed: {exc}")
-        _publish_error(user_id, "career_advice_error", str(exc))
-        _mark_task_failed(user_id, "career_advice", self.request.id, str(exc), started_at)
+        if _mark_task_failed(user_id, "career_advice", self.request.id, str(exc), started_at):
+            _publish_error(user_id, "career_advice_error", str(exc))
         return {"status": "error", "error": str(exc)}
 
 
@@ -475,6 +431,6 @@ def career_compass_task(
         return {"status": "success", "report": result}
     except Exception as exc:
         logger.error(f"career_compass_task failed: {exc}")
-        _publish_error(user_id, "career_compass_error", str(exc))
-        _mark_task_failed(user_id, "career_compass", self.request.id, str(exc), started_at)
+        if _mark_task_failed(user_id, "career_compass", self.request.id, str(exc), started_at):
+            _publish_error(user_id, "career_compass_error", str(exc))
         return {"status": "error", "error": str(exc)}

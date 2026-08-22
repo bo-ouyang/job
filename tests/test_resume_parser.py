@@ -50,6 +50,7 @@ def test_resume_task_persists_structured_notification_only_after_task_commit(mon
 
     async def mark_completed(**kwargs):
         events.append("resume_task_committed")
+        return True
 
     def save_message(**kwargs):
         assert events == ["resume_task_committed"]

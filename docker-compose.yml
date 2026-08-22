@@ -97,8 +97,9 @@ services:
   worker_realtime:
     image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_worker_realtime
+    hostname: worker-realtime
     restart: always
-    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q realtime --concurrency=4 --loglevel=info
+    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q realtime --concurrency=4 --loglevel=info --hostname=worker_realtime@%h
     volumes: *backend-volumes
     env_file:
       - .env.production
@@ -115,9 +116,9 @@ services:
   worker_batch:
     image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_worker_batch
+    hostname: worker-batch
     restart: always
-    profiles: ["batch"]
-    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q batch --concurrency=2 --loglevel=info
+    command: celery -A jobCollectionWebApi.worker.celery_app worker -Q batch --concurrency=2 --loglevel=info --hostname=worker_batch@%h
     volumes: *backend-volumes
     env_file:
       - .env.production
@@ -134,8 +135,8 @@ services:
   beat:
     image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to an immutable release tag}
     container_name: job_beat
+    hostname: job-beat
     restart: always
-    profiles: ["batch"]
     command: celery -A jobCollectionWebApi.worker.celery_app beat --loglevel=info
     volumes: *backend-volumes
     env_file:

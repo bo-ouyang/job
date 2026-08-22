@@ -381,9 +381,9 @@ async def test_career_submission_reuses_run_for_same_user_idempotency_key(monkey
     async def should_not_create(*args, **kwargs):
         raise AssertionError("a retry must not create a second conversation")
 
-    monkeypatch.setattr("services.v2.career_service.crud_agent.acquire_user_admission_lock", acquire_lock)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.get_run_by_user_idempotency_key", get_existing)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.create_conversation", should_not_create)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.acquire_user_admission_lock", acquire_lock)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.get_run_by_user_idempotency_key", get_existing)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.create_conversation", should_not_create)
 
     result = await CareerService().submit_agent_request(
         db=object(),
@@ -423,14 +423,14 @@ async def test_career_submission_returns_stable_active_run_conflict(monkeypatch)
     async def should_not_create(*args, **kwargs):
         raise AssertionError("an active run conflict must not create a conversation")
 
-    monkeypatch.setattr("services.v2.career_service.crud_agent.acquire_user_admission_lock", acquire_lock)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.acquire_user_admission_lock", acquire_lock)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
     monkeypatch.setattr(
-        "services.v2.career_service.crud_agent.get_latest_active_run",
+        "services.agent_submission_service.crud_agent.get_latest_active_run",
         get_active,
         raising=False,
     )
-    monkeypatch.setattr("services.v2.career_service.crud_agent.create_conversation", should_not_create)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.create_conversation", should_not_create)
 
     with pytest.raises(AppException) as exc_info:
         await CareerService().submit_agent_request(
@@ -446,6 +446,7 @@ async def test_career_submission_returns_stable_active_run_conflict(monkeypatch)
     error = exc_info.value
     assert error.status_code == 409
     assert error.code == "AGENT_ACTIVE_RUN_EXISTS"
+    assert error.message == "任务已经创建，正在恢复进度。"
     assert error.data == {
         "runId": "901",
         "conversationId": "801",
@@ -486,10 +487,10 @@ async def test_career_submission_does_not_recover_another_feature_run(
     async def should_not_create(*args, **kwargs):
         raise AssertionError("another active Agent feature must block before conversation creation")
 
-    monkeypatch.setattr("services.v2.career_service.crud_agent.acquire_user_admission_lock", acquire_lock)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.get_latest_active_run", get_active)
-    monkeypatch.setattr("services.v2.career_service.crud_agent.create_conversation", should_not_create)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.acquire_user_admission_lock", acquire_lock)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.get_run_by_user_idempotency_key", no_idempotent_match)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.get_latest_active_run", get_active)
+    monkeypatch.setattr("services.agent_submission_service.crud_agent.create_conversation", should_not_create)
 
     with pytest.raises(AppException) as exc_info:
         await CareerService().submit_agent_request(
@@ -505,6 +506,7 @@ async def test_career_submission_does_not_recover_another_feature_run(
     error = exc_info.value
     assert error.status_code == 409
     assert error.code == "AGENT_OTHER_RUN_ACTIVE"
+    assert error.message == "其他 AI 任务正在处理中，请等待完成或先取消该任务。"
     assert error.data == {
         "runId": "902",
         "conversationId": "802",

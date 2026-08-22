@@ -15,7 +15,7 @@ import uuid
 from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import AppException, ExternalServiceException
+from core.exceptions import AppException, ExternalServiceException, PermissionDeniedException
 from core.status_code import StatusCode
 from core.logger import sys_logger as logger
 from dependencies import get_db, get_current_user
@@ -390,7 +390,11 @@ async def get_ai_task_result(
     轮询 AI 任务状态和结果 (Redis-first → PG-fallback → Celery-fallback)。
     """
     # 1. 先查 AiTask 表 (Redis 缓存 → PG)
-    task_data = await crud_ai_task.get_task_result(task_id, db=db)
+    task_data = await crud_ai_task.get_task_result(
+        task_id,
+        db=db,
+        user_id=current_user.id,
+    )
     if task_data:
         status = task_data.get("status", "unknown")
         if status == "completed":
@@ -405,6 +409,10 @@ async def get_ai_task_result(
             return {"task_id": task_id, "status": "failed", "error": task_data.get("error_message")}
         # pending/processing — 继续检查 Celery 状态
         # （Celery 可能已完成但还没回写，用 Celery 做兜底）
+
+    owner_id = await crud_ai_task.get_task_owner_id(task_id, db=db)
+    if owner_id is not None and owner_id != current_user.id:
+        raise PermissionDeniedException(message="无权访问该 AI 任务")
 
     # 2. Celery result backend 兜底
     from core.celery_app import celery_app

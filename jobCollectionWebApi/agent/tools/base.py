@@ -8,7 +8,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logger import sys_logger as logger
-from .resolvers import ToolResolutionError
+from services.market.errors import MarketResolutionError
 from .schemas import ToolResult
 
 
@@ -68,7 +68,7 @@ class AgentTool(Generic[InputType]):
                 warning="数据查询超时，请缩小查询范围后重试",
                 filters=input_data.model_dump(),
             )
-        except ToolResolutionError as exc:
+        except MarketResolutionError as exc:
             logger.warning(f"Agent tool dimension resolution failed: tool={self.name}, error={exc}")
             return ToolResult.failure(
                 error_code="DIMENSION_RESOLUTION_FAILED",

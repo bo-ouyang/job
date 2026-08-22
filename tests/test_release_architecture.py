@@ -48,6 +48,71 @@ def test_authenticated_proxy_urls_are_rejected():
         )
 
 
+@pytest.mark.parametrize(
+    ("agent_enabled", "rollout_percent", "rollout_user_ids", "error"),
+    [
+        ("false", "0", "", None),
+        ("true", "10", "", None),
+        ("true", "0", "42", None),
+        ("false", "5", "", "Disabled Agent requires"),
+        ("true", "0", "", "Enabled Agent requires"),
+        ("true", "101", "", "must be an integer from 0 to 100"),
+    ],
+)
+def test_production_agent_rollout_configuration_is_safe(
+    tmp_path, agent_enabled, rollout_percent, rollout_user_ids, error
+):
+    production_env = tmp_path / ".env.production"
+    production_env.write_text(
+        "\n".join(
+            (
+                "ENVIRONMENT=production",
+                "SECRET_KEY=test-secret",
+                "POSTGRES_USER=job",
+                "POSTGRES_PASSWORD=test-password",
+                "POSTGRES_DB=job",
+                "REDIS_PASSWORD=test-password",
+                f"AGENT_ENABLED={agent_enabled}",
+                f"AGENT_ROLLOUT_PERCENT={rollout_percent}",
+                f"AGENT_ROLLOUT_USER_IDS={rollout_user_ids}",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    if error:
+        with pytest.raises(ValueError, match=error):
+            release.validate_environment(production_env)
+    else:
+        release.validate_environment(production_env)
+
+
+@pytest.mark.parametrize("rollout_percent", ("1_0", "", "1.0", "+10", "-0"))
+def test_production_agent_rollout_percent_rejects_non_decimal_ascii_syntax(
+    tmp_path, rollout_percent
+):
+    production_env = tmp_path / ".env.production"
+    production_env.write_text(
+        "\n".join(
+            (
+                "ENVIRONMENT=production",
+                "SECRET_KEY=test-secret",
+                "POSTGRES_USER=job",
+                "POSTGRES_PASSWORD=test-password",
+                "POSTGRES_DB=job",
+                "REDIS_PASSWORD=test-password",
+                "AGENT_ENABLED=true",
+                f"AGENT_ROLLOUT_PERCENT={rollout_percent}",
+                "AGENT_ROLLOUT_USER_IDS=42",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        release.validate_environment(production_env)
+
+
 def test_backend_declares_pydantic_email_validation_dependency():
     project_root = Path(__file__).resolve().parents[1]
     requirements = (
@@ -189,3 +254,86 @@ def test_one_command_release_has_remote_backup_cutover_and_rollback_guards():
     assert remote_source.index(smoke_test) < remote_source.index("compose_new run --rm migration")
     assert "rollback" in remote_source
     assert "curl --fail" in remote_source
+
+
+def test_release_launcher_uses_the_project_conda_environment_and_forwards_arguments():
+    project_root = Path(__file__).resolve().parents[1]
+    launcher_source = (project_root / "deploy" / "deploy.ps1").read_text(encoding="utf-8")
+
+    assert "Get-Command conda" in launcher_source
+    assert '"run" "--no-capture-output" "-n" "job" "python"' in launcher_source
+    assert '"deploy.py") @args' in launcher_source
+    assert "$LASTEXITCODE" in launcher_source
+
+
+def test_release_starts_and_checks_all_celery_runtime_processes():
+    project_root = Path(__file__).resolve().parents[1]
+    compose_source = (project_root / "docker-compose.yml").read_text(encoding="utf-8")
+    remote_source = (project_root / "deploy" / "remote_release.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "profiles: [\"batch\"]" not in compose_source
+    assert "api admin worker_realtime worker_batch beat frontend" in remote_source
+    assert "job_worker_realtime" in remote_source
+    assert "job_worker_batch" in remote_source
+    assert "job_beat" in remote_source
+    assert "inspect ping" in remote_source
+
+
+def test_release_gate_covers_agent_market_and_ai_task_lifecycle_contracts():
+    client_source = (Path(__file__).resolve().parents[1] / "deploy" / "deploy.py").read_text(
+        encoding="utf-8"
+    )
+
+    for test_file in (
+        "tests/test_agent_submission_service.py",
+        "tests/test_market_query_service.py",
+        "tests/test_market_skill_buckets.py",
+        "tests/test_market_es_availability.py",
+        "tests/test_agent_tools.py",
+        "tests/test_v2_market_dashboard.py",
+        "tests/test_ai_task_lifecycle.py",
+        "tests/test_ai_task_ownership.py",
+    ):
+        assert test_file in client_source
+
+
+def test_production_agent_configuration_is_explicit_and_build_uses_it():
+    project_root = Path(__file__).resolve().parents[1]
+    example_source = (project_root / ".env.production.example").read_text(encoding="utf-8")
+    client_source = (project_root / "deploy" / "deploy.py").read_text(encoding="utf-8")
+    remote_source = (project_root / "deploy" / "remote_release.sh").read_text(
+        encoding="utf-8"
+    )
+    dockerfile_source = (project_root / "frontend" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "AGENT_ENABLED=false" in example_source
+    assert "AGENT_ROLLOUT_PERCENT=0" in example_source
+    assert "AGENT_ROLLOUT_USER_IDS=" in example_source
+    assert '"AGENT_ENABLED"' in client_source
+    assert '"AGENT_ROLLOUT_PERCENT"' in client_source
+    assert "VITE_AGENT_ENABLED" in remote_source
+    assert 'ARG VITE_AGENT_ENABLED=false' in dockerfile_source
+
+
+def test_remote_release_validates_the_complete_agent_rollout_contract_before_build():
+    project_root = Path(__file__).resolve().parents[1]
+    remote_source = (project_root / "deploy" / "remote_release.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "validate_agent_rollout_configuration" in remote_source
+    assert "AGENT_ENABLED must be explicitly set to true or false" in remote_source
+    assert "AGENT_ROLLOUT_PERCENT must be an integer from 0 to 100" in remote_source
+    assert "Disabled Agent requires AGENT_ROLLOUT_PERCENT=0 and no rollout users" in remote_source
+    assert "Enabled Agent requires a rollout percentage or at least one rollout user" in remote_source
+    assert "/^[0-9]+$/" in remote_source
+    assert "/^[+-]?[0-9]+$/" not in remote_source
+    validation_call = 'validate_agent_rollout_configuration "$release_dir/.env.production"'
+    assert validation_call in remote_source
+    assert remote_source.index(validation_call) < remote_source.index(
+        "docker build --pull"
+    )

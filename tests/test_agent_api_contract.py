@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "jobCollectionWebApi"))
 
 from api.v1.api import api_router
 from api.v1.endpoints import agent_controller
+from services.agent_submission_service import agent_submission_service
 from core.exceptions import AppException
 from tasks import notification_tasks
 from dependencies import get_current_user_id_short_lived
@@ -93,7 +94,11 @@ async def test_agent_dispatch_failure_commits_failed_run_then_enqueues_durable_n
     db = _DispatchFailureDb()
     current_user = SimpleNamespace(id=7)
     conversation = SimpleNamespace(id=11, status="active")
-    queued_run = SimpleNamespace(id=101, conversation_id=11, status="queued")
+    queued_run = SimpleNamespace(
+        id=101,
+        conversation_id=11,
+        status="waiting_user" if waiting_resume else "queued",
+    )
     failed_run = SimpleNamespace(id=101, conversation_id=11, status="failed")
     dispatched_notifications = []
     transitions = []
@@ -131,7 +136,7 @@ async def test_agent_dispatch_failure_commits_failed_run_then_enqueues_durable_n
     def dispatch_failure(**kwargs):
         raise RuntimeError("broker unavailable")
 
-    monkeypatch.setattr(agent_controller, "_get_owned_conversation", lambda *args: asyncio.sleep(0, result=conversation))
+    monkeypatch.setattr(agent_submission_service, "_get_owned_conversation", lambda *args: asyncio.sleep(0, result=conversation))
     monkeypatch.setattr(agent_controller.crud_agent, "get_run_by_idempotency_key", no_run)
     monkeypatch.setattr(agent_controller.crud_agent, "get_message_by_idempotency_key", no_run)
     monkeypatch.setattr(agent_controller.crud_agent, "get_latest_run", latest_run)
@@ -140,14 +145,20 @@ async def test_agent_dispatch_failure_commits_failed_run_then_enqueues_durable_n
     monkeypatch.setattr(agent_controller.crud_agent, "transition_run", transition_run)
     monkeypatch.setattr(agent_controller.crud_agent, "acquire_user_admission_lock", noop)
     monkeypatch.setattr(agent_controller.crud_agent, "count_active_runs", lambda *args, **kwargs: asyncio.sleep(0, result=0))
-    monkeypatch.setattr(agent_controller.ai_access_service, "ensure_access", ensure_access)
-    monkeypatch.setattr(agent_controller, "_ensure_agent_enabled", lambda *args: None)
-    monkeypatch.setattr(agent_controller, "_enforce_agent_user_rate_limit", noop)
+    monkeypatch.setattr(
+        "services.agent_submission_service.ai_access_service.ensure_access",
+        ensure_access,
+    )
+    monkeypatch.setattr("services.agent_submission_service._ensure_agent_enabled", lambda *args: None)
+    monkeypatch.setattr("services.agent_submission_service._enforce_agent_user_rate_limit", noop)
     monkeypatch.setattr(agent_controller.agent_event_publisher, "publish", publish)
-    monkeypatch.setattr(agent_controller.execute_agent_run, "apply_async", dispatch_failure)
-    monkeypatch.setattr(agent_controller, "_enqueue_terminal_notification", enqueue_notification)
+    monkeypatch.setattr(
+        "services.agent_submission_service.execute_agent_run.apply_async",
+        dispatch_failure,
+    )
+    monkeypatch.setattr("services.agent_submission_service._enqueue_terminal_notification", enqueue_notification)
 
-    with pytest.raises(AppException):
+    with pytest.raises(AppException) as exc_info:
         await agent_controller.submit_message(
             conversation_id=11,
             obj_in=SimpleNamespace(content="分析我的职业", message_type="career_question"),
@@ -156,6 +167,11 @@ async def test_agent_dispatch_failure_commits_failed_run_then_enqueues_durable_n
             current_user=current_user,
         )
 
+    assert exc_info.value.message == (
+        "Agent 运行恢复失败，请稍后重试"
+        if waiting_resume
+        else "Agent 运行派发失败，请稍后重试"
+    )
     assert dispatched_notifications == [{
         "user_id": 7,
         "run_id": 101,

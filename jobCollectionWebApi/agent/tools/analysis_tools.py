@@ -6,17 +6,10 @@ from sqlalchemy import func, select
 
 from common.databases.models.industry import Industry
 from common.databases.models.major import MajorIndustryRelation
-from crud.job import job as crud_job
-from services.analysis_service import analysis_service
 from services.comparison_analysis_service import comparison_analysis_service
+from services.market.query_service import MarketResolutionError, market_query_service
 
 from .base import AgentTool, ToolContext
-from .resolvers import (
-    ToolResolutionError,
-    resolve_city,
-    resolve_industry,
-    resolve_industry_codes,
-)
 from .schemas import (
     CompareCitiesInput,
     CompareIndustriesInput,
@@ -47,10 +40,10 @@ class GetMarketOverviewTool(AgentTool[MarketOverviewInput]):
     description = "获取目标职业的岗位量、薪资、技能和行业分布"
     input_model = MarketOverviewInput
 
-    def __init__(self, service=analysis_service):
+    def __init__(self, query_service=market_query_service):
         """注入市场分析服务，默认使用生产 analysis_service。"""
 
-        self.service = service
+        self.query_service = query_service
 
     async def execute(self, input_data: MarketOverviewInput, context: ToolContext) -> ToolResult:
         """解析查询维度并返回统一市场概览。
@@ -59,14 +52,20 @@ class GetMarketOverviewTool(AgentTool[MarketOverviewInput]):
         学历和薪资过滤，因此使用这些条件时会在结果中披露限制。
         """
 
-        city = await resolve_city(context.db, input_data.cities[0]) if input_data.cities else None
+        city = (
+            await self.query_service.resolve_city(context.db, input_data.cities[0])
+            if input_data.cities
+            else None
+        )
         warnings: List[str] = []
         industry = None
         keyword = input_data.keyword
         if input_data.industries:
             try:
-                industry = await resolve_industry(context.db, input_data.industries[0])
-            except ToolResolutionError:
+                industry = await self.query_service.resolve_industry(
+                    context.db, input_data.industries[0]
+                )
+            except MarketResolutionError:
                 keyword = keyword or input_data.industries[0]
                 warnings.append(
                     f"未识别行业“{input_data.industries[0]}”，已按关键词继续查询"
@@ -76,31 +75,27 @@ class GetMarketOverviewTool(AgentTool[MarketOverviewInput]):
         if len(input_data.industries) > 1:
             warnings.append("市场概览当前只使用第一个行业")
 
-        source = "elasticsearch"
-        try:
-            stats = await self.service.get_faceted_job_stats(
-                keyword=keyword,
-                location=city.code if city else None,
-                experience=input_data.experience,
-                industry=industry.code if industry and industry.level == 0 else None,
-                industry_2=industry.code if industry and industry.level > 0 else None,
-            )
-            if input_data.education or input_data.salary_min_yuan or input_data.salary_max_yuan:
-                warnings.append("当前 ES 市场概览尚未应用学历或薪资过滤")
-        except Exception:
-            # ES 被关闭、连接失败或聚合异常时使用关系库统计，避免整个 Agent 无证据可用。
-            stats = await crud_job.get_statistics_from_db(
-                context.db,
-                keyword=keyword,
-                location=city.code if city else None,
-                experience=input_data.experience,
-                education=input_data.education,
-                industry=industry.code if industry else None,
-                salary_min=input_data.salary_min_yuan,
-                salary_max=input_data.salary_max_yuan,
-            )
-            source = "postgresql"
-            warnings.append("Elasticsearch 不可用，已降级到 PostgreSQL")
+        snapshot = await self.query_service.get_faceted_stats(
+            context.db,
+            keyword=keyword,
+            location=city.code if city else None,
+            experience=input_data.experience,
+            # The Agent overview's ES aggregation has no education facet.
+            # Keep the legacy evidence contract and disclose that limitation below.
+            es_education=None,
+            pg_education=input_data.education,
+            industry=industry.code if industry and industry.level == 0 else None,
+            industry_2=industry.code if industry and industry.level > 0 else None,
+            salary_min=input_data.salary_min_yuan,
+            salary_max=input_data.salary_max_yuan,
+        )
+        stats = snapshot.data
+        source = snapshot.source
+        warnings.extend(snapshot.warnings)
+        if source == "elasticsearch" and (
+            input_data.education or input_data.salary_min_yuan or input_data.salary_max_yuan
+        ):
+            warnings.append("当前 ES 市场概览尚未应用学历或薪资过滤")
 
         total = int(stats.get("total_jobs") or 0)
         filters = input_data.model_dump()
@@ -221,7 +216,7 @@ class GetMajorDirectionsTool(AgentTool[MajorDirectionsInput]):
         # 父行业映射需要展开到子行业，否则会漏掉具体岗位所属的二级行业。
         expanded_codes = set()
         for code in codes:
-            expanded_codes.update(await resolve_industry_codes(context.db, code))
+            expanded_codes.update(await market_query_service.resolve_industry_codes(context.db, code))
         industry_result = await context.db.execute(
             select(Industry).where(Industry.code.in_(sorted(expanded_codes or codes)))
         )
@@ -281,10 +276,11 @@ class CompareCitiesTool(AgentTool[CompareCitiesInput]):
     description = "比较两个城市在同一职业方向上的岗位、薪资和技能需求"
     input_model = CompareCitiesInput
 
-    def __init__(self, service=comparison_analysis_service):
+    def __init__(self, service=comparison_analysis_service, query_service=market_query_service):
         """注入比较分析服务，默认使用生产 comparison_analysis_service。"""
 
         self.service = service
+        self.query_service = query_service
 
     async def execute(self, input_data: CompareCitiesInput, context: ToolContext) -> ToolResult:
         """解析两个城市及可选行业，并返回岗位、薪资、趋势和技能对比。
@@ -293,9 +289,13 @@ class CompareCitiesTool(AgentTool[CompareCitiesInput]):
         warning 明确提供给回答模型。
         """
 
-        left = await resolve_city(context.db, input_data.cities[0])
-        right = await resolve_city(context.db, input_data.cities[1])
-        industry = await resolve_industry(context.db, input_data.industry) if input_data.industry else None
+        left = await self.query_service.resolve_city(context.db, input_data.cities[0])
+        right = await self.query_service.resolve_city(context.db, input_data.cities[1])
+        industry = (
+            await self.query_service.resolve_industry(context.db, input_data.industry)
+            if input_data.industry
+            else None
+        )
         result = await self.service.compare_cities(
             left_city_code=left.code,
             right_city_code=right.code,
@@ -323,10 +323,11 @@ class CompareIndustriesTool(AgentTool[CompareIndustriesInput]):
     description = "比较两个行业在同一职业方向上的岗位、薪资和技能需求"
     input_model = CompareIndustriesInput
 
-    def __init__(self, service=comparison_analysis_service):
+    def __init__(self, service=comparison_analysis_service, query_service=market_query_service):
         """注入比较分析服务，默认使用生产 comparison_analysis_service。"""
 
         self.service = service
+        self.query_service = query_service
 
     async def execute(self, input_data: CompareIndustriesInput, context: ToolContext) -> ToolResult:
         """解析两个行业及可选城市，并返回岗位、薪资、趋势和技能对比。
@@ -334,9 +335,13 @@ class CompareIndustriesTool(AgentTool[CompareIndustriesInput]):
         与城市比较一样，目前依赖 Elasticsearch，结果会显式说明无 PostgreSQL 降级。
         """
 
-        left = await resolve_industry(context.db, input_data.industries[0])
-        right = await resolve_industry(context.db, input_data.industries[1])
-        city = await resolve_city(context.db, input_data.city) if input_data.city else None
+        left = await self.query_service.resolve_industry(context.db, input_data.industries[0])
+        right = await self.query_service.resolve_industry(context.db, input_data.industries[1])
+        city = (
+            await self.query_service.resolve_city(context.db, input_data.city)
+            if input_data.city
+            else None
+        )
         result = await self.service.compare_industries(
             left_industry_code=left.code,
             right_industry_code=right.code,

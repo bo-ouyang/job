@@ -16,6 +16,7 @@ import os
 from core.logger import sys_logger as logger
 from jobCollectionWebApi.core.celery_app import celery_app
 from services.ai_service import ai_service
+from services.ai_task_lifecycle_service import AiTaskLifecycle
 
 
 def _has_usable_resume_candidates(parsed_data) -> bool:
@@ -154,7 +155,6 @@ async def _parse_resume_logic(user_id: int, file_path: str) -> str:
     text = await _extract_text_from_pdf(file_path)
     if not text:
         error_msg = "无法读取简历内容，请上传标准的PDF文件"
-        _publish_ws(user_id, "resume_parse_error", {"message": error_msg})
         raise ValueError(error_msg)
 
     # Call AI
@@ -164,132 +164,76 @@ async def _parse_resume_logic(user_id: int, file_path: str) -> str:
     if not _has_usable_resume_candidates(parsed_data):
         raise RuntimeError("AI resume parsing returned no structured data")
 
-    # Publish feature-specific WS message (backward compatible)
-    _publish_ws(user_id, "resume_parsed", parsed_data)
-
     return json.dumps(parsed_data, ensure_ascii=False)
 
 
-def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started_at: float):
+def _lifecycle() -> AiTaskLifecycle:
+    """Adapt the existing Resume dependencies to the shared terminal lifecycle."""
     from crud import ai_task as crud_ai_task
 
     loop = _get_event_loop()
-    execution_time = round(time.time() - started_at, 2) if started_at else None
 
-    try:
-        loop.run_until_complete(
+    def persist_completed(**kwargs):
+        return loop.run_until_complete(
             crud_ai_task.mark_completed(
-                user_id=user_id,
-                feature_key="resume_parse",
-                celery_task_id=celery_task_id,
-                result_data=result_data,
-                started_at=started_at,
+                user_id=kwargs["user_id"],
+                feature_key=kwargs["feature_key"],
+                celery_task_id=kwargs["celery_task_id"],
+                result_data=kwargs["result_data"],
+                started_at=kwargs["started_at"],
             )
         )
-    except Exception as exc:
-        logger.error(f"resume mark_completed failed: {exc}")
 
-    try:
-        from core.metrics import ai_task_completed, ai_task_duration
+    def persist_failed(**kwargs):
+        return loop.run_until_complete(crud_ai_task.mark_failed(**kwargs))
 
-        ai_task_completed.labels(feature="resume_parse").inc()
+    def record_metrics(*, status, feature_key, execution_time):
+        from core.metrics import ai_task_completed, ai_task_duration, ai_task_failed
+
+        metric = ai_task_completed if status == "completed" else ai_task_failed
+        metric.labels(feature=feature_key).inc()
         if execution_time is not None:
-            ai_task_duration.labels(feature="resume_parse").observe(execution_time)
-    except Exception:
-        pass
+            ai_task_duration.labels(feature=feature_key).observe(execution_time)
 
-    message_record = _save_resume_message(
-        user_id=user_id,
-        celery_task_id=celery_task_id,
-        status="completed",
-        execution_time=execution_time,
-    )
-    if not message_record:
-        _enqueue_ai_task_message(
-            user_id=user_id,
-            celery_task_id=celery_task_id,
-            status="completed",
-            execution_time=execution_time,
-        )
-        message_text = "Your resume parsing task has completed"
-        message_id = None
-    else:
-        message_text = message_record["content"]
-        message_id = message_record["message_id"]
-
-    _publish_ws(
-        user_id,
-        "ai_task_completed",
-        {
-            "task_id": celery_task_id,
-            "feature_key": "resume_parse",
-            "status": "completed",
-            "execution_time": execution_time,
-            "message": message_text,
-            "message_id": message_id,
-        },
+    return AiTaskLifecycle(
+        persist_completed=persist_completed,
+        persist_failed=persist_failed,
+        save_notification=lambda **kwargs: _save_resume_message(
+            user_id=kwargs["user_id"],
+            celery_task_id=kwargs["celery_task_id"],
+            status=kwargs["status"],
+            execution_time=kwargs["execution_time"],
+            error_message=kwargs.get("error_message"),
+        ),
+        enqueue_notification=lambda **kwargs: _enqueue_ai_task_message(
+            user_id=kwargs["user_id"],
+            celery_task_id=kwargs["celery_task_id"],
+            status=kwargs["status"],
+            execution_time=kwargs["execution_time"],
+            error_message=kwargs.get("error_message"),
+        ),
+        publish_event=_publish_ws,
+        feature_display=lambda _feature_key: "resume parsing",
+        record_metrics=record_metrics,
     )
 
-def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_at: float):
-    from crud import ai_task as crud_ai_task
-
-    loop = _get_event_loop()
-    execution_time = round(time.time() - started_at, 2) if started_at else None
-
-    try:
-        loop.run_until_complete(
-            crud_ai_task.mark_failed(
-                user_id=user_id,
-                feature_key="resume_parse",
-                celery_task_id=celery_task_id,
-                error_message=error_message,
-                started_at=started_at,
-            )
-        )
-    except Exception as exc:
-        logger.error(f"resume mark_failed failed: {exc}")
-
-    try:
-        from core.metrics import ai_task_failed, ai_task_duration
-
-        ai_task_failed.labels(feature="resume_parse").inc()
-        if execution_time is not None:
-            ai_task_duration.labels(feature="resume_parse").observe(execution_time)
-    except Exception:
-        pass
-
-    message_record = _save_resume_message(
+def _mark_completed(user_id: int, celery_task_id: str, result_data: str, started_at: float):
+    return _lifecycle().complete(
         user_id=user_id,
+        feature_key="resume_parse",
         celery_task_id=celery_task_id,
-        status="failed",
-        execution_time=execution_time,
+        result_data=result_data,
+        started_at=started_at,
+    )
+
+
+def _mark_failed(user_id: int, celery_task_id: str, error_message: str, started_at: float) -> bool:
+    return _lifecycle().fail(
+        user_id=user_id,
+        feature_key="resume_parse",
+        celery_task_id=celery_task_id,
         error_message=error_message,
-    )
-    if not message_record:
-        _enqueue_ai_task_message(
-            user_id=user_id,
-            celery_task_id=celery_task_id,
-            status="failed",
-            execution_time=execution_time,
-            error_message=error_message,
-        )
-        message_text = "Your resume parsing task has failed"
-        message_id = None
-    else:
-        message_text = message_record["content"]
-        message_id = message_record["message_id"]
-
-    _publish_ws(
-        user_id,
-        "ai_task_failed",
-        {
-            "task_id": celery_task_id,
-            "feature_key": "resume_parse",
-            "status": "failed",
-            "error": error_message,
-            "message": message_text,
-            "message_id": message_id,
-        },
+        started_at=started_at,
     )
 
 @celery_app.task(
@@ -308,12 +252,13 @@ def parse_resume_task(self, user_id: int, file_path: str):
         result = loop.run_until_complete(_parse_resume_logic(user_id, file_path))
         logger.info(f"ai_task_stage task_id={self.request.id} feature=resume_parse stage=ai_done")
         _mark_completed(user_id, self.request.id, result, started_at)
+        _publish_ws(user_id, "resume_parsed", json.loads(result))
         logger.info(f"ai_task_stage task_id={self.request.id} feature=resume_parse stage=finalized")
     except Exception as e:
         logger.error(f"Resume parsing failed: {e}")
-        _mark_failed(user_id, self.request.id, str(e), started_at)
-        _publish_ws(
-            user_id,
-            "resume_parse_error",
-            {"message": "解析服务暂时不可用", "task_id": self.request.id},
-        )
+        if _mark_failed(user_id, self.request.id, str(e), started_at):
+            _publish_ws(
+                user_id,
+                "resume_parse_error",
+                {"message": "解析服务暂时不可用", "task_id": self.request.id},
+            )

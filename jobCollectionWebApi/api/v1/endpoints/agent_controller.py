@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common.databases.models.user import User
@@ -19,14 +18,10 @@ from agent.events import AgentEventType
 from agent.locks import agent_sse_connection_limiter
 from agent.sse import normalize_last_event_id, stream_agent_events
 from common.databases.PostgresManager import db_manager
-from common.databases.RedisManager import redis_manager
 from core.metrics import (
     agent_runs_cancelled,
-    agent_runs_created,
-    agent_runs_failed,
     agent_sse_connections_active,
     agent_sse_reconnects,
-    celery_tasks_submitted,
 )
 from core.logger import sys_logger as logger
 from schemas.agent_schema import (
@@ -42,8 +37,7 @@ from schemas.agent_schema import (
     CareerProfileResponse,
     CareerProfileUpdate,
 )
-from services.ai_access_service import ai_access_service
-from jobCollectionWebApi.tasks.agent_tasks import execute_agent_run
+from services.agent_submission_service import agent_submission_service
 
 
 router = APIRouter()
@@ -73,28 +67,6 @@ def _enqueue_terminal_notification(
             f"run_id={run_id}, status={status}, error={exc}"
         )
 
-
-async def _enforce_agent_user_rate_limit(user_id: int) -> None:
-    key = redis_manager.make_key(f"agent:rate:user:{user_id}")
-    script = """
-    local current = redis.call('INCR', KEYS[1])
-    if current == 1 then redis.call('EXPIRE', KEYS[1], 60) end
-    return current
-    """
-    try:
-        current = await redis_manager.redis_client.eval(script, 1, key)
-    except Exception as exc:
-        raise AppException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            code=StatusCode.EXTERNAL_SERVICE_ERROR,
-            message="Agent 限流服务暂时不可用",
-        ) from exc
-    if int(current) > settings.AGENT_RATE_LIMIT_PER_MINUTE:
-        raise AppException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            code=StatusCode.TOO_MANY_REQUESTS,
-            message="Agent 请求过于频繁，请稍后再试",
-        )
 
 
 def _agent_enabled_for_user(user_id: int) -> bool:
@@ -262,270 +234,13 @@ async def submit_message(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    conversation = await _get_owned_conversation(db, conversation_id, current_user.id)
-    if conversation.status != "active":
-        raise AppException(
-            status_code=status.HTTP_409_CONFLICT,
-            code=StatusCode.BUSINESS_ERROR,
-            message="归档会话不能继续发送消息",
-        )
-
-    existing_run = await crud_agent.get_run_by_idempotency_key(
-        db,
+    return await agent_submission_service.submit_message(
         conversation_id=conversation_id,
-        user_id=current_user.id,
+        obj_in=obj_in,
         idempotency_key=idempotency_key,
-    )
-    if existing_run is not None:
-        existing_message = await crud_agent.get_message(
-            db,
-            message_id=existing_run.input_message_id,
-            user_id=current_user.id,
-        )
-        if existing_message is None:
-            raise AppException(
-                status_code=status.HTTP_409_CONFLICT,
-                code=StatusCode.BUSINESS_ERROR,
-                message="幂等运行缺少原始消息",
-            )
-        return {"message": existing_message, "run": existing_run}
-
-    existing_message = await crud_agent.get_message_by_idempotency_key(
-        db,
-        conversation_id=conversation_id,
-        user_id=current_user.id,
-        idempotency_key=idempotency_key,
-    )
-    if existing_message is not None:
-        latest_run = await crud_agent.get_latest_run(
-            db,
-            conversation_id=conversation_id,
-            user_id=current_user.id,
-        )
-        if latest_run is None:
-            raise AppException(
-                status_code=status.HTTP_409_CONFLICT,
-                code=StatusCode.BUSINESS_ERROR,
-                message="幂等消息缺少关联运行",
-            )
-        return {"message": existing_message, "run": latest_run}
-
-    _ensure_agent_enabled(current_user.id)
-    waiting_run = await crud_agent.get_latest_run(
-        db,
-        conversation_id=conversation_id,
-        user_id=current_user.id,
-    )
-    if waiting_run is not None and waiting_run.status == "waiting_user":
-        await _enforce_agent_user_rate_limit(current_user.id)
-        try:
-            message = await crud_agent.create_message(
-                db,
-                conversation=conversation,
-                user_id=current_user.id,
-                obj_in=obj_in,
-                role="user",
-                idempotency_key=idempotency_key,
-            )
-            resumed_run = await crud_agent.transition_run(
-                db,
-                run_id=waiting_run.id,
-                user_id=current_user.id,
-                from_statuses=("waiting_user",),
-                to_status="queued",
-                values={"current_node": "resume_queued", "completed_at": None},
-            )
-            if resumed_run is None:
-                await db.rollback()
-                raise AppException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    code=StatusCode.BUSINESS_ERROR,
-                    message="等待中的运行已被其他请求恢复",
-                )
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            message = await crud_agent.get_message_by_idempotency_key(
-                db,
-                conversation_id=conversation_id,
-                user_id=current_user.id,
-                idempotency_key=idempotency_key,
-            )
-            resumed_run = await crud_agent.get_run(
-                db,
-                run_id=waiting_run.id,
-                user_id=current_user.id,
-            )
-            if message is None or resumed_run is None:
-                raise
-        try:
-            execute_agent_run.apply_async(
-                kwargs={"run_id": resumed_run.id, "user_id": current_user.id},
-                queue="realtime",
-                routing_key="realtime",
-            )
-            celery_tasks_submitted.labels(
-                task_name="execute_agent_run",
-                queue="realtime",
-            ).inc()
-        except Exception as exc:
-            await crud_agent.transition_run(
-                db,
-                run_id=resumed_run.id,
-                user_id=current_user.id,
-                from_statuses=("queued",),
-                to_status="failed",
-                values={
-                    "current_node": "dispatch_failed",
-                    "error_code": "AGENT_DISPATCH_FAILED",
-                    "error_message": str(exc)[:1000],
-                },
-            )
-            await db.commit()
-            agent_runs_failed.labels(failure_kind="AGENT_DISPATCH_FAILED").inc()
-            await agent_event_publisher.publish(
-                run_id=resumed_run.id,
-                conversation_id=resumed_run.conversation_id,
-                event=AgentEventType.RUN_FAILED,
-                data={"status": "failed", "error_code": "AGENT_DISPATCH_FAILED"},
-            )
-            _enqueue_terminal_notification(
-                user_id=current_user.id,
-                run_id=resumed_run.id,
-                status="failed",
-                error_message=str(exc)[:1000],
-            )
-            raise AppException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                code=StatusCode.EXTERNAL_SERVICE_ERROR,
-                message="Agent 运行恢复失败，请稍后重试",
-                data={"run_id": str(resumed_run.id)},
-            )
-        return {"message": message, "run": resumed_run}
-
-    await _enforce_agent_user_rate_limit(current_user.id)
-    await crud_agent.acquire_user_admission_lock(db, user_id=current_user.id)
-    existing_run = await crud_agent.get_run_by_idempotency_key(
-        db,
-        conversation_id=conversation_id,
-        user_id=current_user.id,
-        idempotency_key=idempotency_key,
-    )
-    if existing_run is not None:
-        existing_message = await crud_agent.get_message(
-            db,
-            message_id=existing_run.input_message_id,
-            user_id=current_user.id,
-        )
-        if existing_message is not None:
-            return {"message": existing_message, "run": existing_run}
-    active_runs = await crud_agent.count_active_runs(db, user_id=current_user.id)
-    if active_runs >= settings.AGENT_MAX_CONCURRENT_RUNS_PER_USER:
-        raise AppException(
-            status_code=status.HTTP_409_CONFLICT,
-            code=StatusCode.BUSINESS_ERROR,
-            message="已有职业规划正在分析，请等待完成或先取消当前运行",
-        )
-
-    billing_feature_key = (
-        "career_compass"
-        if obj_in.message_type == "career_report_request"
-        else "career_advice"
-    )
-    charge_amount = await ai_access_service.ensure_access(
         db=db,
-        user_id=current_user.id,
-        feature_key=billing_feature_key,
+        current_user=current_user,
     )
-
-    created_run = False
-    try:
-        message = await crud_agent.create_message(
-            db,
-            conversation=conversation,
-            user_id=current_user.id,
-            obj_in=obj_in,
-            role="user",
-            idempotency_key=idempotency_key,
-        )
-        run = await crud_agent.create_run(
-            db,
-            conversation=conversation,
-            user_id=current_user.id,
-            goal=obj_in.content,
-            input_message_id=message.id,
-            idempotency_key=idempotency_key,
-            billing_feature_key=billing_feature_key,
-            charge_amount=charge_amount,
-        )
-        # The worker must never observe a run before its transaction is committed.
-        await db.commit()
-        created_run = True
-    except IntegrityError:
-        await db.rollback()
-        run = await crud_agent.get_run_by_idempotency_key(
-            db,
-            conversation_id=conversation_id,
-            user_id=current_user.id,
-            idempotency_key=idempotency_key,
-        )
-        if run is None:
-            raise
-        message = await crud_agent.get_message(
-            db,
-            message_id=run.input_message_id,
-            user_id=current_user.id,
-        )
-
-    try:
-        execute_agent_run.apply_async(
-            kwargs={"run_id": run.id, "user_id": current_user.id},
-            queue="realtime",
-            routing_key="realtime",
-        )
-        celery_tasks_submitted.labels(
-            task_name="execute_agent_run",
-            queue="realtime",
-        ).inc()
-        if created_run:
-            agent_runs_created.labels(source="message").inc()
-    except Exception as exc:
-        failed_run = await crud_agent.transition_run(
-            db,
-            run_id=run.id,
-            user_id=current_user.id,
-            from_statuses=("queued",),
-            to_status="failed",
-            values={
-                "current_node": "dispatch_failed",
-                "error_code": "AGENT_DISPATCH_FAILED",
-                "error_message": str(exc)[:1000],
-            },
-        )
-        await db.commit()
-        terminal_run = failed_run or run
-        agent_runs_failed.labels(failure_kind="AGENT_DISPATCH_FAILED").inc()
-        await agent_event_publisher.publish(
-            run_id=terminal_run.id,
-            conversation_id=terminal_run.conversation_id,
-            event=AgentEventType.RUN_FAILED,
-            data={"status": "failed", "error_code": "AGENT_DISPATCH_FAILED"},
-        )
-        _enqueue_terminal_notification(
-            user_id=current_user.id,
-            run_id=terminal_run.id,
-            status="failed",
-            error_message=str(exc)[:1000],
-        )
-        raise AppException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            code=StatusCode.EXTERNAL_SERVICE_ERROR,
-            message="Agent 运行派发失败，请稍后重试",
-            data={"run_id": str((failed_run or run).id)},
-        )
-
-    return {"message": message, "run": run}
-
 
 @router.get("/runs/{run_id}", response_model=AgentRunResponse)
 async def get_run(

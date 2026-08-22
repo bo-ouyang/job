@@ -61,6 +61,73 @@ git_with_retry() {
     return 1
 }
 
+read_dotenv_value() {
+    dotenv_key=$1
+    dotenv_path=$2
+    awk -v expected_key="$dotenv_key" '
+        /^[[:space:]]*($|#)/ { next }
+        {
+            assignment = $0
+            separator = index(assignment, "=")
+            if (!separator) next
+
+            key = substr(assignment, 1, separator - 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+            if (key != expected_key) next
+
+            value = substr(assignment, separator + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            if (length(value) >= 2) {
+                first = substr(value, 1, 1)
+                last = substr(value, length(value), 1)
+                if ((first == "\"" || first == sprintf("%c", 39)) && first == last) {
+                    value = substr(value, 2, length(value) - 2)
+                }
+            }
+            result = value
+            found = 1
+        }
+        END {
+            if (found) print result
+        }
+    ' "$dotenv_path"
+}
+
+is_rollout_percentage() {
+    printf '%s\n' "$1" | awk '
+        /^[0-9]+$/ && ($0 + 0) >= 0 && ($0 + 0) <= 100 { valid = 1 }
+        END { exit valid ? 0 : 1 }
+    '
+}
+
+validate_agent_rollout_configuration() {
+    dotenv_path=$1
+    agent_enabled=$(read_dotenv_value AGENT_ENABLED "$dotenv_path" | tr '[:upper:]' '[:lower:]')
+    rollout_percent=$(read_dotenv_value AGENT_ROLLOUT_PERCENT "$dotenv_path")
+    rollout_user_ids=$(read_dotenv_value AGENT_ROLLOUT_USER_IDS "$dotenv_path")
+
+    case "$agent_enabled" in
+        true|false) ;;
+        *) echo "AGENT_ENABLED must be explicitly set to true or false" >&2; return 1 ;;
+    esac
+    if ! is_rollout_percentage "$rollout_percent"; then
+        echo "AGENT_ROLLOUT_PERCENT must be an integer from 0 to 100" >&2
+        return 1
+    fi
+
+    rollout_percent_value=$(printf '%s\n' "$rollout_percent" | awk '{ print $1 + 0 }')
+    if [[ "$agent_enabled" == false ]] && \
+        { [[ "$rollout_percent_value" -ne 0 ]] || [[ -n "$rollout_user_ids" ]]; }; then
+        echo "Disabled Agent requires AGENT_ROLLOUT_PERCENT=0 and no rollout users" >&2
+        return 1
+    fi
+    if [[ "$agent_enabled" == true ]] && \
+        [[ "$rollout_percent_value" -eq 0 ]] && [[ -z "$rollout_user_ids" ]]; then
+        echo "Enabled Agent requires a rollout percentage or at least one rollout user" >&2
+        return 1
+    fi
+}
+
 compose_new() {
     (
         cd "$release_dir"
@@ -78,7 +145,7 @@ start_previous_release() {
         source .release.env
         set +a
         docker compose --env-file .env.production up -d --remove-orphans \
-            api admin worker_realtime frontend
+            api admin worker_realtime worker_batch beat frontend
     )
 }
 
@@ -88,7 +155,7 @@ start_legacy_services() {
         supervisorctl reread >/dev/null || true
         supervisorctl update >/dev/null || true
     fi
-    supervisorctl start job-api job-admin job-celery-realtime >/dev/null || true
+    supervisorctl start job-api job-admin job-celery-realtime job-celery-batch job-celery-beat >/dev/null || true
 }
 
 rollback() {
@@ -107,7 +174,7 @@ rollback() {
             pkill -HUP -x prometheus >/dev/null 2>&1 || true
         fi
         if ! start_previous_release; then
-            compose_new stop api admin worker_realtime frontend >/dev/null 2>&1 || true
+            compose_new stop api admin worker_realtime worker_batch beat frontend >/dev/null 2>&1 || true
             if (( legacy_stopped == 1 || supervisor_disabled_now == 1 )); then
                 start_legacy_services
             fi
@@ -151,6 +218,7 @@ fi
     git worktree add --detach "$release_dir" "$commit"
 )
 install -m 600 "$production_env_path" "$release_dir/.env.production"
+validate_agent_rollout_configuration "$release_dir/.env.production"
 
 host_nginx_template="$release_dir/deploy/nginx/host.conf"
 host_prometheus_template="$release_dir/deploy/prometheus/prometheus.yml"
@@ -165,7 +233,7 @@ echo "[2/8] Validating Compose and building immutable images"
 compose_new config --quiet
 docker build --pull -t "$backend_image" \
     -f "$release_dir/jobCollectionWebApi/backend.Dockerfile" "$release_dir"
-docker build --pull -t "$frontend_image" \
+docker build --pull --build-arg "VITE_AGENT_ENABLED=$agent_enabled" -t "$frontend_image" \
     -f "$release_dir/frontend/Dockerfile" "$release_dir"
 compose_new run --rm --no-deps api python -c "import jobCollectionWebApi.main; import jobCollectionWebApi.main_admin; import jobCollectionWebApi.worker"
 
@@ -202,13 +270,19 @@ chmod 600 "$database_backup"
 echo "[5/8] Running database migrations"
 compose_new run --rm migration
 
-echo "[6/8] Starting API, admin, realtime worker, and frontend"
-compose_new up -d --remove-orphans api admin worker_realtime frontend
+echo "[6/8] Starting API, admin, Celery workers, beat, and frontend"
+compose_new up -d --remove-orphans api admin worker_realtime worker_batch beat frontend
 curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 2 \
     http://127.0.0.1:18080/health >/dev/null
 curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 \
     http://127.0.0.1:18002/admin/ >/dev/null
 [[ $(docker inspect -f '{{.State.Running}}' job_worker_realtime) == true ]]
+[[ $(docker inspect -f '{{.State.Running}}' job_worker_batch) == true ]]
+[[ $(docker inspect -f '{{.State.Running}}' job_beat) == true ]]
+compose_new exec -T worker_realtime celery -A jobCollectionWebApi.worker.celery_app \
+    inspect ping --destination=worker_realtime@worker-realtime --timeout=10
+compose_new exec -T worker_realtime celery -A jobCollectionWebApi.worker.celery_app \
+    inspect ping --destination=worker_batch@worker-batch --timeout=10
 
 echo "[7/8] Switching host Nginx and Prometheus"
 cp "$nginx_config" "$nginx_backup"

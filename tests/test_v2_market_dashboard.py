@@ -1,19 +1,32 @@
 from datetime import datetime, timezone
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from elasticsearch import ConnectionTimeout
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "jobCollectionWebApi"))
 
 from schemas.v2.market import MarketDashboardQuery
+from services.market.query_service import MarketQueryService
 from services.v2.market_dashboard_service import MarketDashboardService
+from services.market.query_service import MarketQueryService
 
 dashboard_module = importlib.import_module("services.v2.market_dashboard_service")
+query_module = importlib.import_module("services.market.query_service")
+
+
+def test_market_dashboard_depends_on_market_domain_not_agent_tools():
+    source = Path(dashboard_module.__file__).read_text(encoding="utf-8")
+
+    assert "agent.tools" not in source
+    assert importlib.util.find_spec("services.market.query_service") is not None
 
 
 @pytest.mark.asyncio
@@ -109,11 +122,11 @@ async def test_dashboard_resolves_named_filters_and_applies_date_range(monkeypat
         captured.update(kwargs)
         return {"total_jobs": 7, "salary": [], "skills": [], "industries": []}
 
-    monkeypatch.setattr(dashboard_module.settings, "ES_ENABLED", False)
+    monkeypatch.setattr(query_module.settings, "ES_ENABLED", False)
     monkeypatch.setattr(dashboard_module.db_manager, "async_session", lambda: SessionContext())
-    monkeypatch.setattr(dashboard_module, "resolve_city", resolve_city)
-    monkeypatch.setattr(dashboard_module, "resolve_industry", resolve_industry)
-    monkeypatch.setattr(dashboard_module.crud_job, "get_statistics_from_db", load_stats)
+    monkeypatch.setattr(query_module, "resolve_city", resolve_city)
+    monkeypatch.setattr(query_module, "resolve_industry", resolve_industry)
+    monkeypatch.setattr(query_module.crud_job, "get_statistics_from_db", load_stats)
 
     service = MarketDashboardService(
         now=lambda: datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc),
@@ -127,3 +140,60 @@ async def test_dashboard_resolves_named_filters_and_applies_date_range(monkeypat
     assert captured["location"] == 101210100
     assert captured["industry"] == 100000
     assert captured["published_after"] == datetime(2026, 7, 6, 12, 0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_attempts_elasticsearch_before_postgresql_fallback(monkeypatch):
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    statistics_service = SimpleNamespace(
+        get_faceted_job_stats=AsyncMock(side_effect=ConnectionTimeout("es down"))
+    )
+    fallback_loader = AsyncMock(
+        return_value={"total_jobs": 2, "salary": [], "skills": [], "industries": []}
+    )
+    monkeypatch.setattr(query_module.settings, "ES_ENABLED", True)
+    monkeypatch.setattr(dashboard_module.db_manager, "async_session", lambda: SessionContext())
+    monkeypatch.setattr(query_module.crud_job, "get_statistics_from_db", fallback_loader)
+
+    raw, source = await MarketDashboardService(
+        query_service=MarketQueryService(statistics_service=statistics_service)
+    )._load_stats(MarketDashboardQuery(education="本科"))
+
+    assert raw["total_jobs"] == 2
+    assert source == "postgresql"
+    statistics_service.get_faceted_job_stats.assert_awaited_once()
+    assert fallback_loader.await_args.kwargs["education"] == "本科"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_falls_back_to_postgresql_when_es_statistics_fail(monkeypatch):
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    fallback = {"total_jobs": 4, "salary": [], "skills": [], "industries": []}
+    load_stats = AsyncMock(return_value=fallback)
+    failed_statistics = SimpleNamespace(
+        get_faceted_job_stats=AsyncMock(side_effect=ConnectionTimeout("es unavailable"))
+    )
+    monkeypatch.setattr(query_module.settings, "ES_ENABLED", True)
+    monkeypatch.setattr(dashboard_module.db_manager, "async_session", lambda: SessionContext())
+    monkeypatch.setattr(query_module.crud_job, "get_statistics_from_db", load_stats)
+
+    service = MarketDashboardService(
+        query_service=MarketQueryService(statistics_service=failed_statistics)
+    )
+    raw, source = await service._load_stats(MarketDashboardQuery())
+
+    assert raw == fallback
+    assert source == "postgresql"
+    load_stats.assert_awaited_once()

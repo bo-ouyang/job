@@ -20,6 +20,9 @@ from schemas.analysis_schema import (
     CompareTrendItem,
 )
 from services.analysis_service import analysis_service
+from services.market.skill_buckets import merge_skill_buckets
+from services.market.skill_buckets import build_skill_aggregations
+from services.market.skill_noise import get_skill_noise_rules
 
 
 class ComparisonAnalysisService:
@@ -119,8 +122,7 @@ class ComparisonAnalysisService:
             },
             "education_dist": {"terms": {"field": "education", "size": 10}},
             "experience_dist": {"terms": {"field": "experience", "size": 10}},
-            "top_skills": {"terms": {"field": "skills", "size": 20}},
-            "top_ai_skills": {"terms": {"field": "ai_skills", "size": 20}},
+            **build_skill_aggregations(20),
         }
 
     async def _resolve_names(
@@ -164,20 +166,14 @@ class ComparisonAnalysisService:
         ]
 
     async def _parse_skills(self, aggs: Dict[str, Any], limit: int = 12) -> List[CompareBucketItem]:
-        exact_rules, contains_rules = await analysis_service._get_skill_noise_rules()  # noqa: SLF001
-        skill_counter: Dict[str, int] = {}
-
-        for agg_name in ("top_skills", "top_ai_skills"):
-            for bucket in aggs.get(agg_name, {}).get("buckets", []):
-                label = analysis_service._normalize_skill_tag(bucket.get("key"))  # noqa: SLF001
-                if analysis_service._is_noise_skill_tag(label, exact_rules, contains_rules):  # noqa: SLF001
-                    continue
-                skill_counter[label] = skill_counter.get(label, 0) + int(
-                    bucket.get("doc_count", 0)
-                )
-
-        top_items = sorted(skill_counter.items(), key=lambda item: item[1], reverse=True)[:limit]
-        return [CompareBucketItem(name=name, value=value) for name, value in top_items]
+        exact_rules, contains_rules = await get_skill_noise_rules()
+        buckets = merge_skill_buckets(
+            aggs,
+            exact_noise=exact_rules,
+            contains_noise=contains_rules,
+            limit=limit,
+        )
+        return [CompareBucketItem(name=item["name"], value=item["value"]) for item in buckets]
 
     @staticmethod
     def _build_overview(aggs: Dict[str, Any], total_count: int) -> CompareOverview:

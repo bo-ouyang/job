@@ -205,11 +205,22 @@ async def get_active_task_id(user_id: int, feature_key: str) -> Optional[str]:
 async def get_task_result(
     celery_task_id: str,
     db: AsyncSession = None,
+    *,
+    user_id: int = None,
 ) -> Optional[dict]:
     """
     获取任务结果（Redis-first → PG-fallback）。
     返回 dict: {status, result_data, error_message, ...} 或 None。
     """
+    # User-scoped reads must prove ownership from PostgreSQL. Older shared
+    # Redis entries do not contain user_id and cannot authorize a request.
+    if user_id is not None:
+        if db is None:
+            from common.databases.PostgresManager import db_manager
+            async with await db_manager.get_session() as db:
+                return await _pg_get_task_result(db, celery_task_id, user_id=user_id)
+        return await _pg_get_task_result(db, celery_task_id, user_id=user_id)
+
     # 1. Redis 缓存
     try:
         key = redis_manager.make_key(_result_key(celery_task_id))
@@ -247,8 +258,16 @@ async def get_task_result(
     return await _pg_get_task_result(db, celery_task_id)
 
 
-async def _pg_get_task_result(db: AsyncSession, celery_task_id: str) -> Optional[dict]:
-    stmt = select(AiTask).where(AiTask.celery_task_id == celery_task_id)
+async def _pg_get_task_result(
+    db: AsyncSession,
+    celery_task_id: str,
+    *,
+    user_id: int = None,
+) -> Optional[dict]:
+    conditions = [AiTask.celery_task_id == celery_task_id]
+    if user_id is not None:
+        conditions.append(AiTask.user_id == user_id)
+    stmt = select(AiTask).where(*conditions)
     result = await db.execute(stmt)
     task = result.scalar_one_or_none()
     if not task:
@@ -265,6 +284,17 @@ async def _pg_get_task_result(db: AsyncSession, celery_task_id: str) -> Optional
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
+
+
+async def get_task_owner_id(
+    celery_task_id: str,
+    *,
+    db: AsyncSession,
+) -> Optional[int]:
+    """Return the persisted owner for a known Celery task."""
+    stmt = select(AiTask.user_id).where(AiTask.celery_task_id == celery_task_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def mark_completed(
@@ -369,11 +399,12 @@ async def mark_failed(
     celery_task_id: str,
     error_message: str,
     started_at: float = None,
-) -> None:
+) -> bool:
     """标记任务失败：更新 PG + 释放活跃锁。"""
     execution_time = round(time.time() - started_at, 2) if started_at else None
 
     # 1. PG 更新
+    persisted = False
     try:
         from common.databases.PostgresManager import db_manager
         async with await db_manager.get_session() as db:
@@ -389,6 +420,7 @@ async def mark_failed(
             )
             await db.execute(stmt)
             await db.commit()
+            persisted = True
     except Exception as exc:
         logger.error(f"mark_failed PG update failed: {exc}")
 
@@ -398,6 +430,8 @@ async def mark_failed(
         await redis_manager.redis_client.delete(lkey)
     except Exception as exc:
         logger.warning(f"Redis release active lock degraded: {exc}")
+
+    return persisted
 
 async def mark_failed_by_task_id(
     celery_task_id: str,
